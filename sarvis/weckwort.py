@@ -8,7 +8,7 @@ Stattdessen die Kette, die ohnehin läuft:
 
   Silero-VAD (CPU, billig)  entscheidet, ob überhaupt jemand redet
         ↓ nur dann
-  Whisper (3070er GPU)      versteht, WAS gesagt wurde
+  Whisper (3080er GPU)      versteht, WAS gesagt wurde
         ↓
   Anfang = Weckwort?        dann ist der Rest schon der Zuruf
 

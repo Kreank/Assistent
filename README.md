@@ -1,10 +1,13 @@
 # Sarvis
 
-Ein privater Sprachassistent für den eigenen PC. Taste halten, reden,
-loslassen, Antwort hören.
+Ein privater Sprachassistent für den eigenen PC. „Hey Sarvis" rufen oder
+eine Taste halten, reden, Antwort hören.
 
-**Stufe 1 (steht):** die geschlossene Schleife — Ohren, Hirn, Mund —
-plus die Anzeige. Noch ohne Werkzeuge.
+**Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
+Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
+**34 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+Aufgaben, Kontakte), Programme und Medien, Dateien, Projekte und
+Hintergrundaufträge.
 
 ## Starten
 
@@ -41,6 +44,69 @@ Vordergrundprogramm bekommt den Tastendruck aber trotzdem. Bei der rechten
 Strg-Taste ist das folgenlos, bei F10 oder Alt wäre es das nicht.
 Ausnahme: Hat ein Programm mit Administratorrechten den Fokus, blockiert
 Windows den Haken.
+
+## Weckwort
+
+Neben der Taste hört Sarvis dauerhaft mit. **„Hey Sarvis, wie spät ist
+es?" ist *ein* Satz** — kein Aufwachen, kein Piepen, kein zweites Mal
+sprechen. Was hinter dem Namen steht, ist schon der Auftrag.
+
+Abschalten über `WECKWORT_AN = False` in `sarvis/config.py`.
+
+### Warum nicht openWakeWord
+
+Dessen Fertigmodelle sind auf englische Aussprache trainiert. Gemessen
+mit unserer deutschen Stimme: „Hey Sarvis" erreichte **0,09 bis 0,13**,
+selbst „Hey Jarvis" nur 0,45. Unbrauchbar.
+
+Stattdessen die Kette, die ohnehin schon läuft:
+
+```
+Silero-VAD (CPU, billig)    redet überhaupt jemand?
+      ↓ nur dann
+Whisper (GPU)               was wurde gesagt?
+      ↓
+Fängt es mit dem Namen an?  dann ist der Rest der Auftrag
+```
+
+Solange niemand spricht, rechnet **nur der VAD**. Whisper rührt sich
+nicht, und der Ton verlässt den Rechner nie.
+
+### Verglichen wird Ähnlichkeit, nicht Gleichheit
+
+Whisper verhört den Namen zuverlässig. Gemessene Ähnlichkeit zu
+„sarvis":
+
+| erkannt | | | |
+|---|---|---|---|
+| sarvis 1,00 | jarvis 0,83 | charvis 0,77 | sabis 0,73 |
+| servus 0,67 | service 0,62 | serviert 0,57 | server 0,50 |
+
+Die Schwelle steht auf **0,60** (`WECKWORT_AEHNLICHKEIT`) und trennt
+damit genau zwischen Verhörern und normalen Wörtern — „alex" liegt bei
+0,20.
+
+Davor darf eine Anrede stehen: hey, hallo, he, ey, ok, sag, yo und
+einige mehr. „hi" und „hai" stehen mit in der Liste, weil Whisper
+gesprochenes „hey" oft so schreibt.
+
+### Nachhören
+
+Nach einer Antwort hört Sarvis **18 Sekunden** weiter zu, ohne dass man
+den Namen wiederholt (`NACHHOEREN_SEK`). Ohne das müsste man „Hey
+Sarvis" auch vor die Antwort auf seine eigene Rückfrage setzen.
+
+Wird nur der Name gerufen, ohne Auftrag, kommt eine feste kurze Antwort
+— „Ja?", „Ich höre." Die wird beim Start **einmal vorproduziert** und
+liegt dann fertig da: Ein Assistent, der beim Wecken erst nachdenkt,
+wirkt träge, und für zwei Wörter lohnt keine Runde zu Claude.
+
+### Eine Falle, die zehn Sekunden kostete
+
+Der VAD meldete im Test **0,91 bei leerem Pegelbalken**. Dadurch endete
+der Sprachabschnitt nie und Whisper lief erst nach zehn Sekunden.
+Deshalb steht neben dem VAD eine zweite Meinung — `WECKWORT_MIN_PEGEL`.
+Wer nichts hört, redet auch nicht.
 
 ## Wie es läuft
 
@@ -115,10 +181,37 @@ Achtung auf die Qualitätsstufe: `low` und `x_low` sind mit weniger
 Material trainiert und klingen blechern. `de_DE-kerstin-low` läuft mit
 16 kHz, Thorsten mit 22 kHz — hörbar.
 
+### Haltung — der billigste Hebel von allen
+
+`HALTUNG` in `config.py` ändert nicht den Klang, sondern den Ton:
+`"normal"` ist sachlich und kurz angebunden, `"diener"` höflich
+dienstbeflissen mit Meister-Anrede, `"butler"` die volle Nummer.
+
+Das trägt weiter als jeder Stimmwechsel — dieselbe Stimme klingt mit
+„Sehr wohl, Meister" völlig anders als mit „Mach ich". Es kostet nichts
+und geht nicht auf die Klangqualität.
+
+### Stimmfarbe
+
+`STIMMFARBE` legt eine Effektkette hinter Piper: `"aus"`, `"hologramm"`,
+`"bordcomputer"`, `"halle"`, `"kuenstlich"`, `"nah"`. Steht ab Werk auf
+`"aus"`.
+
+Der Umweg, den man sich damit spart: Sci-Fi-Stimmen sind fast nie eigene
+Modelle. HAL 9000, GLaDOS, JARVIS — alles Schauspieler mit einer
+Effektkette dahinter. Der Vorteil gegenüber einem geklonten Modell ist
+nicht Klangtreue, sondern **Tempo**: Die Kette kostet Millisekunden und
+läuft auf der CPU. Ein Klon-Modell bräuchte die GPU, und die hat Whisper.
+
+Die Tonhöhe wird dabei bewusst **nicht** nachträglich verschoben, sondern
+über Pipers Sprechtempo vorkompensiert. Ein Phasenvocoder verwäscht
+Zischlaute — und genau die trägt eine Assistentenstimme.
+
 ## Einstellen
 
-Alles Drehbare steht in `sarvis/config.py`: Taste, Whisper-Modell,
-Stimme, Sprechtempo, Modell, Systemprompt.
+Alles Drehbare steht in `sarvis/config.py`: Taste und Weckwort,
+Whisper-Modell, Stimme, Sprechtempo, Stimmfarbe, Haltung, Modell,
+Systemprompt, Erlaubnisstufen und die freigegebenen Pfade.
 
 Läuft Whisper nicht auf der Karte, `WHISPER_GERAET = "cpu"` und
 `WHISPER_GENAUIGKEIT = "int8"` setzen — langsamer, aber es läuft.
@@ -167,9 +260,12 @@ ist der Haken, über den ich selbst gestolpert bin:
 | `WERKZEUG_BEREIT` | `0.95` | gebaute Werkzeuge im Kranz |
 | `WERKZEUG_GEPLANT` | `0.65` | noch nicht gebaute Werkzeuge |
 
-Ein geplantes Werkzeug im Ruhezustand steht also bei `0.58 × 0.80`. Mit den
-alten Werten (`0.34 × 0.60`) waren das effektiv 20 % — da erkennt man nichts
-mehr, auch wenn die Deckkraft allein plausibel klingt.
+Ein geplantes Werkzeug im Ruhezustand steht also bei `0.65 × 0.88`, also
+effektiv 57 %. Mit den alten Werten (`0.34 × 0.60`) waren es 20 % — da
+erkennt man nichts mehr, auch wenn die Deckkraft allein plausibel klingt.
+
+Zurzeit steht **kein** Werkzeug auf „geplant": Alle 13 Punkte im Kranz
+sind gebaut. Der Wert wirkt erst wieder, wenn einer dazukommt.
 
 Zusätzlich hat jede Schrift einen dunklen Saum. Ein Overlay liegt mal auf
 schwarzem Editor, mal auf weißem Explorer; helle Schrift allein ist im
@@ -231,12 +327,63 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-| Werkzeug | Stufe | was es kann |
+**34 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
+Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
+
+Jedes hat eine Erlaubnisstufe in `config.WERKZEUG_STUFEN`:
+
+| Stufe | |
+|---|---|
+| **still** | läuft ohne Nachfrage durch |
+| **fragen** | Sarvis fragt laut nach und wartet auf ja oder nein |
+| *nicht aufgezählt* | wird abgelehnt |
+
+Die letzte Zeile ist wichtiger, als sie aussieht: **Nicht aufgezählt
+heißt nein.** Eine Sperrliste kann nur verbieten, woran man gedacht hat.
+
+| Bereich | still | fragt nach |
 |---|---|---|
-| `timer_stellen` | still | Timer mit Ansage beim Ablaufen |
-| `timer_liste` | still | was läuft, mit Restzeit |
-| `timer_abbrechen` | still | Timer löschen |
-| `WebSearch` | still | eingebaut, kostet nichts extra |
+| Zeit | `timer_stellen`, `timer_liste`, `timer_abbrechen` | — |
+| Gedächtnis | `merken`, `gedaechtnis_zeigen` | `vergessen` |
+| Telegram | `telegram_kontakte`, `telegram_lesen`, `telegram_suchen` | `telegram_senden` |
+| Kalender | `termine_ansehen` | `termin_anlegen`, `termin_absagen` |
+| Mail | `mails_ansehen`, `mail_lesen` | `mail_senden`, `mail_verschieben` |
+| Aufgaben | `aufgaben_ansehen`, `aufgabe_anlegen`, `aufgabe_abhaken` | — |
+| Kontakte | `kontakt_suchen` | `kontakt_anlegen` |
+| Programme | `programm_starten`, `programm_suchen`, `web_oeffnen`, `route_zeigen` | `programm_beenden` |
+| Medien | `medien_steuern` | — |
+| Projekte | `projekt_liste` | `projekt_anlegen`, `projekt_oeffnen` |
+| Aufträge | `auftrag_status`, `auftrag_abbrechen` | `auftrag_geben` |
+| Dateien | Lesen, wo ohnehin gearbeitet wird | alles Übrige — siehe unten |
+
+### Wie eine Rückfrage abläuft
+
+Eine Rückfrage muss man beantworten können, **ohne hinzusehen**. Also
+enthält sie den Inhalt, nicht den Werkzeugnamen:
+
+> „Soll ich Anna schreiben, dass du später kommst?"
+
+und nicht „Werkzeug `telegram_senden` ausführen?".
+
+Antworten geht **per Stimme oder per Taste** — Enter ist ja, Escape ist
+nein. Beides, weil beides seine Situation hat: Wer die Hände frei hat,
+redet; wer im Büro sitzt, drückt. Solange die Frage offen steht, braucht
+das „ja" **kein Weckwort** — auf eine Frage, die er gerade selbst
+gestellt hat, wäre das albern.
+
+Drei Dinge, die dabei nicht offensichtlich sind:
+
+**Verneinung wird zuerst geprüft.** „Ja, aber nicht jetzt" ist kein Ja.
+
+**Unklar ist kein Nein.** Wer etwas antwortet, das weder ja noch nein
+ist, wird einmal nachgefragt, statt dass geraten wird.
+
+**Im Zweifel wird abgelehnt.** Nach 25 Sekunden ohne Antwort
+(`RUECKFRAGE_SEKUNDEN`) gilt die Handlung als abgelehnt. Ein Assistent,
+der im Zweifel handelt, ist schlimmer als einer, der im Zweifel fragt.
+
+### Timer und Wecker
 
 Löschen und Ändern braucht kein eigenes Werkzeug: „Verlänger den
 Wäsche-Timer um fünf Minuten" setzt Sarvis aus Liste, Abbrechen und Neu
@@ -248,6 +395,80 @@ Sarvis aus war, meldet er beim nächsten Start nach.
 Der Wecker läuft **komplett in Sarvis** — keine Windows-Weckfunktion.
 Ist Sarvis zu, klingelt nichts. Gewartet wird gegen die Wanduhr, nicht
 gegen eine Dauer: sonst ginge ein Timer um die Schlafdauer des PCs falsch.
+
+### Programme, Medien und Web
+
+„Mach mal Spotify auf", „geh auf YouTube", „nächster Titel", „wie komme
+ich von Hamburg nach Berlin". Programme werden im Startmenü gesucht,
+Medientasten wirken auf alles, was gerade Ton macht — Spotify, YouTube,
+VLC.
+
+Öffnen läuft still durch, **Beenden fragt nach**: Ein Fenster schließt
+man wieder, ungespeicherte Arbeit nicht. Und eine Rückfrage vor „Pause"
+wäre länger als die Handlung selbst.
+
+### Dateien
+
+Der Grundsatz ist **nicht aussperren, sondern nachfragen**. Ein
+Assistent, der nichts anfassen darf, nützt nichts.
+
+| | |
+|---|---|
+| frei lesen | `D:\Projekte`, `D:\Mitra`, `D:\Wissen` |
+| frei schreiben | `D:\Projekte` |
+| überall sonst | er darf, er fragt eben vorher |
+
+Dateien, deren Inhalt Zugänge öffnet — `.env`, `.pem`, `.key`, `id_rsa`,
+`.kdbx`, alles mit „passw", „secret" oder „token" im Namen — lösen eine
+**deutlichere Rückfrage** aus: „das ist eine Datei mit Zugangsdaten".
+
+Dazu eine sehr kurze harte Sperre. Nicht, weil Sarvis dort nichts zu
+suchen hätte, sondern weil es **Einwegtüren** sind:
+
+| gesperrt | warum |
+|---|---|
+| `sarvis/config.py`, `sarvis/schutz.py` | Wer die Erlaubnisstufen ändert, schaltet alle künftigen Rückfragen ab. Eine einzige Zustimmung würde jede weitere ersetzen. |
+| `sarvis.session`, `.env` | Wer die Sitzungsdatei liest, hat das Telegram-Konto. |
+| `C:\Windows`, `C:\Program Files` | Repariert kein „war doch nicht so gemeint". |
+| `format`, `shutdown`, `diskpart`, `Clear-Disk`, `curl \| sh` … | Befehle, die sich mit einem gesprochenen „ja" nicht verantworten lassen. |
+
+Der Prüfer ist bewusst **handgeschrieben statt mustergesteuert**, damit
+nachvollziehbar bleibt, was durchkommt. Er kennt auch `PowerShell`, nicht
+nur `Bash` — unter Windows heißt Claude Codes Shell-Werkzeug so, und eine
+Sperrliste, die nur cmd-Befehle kennt, sperrt hier gar nichts.
+
+## Gedächtnis
+
+Sarvis merkt sich Dinge über dich — in **Markdown, von Hand lesbar**.
+Das ist Absicht: Bei einem Assistenten, der Mails verschickt, musst du
+nachlesen können, was er über dich zu wissen glaubt, und es korrigieren,
+ohne ihn zu fragen.
+
+Zwei Schichten, weil sie unterschiedlich teuer sind:
+
+| | `kern.md` | `personen/`, `notizen/` |
+|---|---|---|
+| geladen | **immer**, bei jedem Zuruf | nur wenn er nachschlägt |
+| kostet | Kontext bei *jeder* Frage | einen Werkzeugaufruf |
+| Größe | unter 60 Zeilen | beliebig |
+
+Der Kern steht im **Systemprompt**, nicht in der Frage. Dort wird er
+zwischengespeichert und kostet ab dem zweiten Zuruf fast nichts; an die
+Frage gehängt wäre er jedes Mal neu zu lesen. Wird er zu lang, warnt
+Sarvis beim Start — ab etwa 4000 Zeichen wird er nicht klüger, sondern
+unschärfer.
+
+**Gesagt und bemerkt werden getrennt.** Was du ihm ausdrücklich aufträgst,
+landet in `gemerkt.md`; was ihm von selbst auffällt, in `beobachtet.md` —
+ausdrücklich als Vermutung, zum Durchsehen und Korrigieren. Gelöscht wird
+nur auf Rückfrage.
+
+Die Vorlage besteht größtenteils aus Ausfüllhinweisen. Die werden vor dem
+Laden herausgefiltert, sonst würde Sarvis früher oder später über
+„(Name)" reden.
+
+**Der Inhalt ist aus dem Repository ausgeschlossen** — der Aufbau ist
+drin, was er über dich weiß, nicht.
 
 ## Projekte und Aufträge
 
@@ -349,11 +570,15 @@ beides nicht — man müsste zwei Seiten irgendwo hinstellen.
 
 ## Was noch nicht drin ist
 
-- **Werkzeuge.** Kommt als Stufe 2, mit drei Stufen: Timer und Lautstärke
-  laufen still durch, Mail und Telegram fragen laut nach, Bash gar nicht.
-  Rückfrage per Stimme *und* per Taste.
-- **Weckwort.** Nach den Werkzeugen.
-- **Einstellungsoberfläche.** Später.
+- **Einstellungsoberfläche.** Alles Drehbare steht bis dahin in
+  `sarvis/config.py`.
+- **Spotify gezielt steuern.** Sarvis startet die App und bedient die
+  Medientasten; einen bestimmten Titel auswählen kann er nicht. Dafür
+  bräuchte es die Spotify-API mit eigener Anmeldung — bewusst
+  zurückgestellt, weil Starten und Pausieren den Alltag abdecken.
+- **Kalender-Erinnerungen von sich aus.** Er sieht Termine an, wenn man
+  fragt, meldet sich aber nicht ungefragt. Nur Timer tun das — sie sind
+  das einzige, was im Hintergrund gegen die Uhr wartet.
 
 ### Geprüft, damit es niemand nochmal glauben muss
 

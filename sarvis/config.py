@@ -369,6 +369,8 @@ WERKZEUGE = [
     ("Dateien",    "bereit"),
     ("Projekte",   "bereit"),
     ("Aufträge",   "bereit"),
-    ("Kalender",   "geplant"),
-    ("E-Mail",     "geplant"),
+    ("Kalender",   "bereit"),
+    ("E-Mail",     "bereit"),
+    ("Aufgaben",   "bereit"),
+    ("Kontakte",   "bereit"),
 ]

@@ -576,7 +576,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 tasklist=liste, showCompleted=auch,
                 showHidden=auch, maxResults=50).execute())
         offen = antwort.get("items", [])
-        blinken("Gedächtnis")
+        blinken("Aufgaben")
         if not offen:
             return {"content": [{"type": "text", "text":
                     "Keine offenen Aufgaben."}]}
@@ -627,7 +627,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         await asyncio.to_thread(
             lambda: dienst.tasks().insert(tasklist=liste,
                                           body=koerper).execute())
-        blinken("Gedächtnis")
+        blinken("Aufgaben")
         return {"content": [{"type": "text", "text":
                 f"Aufgabe angelegt: {args['titel']}."}]}
 
@@ -671,7 +671,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         await asyncio.to_thread(
             lambda: dienst.tasks().update(
                 tasklist=liste, task=ziel["id"], body=ziel).execute())
-        blinken("Gedächtnis")
+        blinken("Aufgaben")
         return {"content": [{"type": "text", "text":
                 f"{ziel['title']} ist abgehakt."}]}
 
@@ -726,7 +726,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 treffer = antwort.get("results", [])
             except Exception:
                 treffer = []
-        blinken("Telegram")
+        blinken("Kontakte")
         if not treffer:
             return {"content": [{"type": "text", "text":
                     f"Keinen Kontakt {args['name']!r} gefunden."}]}
@@ -768,7 +768,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             koerper["phoneNumbers"] = [{"value": args["telefon"]}]
         await asyncio.to_thread(
             lambda: dienst.people().createContact(body=koerper).execute())
-        blinken("Telegram")
+        blinken("Kontakte")
         vermerken(f"kontakt_anlegen: {args['name']} wurde angelegt.")
         return {"content": [{"type": "text", "text":
                 f"{args['name']} ist als Kontakt angelegt."}]}
