@@ -1,0 +1,11 @@
+claude-agent-sdk
+faster-whisper
+numpy
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+piper-tts
+pynput
+PySide6-Essentials
+pywin32
+sounddevice
+win11toast

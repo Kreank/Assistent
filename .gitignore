@@ -1,0 +1,32 @@
+*.pyc
+*.session
+.env
+.venv/
+__pycache__/
+anzeige.json
+anzeige.log
+aufnahmen/
+auftraege.json
+client_secret*.json
+google_token.json
+google_zugang.json
+sarvis.ico
+sarvis.session
+sarvis.session-journal
+stimmen/
+timer.json
+
+# Notizdateien mit Zugangsdaten -- beim ersten Commit gefunden.
+# Telegram.txt enthaelt den api_hash, google.txt Client-ID und Secret.
+Telegram.txt
+google.txt
+*.token
+*.secret
+
+# Persoenliches Gedaechtnis. Der Aufbau gehoert ins Repository, der
+# Inhalt nicht -- dort steht, was Sarvis ueber dich weiss.
+gedaechtnis/gemerkt.md
+gedaechtnis/beobachtet.md
+gedaechtnis/personen/*.md
+!gedaechtnis/personen/BEISPIEL.md
+gedaechtnis/notizen/
