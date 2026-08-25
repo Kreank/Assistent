@@ -5,9 +5,9 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**34 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
-Aufgaben, Kontakte), Programme und Medien, Dateien, Projekte und
-Hintergrundaufträge.
+**41 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
+Projekte und Hintergrundaufträge.
 
 ## Starten
 
@@ -264,7 +264,7 @@ Ein geplantes Werkzeug im Ruhezustand steht also bei `0.65 × 0.88`, also
 effektiv 57 %. Mit den alten Werten (`0.34 × 0.60`) waren es 20 % — da
 erkennt man nichts mehr, auch wenn die Deckkraft allein plausibel klingt.
 
-Zurzeit steht **kein** Werkzeug auf „geplant": Alle 13 Punkte im Kranz
+Zurzeit steht **kein** Werkzeug auf „geplant": Alle 15 Punkte im Kranz
 sind gebaut. Der Wert wirkt erst wieder, wenn einer dazukommt.
 
 Zusätzlich hat jede Schrift einen dunklen Saum. Ein Overlay liegt mal auf
@@ -327,7 +327,7 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-**34 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**41 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
 **im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
 Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
 
@@ -351,6 +351,8 @@ heißt nein.** Eine Sperrliste kann nur verbieten, woran man gedacht hat.
 | Mail | `mails_ansehen`, `mail_lesen` | `mail_senden`, `mail_verschieben` |
 | Aufgaben | `aufgaben_ansehen`, `aufgabe_anlegen`, `aufgabe_abhaken` | — |
 | Kontakte | `kontakt_suchen` | `kontakt_anlegen` |
+| Drive | `drive_suchen`, `drive_lesen` | `drive_teilen` |
+| Tabellen | `tabelle_lesen`, `tabelle_anhaengen` | `tabelle_schreiben`, `tabelle_anlegen` |
 | Programme | `programm_starten`, `programm_suchen`, `web_oeffnen`, `route_zeigen` | `programm_beenden` |
 | Medien | `medien_steuern` | — |
 | Projekte | `projekt_liste` | `projekt_anlegen`, `projekt_oeffnen` |
@@ -521,8 +523,8 @@ und `type D:\Privat\Sarvis\.env`.
 
 ## Google
 
-Kalender, Mail, Aufgaben und Kontakte hängen an **einer** Anmeldung.
-Einrichten: `google_anmelden.bat`.
+Kalender, Mail, Aufgaben, Kontakte, Drive und Tabellen hängen an
+**einer** Anmeldung. Einrichten: `google_anmelden.bat`.
 
 | still | fragt nach |
 |---|---|
@@ -530,11 +532,41 @@ Einrichten: `google_anmelden.bat`.
 | Mails ansehen und lesen | **Mail senden** |
 | Aufgaben ansehen, anlegen, abhaken | Mail verschieben oder löschen |
 | Kontakt suchen | Kontakt anlegen |
+| Drive durchsuchen und lesen | **Datei freigeben** |
+| Tabelle lesen, Zeile anhängen | Tabelle überschreiben, Tabelle anlegen |
 
 Löschen geht in den Papierkorb — dreißig Tage rückholbar, wie beim Klick
 in Gmail. Deshalb reicht `gmail.modify`; den Vollzugriff mit endgültigem
 Löschen haben wir bewusst nicht genommen: Das ist die einzige Handlung,
 bei der ein missverstandenes „ja" nicht mehr zu reparieren wäre.
+
+### Drive und Tabellen
+
+Drive sucht **nach Namen und nach Inhalt** — „find mal die Rechnung von
+der Werkstatt" findet also auch, was nur im Text steht. Vorgelesen wird
+aus Google Docs und Textdateien; aus PDF, Bild oder Ordner kommt eine
+ehrliche Absage statt Kauderwelsch.
+
+Bei den Tabellen sind **Anhängen und Überschreiben getrennte Werkzeuge**,
+und das ist kein Formalismus: „Trag im Tankbuch 52 Liter für 89 Euro ein"
+darf nie in einer Zelle landen, die schon etwas enthält. Anhängen läuft
+deshalb still durch, Überschreiben fragt.
+
+Zwei Dinge, über die man sonst stolpert:
+
+**Der Blattname muss mit.** Ein Bereich `A1:C20` ohne Blattnamen trifft
+zwar das erste Blatt, aber `append` hängt dann *innerhalb* dieses
+Bereichs an statt unten an der Tabelle. Deshalb wird zu jeder Tabelle
+der Name ihres ersten Blattes mitgeholt.
+
+**Werte werden interpretiert**, wie beim Tippen in der Tabelle: Aus
+„89,10" wird die Zahl 89,1, nicht der Text „89,10". Das ist gewollt —
+sonst könnte man mit den Zellen später nicht rechnen.
+
+**Mehrdeutigkeit ist ein Fehler, keine Auswahl.** Passen mehrere Dateien
+auf den gesagten Namen, zählt Sarvis sie auf und fragt nach, statt die
+zuletzt geänderte zu nehmen. Beim Lesen wäre die falsche Datei lästig,
+beim Freigeben nicht mehr.
 
 **Der Kontaktzugriff löst das Namensproblem.** Gesprochene Mailadressen
 versteht keine Spracherkennung. Bei „schreib Alex eine Mail" schlägt

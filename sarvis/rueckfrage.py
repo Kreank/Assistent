@@ -88,6 +88,10 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "merken":
         return f"Soll ich mir merken: {_kuerzen(e.get('inhalt'))}?"
 
+    if werkzeug == "vergessen":
+        return (f"Soll ich alles zu {_kuerzen(e.get('stichwort'), 50)} aus "
+                "dem Gedächtnis löschen?")
+
     if werkzeug == "telegram_senden":
         an = e.get("an") or "den Kontakt"
         return f"Soll ich {an} schreiben: {_kuerzen(e.get('text'))}?"
@@ -131,6 +135,20 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         anzahl = e.get("anzahl") or 1
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
         return f"Soll ich {was} zu {_kuerzen(e.get('suche'), 40)} {wohin}?"
+
+    if werkzeug == "drive_teilen":
+        # Der Satz muss die Tragweite tragen, nicht den Werkzeugnamen:
+        # "freigeben" klingt harmlos, "jeder mit dem Link" nicht.
+        return (f"Soll ich {_kuerzen(e.get('name'), 50)} freigeben? "
+                "Danach kann jeder mit dem Link mitlesen.")
+
+    if werkzeug == "tabelle_schreiben":
+        return (f"Soll ich in {_kuerzen(e.get('name'), 40)} den Bereich "
+                f"{e.get('bereich', 'den angegebenen')} überschreiben mit "
+                f"{_kuerzen(', '.join(str(w) for w in (e.get('werte') or [])), 80)}?")
+
+    if werkzeug == "tabelle_anlegen":
+        return f"Soll ich eine Tabelle {_kuerzen(e.get('name'), 50)} anlegen?"
 
     if werkzeug == "kontakt_anlegen":
         return f"Soll ich {_kuerzen(e.get('name'), 40)} als Kontakt anlegen?"

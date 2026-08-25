@@ -1,6 +1,6 @@
-"""Google: Kalender, Mail, Aufgaben, Kontakte, Drive.
+"""Google: Kalender, Mail, Aufgaben, Kontakte, Drive, Tabellen.
 
-Eine Anmeldung, fuenf Dienste. Bewusst ueber die klassischen APIs und
+Eine Anmeldung, sechs Dienste. Bewusst ueber die klassischen APIs und
 nicht ueber Googles fertige MCP-Server: Deren Anmeldung laeuft ueber
 claude.ai, und dass claude.ai-Connectors Sarvis' eigene Sitzung NICHT
 erreichen, haben wir gemessen. Der Zugang liegt so als Datei hier, wie
@@ -166,6 +166,132 @@ def _text_aus(nutzlast: dict) -> str:
         if gefunden:
             return gefunden
     return ""
+
+
+# --- Drive und Tabellen ---------------------------------------------------
+
+TABELLE = "application/vnd.google-apps.spreadsheet"
+DOKUMENT = "application/vnd.google-apps.document"
+
+# Wieviel aus einer Datei bzw. Tabelle in den Kontext geht. Eine
+# vorgelesene Antwort ist ohnehin kuerzer -- aber der ganze Text landet
+# erst einmal bei Claude, und ein 200-Seiten-Dokument waere teuer.
+LESE_GRENZE = 4000     # Zeichen
+ZEILEN_GRENZE = 40     # Tabellenzeilen
+
+ARTEN = {
+    TABELLE: "Tabelle",
+    DOKUMENT: "Dokument",
+    "application/vnd.google-apps.presentation": "Präsentation",
+    "application/vnd.google-apps.folder": "Ordner",
+    "application/vnd.google-apps.form": "Formular",
+    "application/pdf": "PDF",
+}
+
+
+def _art(mime: str) -> str:
+    if mime in ARTEN:
+        return ARTEN[mime]
+    if mime.startswith("image/"):
+        return "Bild"
+    if mime.startswith("video/"):
+        return "Video"
+    if mime.startswith("audio/"):
+        return "Audio"
+    if mime.startswith("text/"):
+        return "Textdatei"
+    return "Datei"
+
+
+def _fuer_abfrage(text: str) -> str:
+    """Suchwort fuer Drives Abfragesprache entschaerfen.
+
+    Ein Apostroph im Suchwort beendet dort sonst die Zeichenkette -- aus
+    "Anna's Liste" wuerde eine kaputte Abfrage statt eines Treffers.
+    """
+    return str(text or "").replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _geaendert(roh: str) -> str:
+    if not roh:
+        return ""
+    try:
+        d = datetime.fromisoformat(roh.replace("Z", "+00:00")).astimezone()
+        return f", zuletzt geändert {d:%d.%m.%Y}"
+    except ValueError:
+        return ""
+
+
+async def _datei_finden(dienst, name: str):
+    """Eine Datei anhand eines Namensteils suchen.
+
+    Gibt (Datei, None) oder (None, Fehlerantwort) zurueck. Mehrdeutigkeit
+    ist bewusst ein Fehler und keine Auswahl nach Gutduenken: Beim Lesen
+    waere die falsche Datei nur laestig, beim Teilen nicht mehr.
+    """
+    frage = (f"name contains '{_fuer_abfrage(name)}' and trashed = false")
+    antwort = await asyncio.to_thread(
+        lambda: dienst.files().list(
+            q=frage, pageSize=10, orderBy="modifiedTime desc",
+            fields="files(id,name,mimeType)").execute())
+    treffer = antwort.get("files", [])
+    if not treffer:
+        return None, {"content": [{"type": "text", "text":
+                      f"Keine Datei {name!r} in Drive gefunden."}],
+                      "is_error": True}
+    genau = [f for f in treffer if f["name"].lower() == str(name).lower()]
+    if genau:
+        return genau[0], None
+    if len(treffer) > 1:
+        return None, {"content": [{"type": "text", "text":
+                      "Mehrere passen: "
+                      + "; ".join(f["name"] for f in treffer[:4])
+                      + ". Frag nach, welche gemeint ist."}],
+                      "is_error": True}
+    return treffer[0], None
+
+
+async def _tabelle_finden(name: str):
+    """Tabelle suchen und den Namen ihres ersten Blattes mitliefern.
+
+    Das Blatt braucht man fuer jeden Zugriff ohne ausdruecklichen Bereich:
+    Ein Bereich "A1:C20" ohne Blattnamen trifft zwar das erste Blatt, aber
+    values().append() haengt dann innerhalb dieses Bereichs an statt unten
+    an der Tabelle.
+    """
+    drive = await _hole("drive", "v3")
+    if drive is None:
+        return None, _fehlt()
+    frage = (f"name contains '{_fuer_abfrage(name)}' "
+             f"and mimeType = '{TABELLE}' and trashed = false")
+    antwort = await asyncio.to_thread(
+        lambda: drive.files().list(
+            q=frage, pageSize=10, orderBy="modifiedTime desc",
+            fields="files(id,name)").execute())
+    treffer = antwort.get("files", [])
+    if not treffer:
+        return None, {"content": [{"type": "text", "text":
+                      f"Keine Tabelle {name!r} gefunden."}],
+                      "is_error": True}
+    genau = [f for f in treffer if f["name"].lower() == str(name).lower()]
+    if not genau and len(treffer) > 1:
+        return None, {"content": [{"type": "text", "text":
+                      "Mehrere Tabellen passen: "
+                      + "; ".join(f["name"] for f in treffer[:4])
+                      + ". Frag nach, welche gemeint ist."}],
+                      "is_error": True}
+    datei = (genau or treffer)[0]
+
+    blaetter = await _hole("sheets", "v4")
+    if blaetter is None:
+        return None, _fehlt()
+    angaben = await asyncio.to_thread(
+        lambda: blaetter.spreadsheets().get(
+            spreadsheetId=datei["id"],
+            fields="sheets.properties.title").execute())
+    blatt = (angaben.get("sheets") or [{}])[0].get(
+        "properties", {}).get("title", "Tabellenblatt1")
+    return {"id": datei["id"], "name": datei["name"], "blatt": blatt}, None
 
 
 def _fehlt():
@@ -773,7 +899,299 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"{args['name']} ist als Kontakt angelegt."}]}
 
+    # --- Drive ------------------------------------------------------------
+
+    @tool(
+        "drive_suchen",
+        "Sucht Dateien in Google Drive — nach Namen UND nach Inhalt. Für "
+        "'find mal die Rechnung von der Werkstatt' oder 'was habe ich zum "
+        "Thema Umzug liegen'. Gibt Name, Art und Änderungsdatum zurück.",
+        {
+            "type": "object",
+            "properties": {
+                "suche": {"type": "string",
+                          "description": "Suchwort. Kommt in Name oder "
+                                         "Inhalt vor."},
+                "nur_tabellen": {"type": "boolean",
+                                 "description": "Nur Google-Tabellen. "
+                                                "Vorgabe: nein."},
+            },
+            "required": ["suche"],
+        },
+    )
+    async def drive_suchen(args):
+        dienst = await _hole("drive", "v3")
+        if dienst is None:
+            return _fehlt()
+        such = _fuer_abfrage(args["suche"])
+        frage = f"(name contains '{such}' or fullText contains '{such}')"
+        if args.get("nur_tabellen"):
+            frage += f" and mimeType = '{TABELLE}'"
+        frage += " and trashed = false"
+        antwort = await asyncio.to_thread(
+            lambda: dienst.files().list(
+                q=frage, pageSize=10, orderBy="modifiedTime desc",
+                fields="files(id,name,mimeType,modifiedTime)").execute())
+        treffer = antwort.get("files", [])
+        blinken("Drive")
+        if not treffer:
+            return {"content": [{"type": "text", "text":
+                    f"Nichts zu {args['suche']!r} in Drive gefunden."}]}
+        zeilen = [f"{f['name']} — {_art(f.get('mimeType', ''))}"
+                  f"{_geaendert(f.get('modifiedTime'))}" for f in treffer]
+        return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
+
+    @tool(
+        "drive_lesen",
+        "Liest den Inhalt einer Datei aus Google Drive vor. Funktioniert bei "
+        "Google Docs und bei Textdateien. Vorher drive_suchen benutzen, wenn "
+        "der genaue Name unklar ist.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name der Datei oder ein Teil davon."},
+            },
+            "required": ["name"],
+        },
+    )
+    async def drive_lesen(args):
+        dienst = await _hole("drive", "v3")
+        if dienst is None:
+            return _fehlt()
+        datei, fehler = await _datei_finden(dienst, args["name"])
+        if fehler:
+            return fehler
+        art = datei.get("mimeType", "")
+        blinken("Drive")
+
+        if art == TABELLE:
+            return {"content": [{"type": "text", "text":
+                    f"{datei['name']} ist eine Tabelle — dafür ist "
+                    "tabelle_lesen da."}], "is_error": True}
+        try:
+            if art == DOKUMENT:
+                roh = await asyncio.to_thread(
+                    lambda: dienst.files().export_media(
+                        fileId=datei["id"], mimeType="text/plain").execute())
+            elif art.startswith("text/") or art == "application/json":
+                roh = await asyncio.to_thread(
+                    lambda: dienst.files().get_media(
+                        fileId=datei["id"]).execute())
+            else:
+                return {"content": [{"type": "text", "text":
+                        f"{datei['name']} ist {_art(art)} — daraus kann ich "
+                        "keinen Text holen."}], "is_error": True}
+        except Exception as e:
+            return {"content": [{"type": "text", "text":
+                    f"Konnte {datei['name']} nicht lesen: {e}"}],
+                    "is_error": True}
+
+        text = (roh.decode("utf-8", "replace")
+                if isinstance(roh, bytes) else str(roh)).strip()
+        if not text:
+            return {"content": [{"type": "text", "text":
+                    f"{datei['name']} ist leer."}]}
+        gekuerzt = ""
+        if len(text) > LESE_GRENZE:
+            text, gekuerzt = text[:LESE_GRENZE], "\n[… gekürzt]"
+        return {"content": [{"type": "text", "text":
+                f"{datei['name']}:\n{text}{gekuerzt}"}]}
+
+    @tool(
+        "drive_teilen",
+        "Erzeugt einen Freigabelink für eine Datei in Drive. ACHTUNG: Danach "
+        "kann JEDER mit dem Link die Datei ansehen. Nur auf ausdrücklichen "
+        "Wunsch.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name der Datei oder ein Teil davon."},
+            },
+            "required": ["name"],
+        },
+    )
+    async def drive_teilen(args):
+        dienst = await _hole("drive", "v3")
+        if dienst is None:
+            return _fehlt()
+        datei, fehler = await _datei_finden(dienst, args["name"])
+        if fehler:
+            return fehler
+        await asyncio.to_thread(
+            lambda: dienst.permissions().create(
+                fileId=datei["id"],
+                body={"role": "reader", "type": "anyone"}).execute())
+        angaben = await asyncio.to_thread(
+            lambda: dienst.files().get(fileId=datei["id"],
+                                       fields="webViewLink").execute())
+        blinken("Drive")
+        vermerken(f"drive_teilen: {datei['name']} ist jetzt per Link für "
+                  "jeden lesbar.")
+        return {"content": [{"type": "text", "text":
+                f"{datei['name']} ist freigegeben: "
+                f"{angaben.get('webViewLink', '(kein Link)')}"}]}
+
+    # --- Tabellen ---------------------------------------------------------
+
+    @tool(
+        "tabelle_lesen",
+        "Liest eine Google-Tabelle vor. Für 'was steht im Tankbuch' oder "
+        "'lies mir die Einkaufsliste vor'.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name der Tabelle oder Teil davon."},
+                "bereich": {"type": "string",
+                            "description": "Optional in A1-Schreibweise, z. B. "
+                                           "'A1:C20'. Ohne Angabe das ganze "
+                                           "erste Blatt."},
+            },
+            "required": ["name"],
+        },
+    )
+    async def tabelle_lesen(args):
+        blatt, fehler = await _tabelle_finden(args["name"])
+        if fehler:
+            return fehler
+        dienst = await _hole("sheets", "v4")
+        if dienst is None:
+            return _fehlt()
+        bereich = args.get("bereich") or blatt["blatt"]
+        antwort = await asyncio.to_thread(
+            lambda: dienst.spreadsheets().values().get(
+                spreadsheetId=blatt["id"], range=bereich).execute())
+        zeilen = antwort.get("values", [])
+        blinken("Tabellen")
+        if not zeilen:
+            return {"content": [{"type": "text", "text":
+                    f"{blatt['name']} ist leer."}]}
+        gekuerzt = ""
+        if len(zeilen) > ZEILEN_GRENZE:
+            gekuerzt = f"\n[… {len(zeilen) - ZEILEN_GRENZE} weitere Zeilen]"
+            zeilen = zeilen[:ZEILEN_GRENZE]
+        text = "\n".join(" | ".join(str(z) for z in zeile) for zeile in zeilen)
+        return {"content": [{"type": "text", "text":
+                f"{blatt['name']}:\n{text}{gekuerzt}"}]}
+
+    @tool(
+        "tabelle_anhaengen",
+        "Hängt eine Zeile unten an eine Google-Tabelle an. Für 'trag im "
+        "Tankbuch 52 Liter für 89 Euro ein'. Überschreibt nie etwas.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name der Tabelle oder Teil davon."},
+                "werte": {"type": "array", "items": {"type": "string"},
+                          "description": "Die Zellen der neuen Zeile, von "
+                                         "links nach rechts."},
+            },
+            "required": ["name", "werte"],
+        },
+    )
+    async def tabelle_anhaengen(args):
+        blatt, fehler = await _tabelle_finden(args["name"])
+        if fehler:
+            return fehler
+        dienst = await _hole("sheets", "v4")
+        if dienst is None:
+            return _fehlt()
+        werte = [str(w) for w in (args.get("werte") or [])]
+        if not werte:
+            return {"content": [{"type": "text", "text":
+                    "Ohne Werte kann ich nichts eintragen."}],
+                    "is_error": True}
+        await asyncio.to_thread(
+            lambda: dienst.spreadsheets().values().append(
+                spreadsheetId=blatt["id"], range=blatt["blatt"],
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body={"values": [werte]}).execute())
+        blinken("Tabellen")
+        vermerken(f"tabelle_anhaengen: In {blatt['name']} wurde eine Zeile "
+                  f"angehängt ({', '.join(werte[:4])}).")
+        return {"content": [{"type": "text", "text":
+                f"Eingetragen in {blatt['name']}."}]}
+
+    @tool(
+        "tabelle_schreiben",
+        "Schreibt Werte in einen bestimmten Bereich einer Google-Tabelle und "
+        "ÜBERSCHREIBT, was dort steht. Zum Anfügen ist tabelle_anhaengen "
+        "richtig, nicht dieses Werkzeug.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name der Tabelle oder Teil davon."},
+                "bereich": {"type": "string",
+                            "description": "A1-Schreibweise, z. B. 'B4' oder "
+                                           "'A1:C3'."},
+                "werte": {"type": "array", "items": {"type": "string"},
+                          "description": "Die Werte, von links nach rechts."},
+            },
+            "required": ["name", "bereich", "werte"],
+        },
+    )
+    async def tabelle_schreiben(args):
+        blatt, fehler = await _tabelle_finden(args["name"])
+        if fehler:
+            return fehler
+        dienst = await _hole("sheets", "v4")
+        if dienst is None:
+            return _fehlt()
+        werte = [str(w) for w in (args.get("werte") or [])]
+        await asyncio.to_thread(
+            lambda: dienst.spreadsheets().values().update(
+                spreadsheetId=blatt["id"], range=args["bereich"],
+                valueInputOption="USER_ENTERED",
+                body={"values": [werte]}).execute())
+        blinken("Tabellen")
+        vermerken(f"tabelle_schreiben: In {blatt['name']} wurde "
+                  f"{args['bereich']} überschrieben.")
+        return {"content": [{"type": "text", "text":
+                f"{args['bereich']} in {blatt['name']} ist gesetzt."}]}
+
+    @tool(
+        "tabelle_anlegen",
+        "Legt eine neue Google-Tabelle an, wahlweise mit Überschriftenzeile.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name der Tabelle."},
+                "spalten": {"type": "array", "items": {"type": "string"},
+                            "description": "Optionale Überschriften."},
+            },
+            "required": ["name"],
+        },
+    )
+    async def tabelle_anlegen(args):
+        dienst = await _hole("sheets", "v4")
+        if dienst is None:
+            return _fehlt()
+        neu = await asyncio.to_thread(
+            lambda: dienst.spreadsheets().create(
+                body={"properties": {"title": args["name"]}},
+                fields="spreadsheetId,spreadsheetUrl").execute())
+        spalten = [str(s) for s in (args.get("spalten") or [])]
+        if spalten:
+            await asyncio.to_thread(
+                lambda: dienst.spreadsheets().values().update(
+                    spreadsheetId=neu["spreadsheetId"], range="A1",
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [spalten]}).execute())
+        blinken("Tabellen")
+        vermerken(f"tabelle_anlegen: Die Tabelle {args['name']} wurde "
+                  "angelegt.")
+        return {"content": [{"type": "text", "text":
+                f"Tabelle {args['name']} ist angelegt."}]}
+
     return [termine_ansehen, termin_anlegen, termin_absagen,
             mails_ansehen, mail_lesen, mail_senden, mail_verschieben,
             aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken,
-            kontakt_suchen, kontakt_anlegen]
+            kontakt_suchen, kontakt_anlegen,
+            drive_suchen, drive_lesen, drive_teilen,
+            tabelle_lesen, tabelle_anhaengen, tabelle_schreiben,
+            tabelle_anlegen]

@@ -300,6 +300,22 @@ WERKZEUG_STUFEN = {
     "kontakt_suchen":     "still",
     "kontakt_anlegen":    "fragen",
 
+    # Drive: Suchen und Lesen aendern nichts. Teilen schon -- danach kann
+    # JEDER mit dem Link mitlesen, und das laesst sich nicht ungeschehen
+    # machen, nur widerrufen. Deshalb dieselbe Stufe wie Mail senden.
+    "drive_suchen":       "still",
+    "drive_lesen":        "still",
+    "drive_teilen":       "fragen",
+
+    # Tabellen: Anhaengen laeuft still durch -- es ueberschreibt nichts
+    # und steht damit auf einer Stufe mit aufgabe_anlegen. Schreiben
+    # fragt, weil es Bestehendes ersetzt; Anlegen fragt, weil dabei eine
+    # Datei in Drive entsteht.
+    "tabelle_lesen":      "still",
+    "tabelle_anhaengen":  "still",
+    "tabelle_schreiben":  "fragen",
+    "tabelle_anlegen":    "fragen",
+
     # Eingebaute Werkzeuge: Die Stufe haengt nicht am Werkzeug, sondern am
     # Pfad bzw. Befehl -- siehe schutz.py. Sie stehen hier nur, damit
     # darf_ich() sie ueberhaupt in Betracht zieht.
@@ -373,4 +389,6 @@ WERKZEUGE = [
     ("E-Mail",     "bereit"),
     ("Aufgaben",   "bereit"),
     ("Kontakte",   "bereit"),
+    ("Drive",      "bereit"),
+    ("Tabellen",   "bereit"),
 ]
