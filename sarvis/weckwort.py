@@ -193,8 +193,21 @@ class Horcher:
         # Nachlauf: kurze Pausen im Satz sind keine Satzenden.
         self._puffer.append(block)
         self._stille += BLOCK / RATE
-        if self._stille >= config.WECKWORT_STILLE_SEK:
+        if self._stille >= self._stille_grenze():
             self._pruefen()
+
+    def _stille_grenze(self) -> float:
+        """Wie lange Stille diesen Satz beendet -- je nachdem, wie lange
+        schon gesprochen wird.
+
+        "Wie spaet ist es" ist nach einer halben Sekunde Stille fertig.
+        Wer seit fuenf Sekunden einen Gedanken ausformuliert, macht
+        dazwischen Pausen -- und wurde bisher jedes Mal unterbrochen.
+        """
+        gesprochen = sum(len(b) for b in self._puffer) / RATE
+        if gesprochen >= config.WECKWORT_LANG_AB_SEK:
+            return config.WECKWORT_STILLE_LANG_SEK
+        return config.WECKWORT_STILLE_SEK
 
     def _pruefen(self) -> None:
         stueck = self._puffer

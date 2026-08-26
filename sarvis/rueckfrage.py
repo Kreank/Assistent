@@ -209,12 +209,26 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "datei_schreiben":
         pfad = e.get("pfad") or ""
         vorhanden = ""
+        neuer_ordner = None
         try:
             from pathlib import Path as _P
-            if _P(pfad).exists():
+            p = _P(pfad)
+            if p.exists():
                 vorhanden = "überschreiben"
+            # Entsteht der Ordner gerade erst mit? Dann reicht sein Name
+            # nicht. "index.html im Ordner Finanzdashboard" klingt, als
+            # gäbe es den Ordner schon -- und WO er liegt, erfährt man
+            # nie. Genau so landete ein Dashboard unbemerkt in D:/Privat.
+            elif p.parent and not p.parent.exists():
+                neuer_ordner = p.parent
         except (OSError, ValueError):
             pass
+
+        if neuer_ordner is not None:
+            wo = schutz.sprechbar(neuer_ordner.parent, "dativ")
+            return (f"Soll ich {p.name} anlegen? Der Ordner "
+                    f"{neuer_ordner.name} entsteht dabei in {wo}.")
+
         return (f"Soll ich {schutz.sprechbar(pfad)} "
                 f"{vorhanden or 'anlegen'}?")
 
@@ -247,7 +261,13 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
                 f"Der Text lautet: {_kuerzen(e.get('text'), 160)}")
 
     if werkzeug == "projekt_anlegen":
-        return (f"Soll ich ein Projekt {_kuerzen(e.get('name'), 50)} anlegen?")
+        # Der Ort MUSS in der Frage stehen. Er ist der eigentliche Grund,
+        # warum hier ueberhaupt gefragt wird -- ein Projekt am falschen
+        # Ort merkt man erst Wochen spaeter.
+        ort = config.PROJEKT_ORT_NAMEN.get((e.get("ort") or "").lower(), "")
+        wohin = f" in {ort}" if ort else ""
+        return (f"Soll ich ein Projekt {_kuerzen(e.get('name'), 50)}"
+                f"{wohin} anlegen?")
 
     if werkzeug == "projekt_oeffnen":
         return f"Soll ich {_kuerzen(e.get('name'), 50)} im Terminal öffnen?"

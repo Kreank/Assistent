@@ -90,6 +90,27 @@ Davor darf eine Anrede stehen: hey, hallo, he, ey, ok, sag, yo und
 einige mehr. „hi" und „hai" stehen mit in der Liste, weil Whisper
 gesprochenes „hey" oft so schreibt.
 
+### Menschen machen Pausen
+
+Eine halbe Sekunde Stille galt als Satzende (`WECKWORT_STILLE_SEK`), und
+nach neun Sekunden schnitt eine Notbremse mitten im Wort ab. Für „wie
+spät ist es" reicht das — für ein Gespräch nicht. Wer beim Formulieren
+Luft holt, wurde unterbrochen, wiederholte sich und wurde wieder
+unterbrochen.
+
+Deshalb zwei Werte statt einem:
+
+| | |
+|---|---|
+| kurzer Zuruf (unter 2 s) | **0,55 s** Stille beenden ihn |
+| laufende Rede (ab 2 s) | **1,4 s** Stille nötig |
+| Notbremse | **30 s** statt 9 |
+
+Wer kurz etwas zuruft, ist nach einer halben Sekunde fertig. Wer länger
+spricht, formuliert — und holt zwischendurch Luft. Der Preis: Nach einem
+längeren Satz wartet Sarvis 0,9 s länger, bevor er anfängt. Das ist
+billiger, als unterbrochen zu werden.
+
 ### Nachhören
 
 Nach einer Antwort hört Sarvis **18 Sekunden** weiter zu, ohne dass man
@@ -707,6 +728,43 @@ Laden herausgefiltert, sonst würde Sarvis früher oder später über
 drin, was er über dich weiß, nicht.
 
 ## Projekte und Aufträge
+
+### Wohin entscheidet der Nutzer
+
+Es gab genau **einen** Ort: `D:\Projekte`. Damit konnte die Frage
+„entwickeln wir für privat oder für die Arbeit?" gar nicht gestellt
+werden — sie hatte keine Antwortmöglichkeit. `projekt_anlegen` hat jetzt
+ein **Pflichtfeld** `ort`:
+
+| | |
+|---|---|
+| `privat` | `D:\Privat` |
+| `arbeit` | `D:\Mitra` |
+| `sandkasten` | `D:\Projekte` |
+
+Die Werkzeugbeschreibung sagt ausdrücklich, dass der Ort **nicht geraten
+werden darf** — hat der Nutzer nichts gesagt, wird zuerst gefragt. Und
+die Rückfrage nennt ihn:
+
+> „Soll ich ein Projekt Finanzdashboard in deinen privaten Projekten anlegen?"
+
+Wer „privat" hört, wo er „Arbeit" gemeint hat, sagt nein. Ein Projekt am
+falschen Ort merkt man sonst erst Wochen später.
+
+Ein Projekt kann weiterhin nur **innerhalb** dieser drei Ordner
+entstehen; geprüft wird am aufgelösten Pfad, nicht an der Vernunft des
+Modells. `projekt_liste` zeigt alle drei mit Ortsangabe.
+
+### Ein neuer Ordner sagt, wo er entsteht
+
+Dasselbe Problem eine Ebene tiefer: Schreibt Sarvis eine Datei in einen
+Ordner, der dabei **erst entsteht**, hieß die Rückfrage „Soll ich
+index.html im Ordner Finanzdashboard anlegen?" — als gäbe es den Ordner
+schon, und wo er liegt, erfuhr man nie. Genau so landete ein Dashboard
+unbemerkt in `D:\Privat`. Jetzt:
+
+> „Soll ich index.html anlegen? Der Ordner Finanzdashboard entsteht dabei
+> in dem Ordner Privat auf Laufwerk D."
 
 Sarvis kann Projekte anlegen und im Hintergrund daran arbeiten lassen.
 

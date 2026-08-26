@@ -4,8 +4,15 @@ Der lästige Teil am Anfang eines Projekts ist Ordner anlegen, README
 schreiben, git init. Genau das lässt sich gut zurufen. Entwickelt wird
 danach dort, wo man sieht was passiert.
 
-Alles spielt sich unter config.PROJEKTE ab und nirgends sonst. Der Ordner
-ist die Grenze -- nicht die Vernunft des Modells.
+Wohin, entscheidet der Nutzer -- nicht das Modell. Frueher gab es nur
+config.PROJEKTE, und damit konnte die Frage "entwickeln wir fuer privat
+oder fuer die Arbeit?" gar nicht erst gestellt werden. Es landete immer
+im selben Ordner, und man erfuhr es erst, wenn man nachfragte.
+
+Jetzt gibt es drei Orte (config.PROJEKT_ORTE), und der Ort ist ein
+Pflichtfeld. Die Grenze bleibt derselbe Gedanke wie vorher: Ein Projekt
+kann nur INNERHALB eines dieser Ordner entstehen, geprueft wird das am
+aufgeloesten Pfad -- nicht an der Vernunft des Modells.
 """
 import re
 import subprocess
@@ -49,18 +56,34 @@ def kurzname(name: str) -> str:
     return s[:60] or "projekt"
 
 
-def _pfad(name: str):
-    """Zielordner -- und die Zusicherung, dass er unter PROJEKTE liegt.
+def _wurzel(ort: str):
+    """Der Ordner zu einem Ortsnamen, oder None."""
+    return config.PROJEKT_ORTE.get((ort or "").strip().lower())
+
+
+def _pfad(name: str, ort: str = "sandkasten"):
+    """Zielordner -- und die Zusicherung, dass er im gewaehlten Ort liegt.
 
     Ohne diese Pruefung koennte ein Name wie '../../Privat' aus dem
-    Sandkasten herausfuehren. Das ist keine Theorie, sondern der
+    Ordner herausfuehren. Das ist keine Theorie, sondern der
     naheliegendste Weg, wie so etwas schiefgeht.
     """
-    ziel = (config.PROJEKTE / kurzname(name)).resolve()
-    wurzel = config.PROJEKTE.resolve()
-    if wurzel not in ziel.parents:
+    wurzel = _wurzel(ort)
+    if wurzel is None:
+        return None
+    ziel = (wurzel / kurzname(name)).resolve()
+    if wurzel.resolve() not in ziel.parents:
         return None
     return ziel
+
+
+def _finden(name: str):
+    """Ein bestehendes Projekt in allen Orten suchen."""
+    for ort in config.PROJEKT_ORTE:
+        ziel = _pfad(name, ort)
+        if ziel is not None and ziel.exists():
+            return ziel, ort
+    return None, None
 
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:
@@ -74,14 +97,26 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     @tool(
         "projekt_anlegen",
-        "Legt ein neues Projekt unter D:\\Projekte an: Ordner, README mit "
-        "der Beschreibung, Git-Repository und je nach Art ein Grundgerüst. "
-        "Für 'mach mir ein neues Projekt für X'.",
+        "Legt ein neues Projekt an: Ordner, README mit der Beschreibung, "
+        "Git-Repository und je nach Art ein Grundgerüst. Für 'mach mir ein "
+        "neues Projekt für X'. "
+        "WICHTIG: 'ort' ist Pflicht und darf NICHT geraten werden. Hat der "
+        "Nutzer nicht gesagt, wohin das Projekt soll, dann frag ihn zuerst "
+        "— privat, für die Arbeit, oder erstmal in den Sandkasten — und "
+        "warte seine Antwort ab, bevor du dieses Werkzeug benutzt.",
         {
             "type": "object",
             "properties": {
                 "name": {"type": "string",
                          "description": "Kurzer Projektname, wie gesagt."},
+                "ort": {
+                    "type": "string",
+                    "enum": ["privat", "arbeit", "sandkasten"],
+                    "description": "Wohin das Projekt gehört. privat = "
+                                   "D:\\Privat, arbeit = D:\\Mitra, "
+                                   "sandkasten = D:\\Projekte. Nur setzen, "
+                                   "wenn der Nutzer es gesagt hat.",
+                },
                 "beschreibung": {
                     "type": "string",
                     "description": "Worum es geht, in eigenen Worten "
@@ -91,12 +126,18 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "art": {"type": "string", "enum": ["leer", "python", "web"],
                         "description": "Grundgerüst. Vorgabe: leer."},
             },
-            "required": ["name", "beschreibung"],
+            "required": ["name", "beschreibung", "ort"],
         },
     )
     async def projekt_anlegen(args):
         name = (args.get("name") or "").strip()
-        ziel = _pfad(name)
+        ort = (args.get("ort") or "").strip().lower()
+        if _wurzel(ort) is None:
+            return {"content": [{"type": "text", "text":
+                    "Ich weiß nicht, wohin. Frag den Nutzer, ob das Projekt "
+                    "privat, für die Arbeit oder in den Sandkasten soll."}],
+                    "is_error": True}
+        ziel = _pfad(name, ort)
         if ziel is None:
             return {"content": [{"type": "text", "text":
                     "Dieser Name führt aus dem Projektordner heraus. "
@@ -137,23 +178,44 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     @tool(
         "projekt_liste",
-        "Zählt auf, welche Projekte unter D:\\Projekte liegen, mit dem "
-        "Datum der letzten Änderung.",
-        {"type": "object", "properties": {}},
+        "Zählt auf, welche Projekte es gibt — privat, für die Arbeit und im "
+        "Sandkasten —, mit Ort und Datum der letzten Änderung.",
+        {
+            "type": "object",
+            "properties": {
+                "ort": {"type": "string",
+                        "enum": ["privat", "arbeit", "sandkasten"],
+                        "description": "Nur diesen Ort auflisten. Weglassen "
+                                       "zeigt alle."},
+            },
+        },
     )
     async def projekt_liste(args):
         blinken()
-        if not config.PROJEKTE.exists():
+        nur = (args.get("ort") or "").strip().lower()
+        orte = ({nur: config.PROJEKT_ORTE[nur]} if nur in config.PROJEKT_ORTE
+                else config.PROJEKT_ORTE)
+
+        gefunden = []
+        for ort, wurzel in orte.items():
+            if not wurzel.exists():
+                continue
+            for p in wurzel.iterdir():
+                # Nur was wie ein Projekt aussieht -- D:\\Privat enthaelt
+                # auch anderes. Ein Git-Repo oder ein README genuegt.
+                if not p.is_dir():
+                    continue
+                if not ((p / ".git").exists() or (p / "README.md").exists()):
+                    continue
+                gefunden.append((p, ort))
+
+        if not gefunden:
             return {"content": [{"type": "text", "text":
                     "Es gibt noch keine Projekte."}]}
-        ordner = [p for p in config.PROJEKTE.iterdir() if p.is_dir()]
-        if not ordner:
-            return {"content": [{"type": "text", "text":
-                    "Es gibt noch keine Projekte."}]}
-        ordner.sort(key=lambda p: -p.stat().st_mtime)
-        zeilen = [f"{p.name} — zuletzt "
+        gefunden.sort(key=lambda x: -x[0].stat().st_mtime)
+        zeilen = [f"{p.name} ({ort}) — zuletzt "
                   f"{datetime.fromtimestamp(p.stat().st_mtime):%d.%m.%Y}"
-                  for p in ordner[:15]]
+                  for p, ort in gefunden[:15]]
         return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
 
     @tool(
@@ -172,7 +234,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def projekt_oeffnen(args):
-        ziel = _pfad(args.get("name") or "")
+        ziel, _ort = _finden(args.get("name") or "")
         if ziel is None or not ziel.exists():
             return {"content": [{"type": "text", "text":
                     "Dieses Projekt finde ich nicht."}], "is_error": True}

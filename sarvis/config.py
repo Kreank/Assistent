@@ -58,14 +58,30 @@ WECKWORT_MIN_PEGEL = 0.008
 # So lange Stille, bis der Satz als beendet gilt. Reine Totzeit -- sie
 # geht direkt in die Reaktionszeit ein. Zu klein schneidet Denkpausen
 # mitten im Satz ab, zu gross laesst ihn traege wirken.
-WECKWORT_STILLE_SEK = 0.5
+# Wie lange Stille einen Satz beendet.
+#
+# Eine halbe Sekunde reicht fuer "wie spaet ist es" -- fuer ein Gespraech
+# nicht. Menschen machen beim Formulieren Pausen von einer Sekunde und
+# mehr, und Sarvis fiel ihnen dabei ins Wort. Wer unterbrochen wird,
+# wiederholt sich, wird wieder unterbrochen, und irgendwann laesst man es.
+#
+# Deshalb zwei Werte statt einem: Wer kurz etwas zuruft, ist nach einer
+# halben Sekunde fertig. Wer laenger als WECKWORT_LANG_AB_SEK spricht,
+# formuliert -- und holt zwischendurch Luft.
+WECKWORT_STILLE_SEK = 0.55       # kurzer Zuruf
+WECKWORT_STILLE_LANG_SEK = 1.4   # laufende Rede
+WECKWORT_LANG_AB_SEK = 2.0       # ab wann als laufende Rede gilt
 WECKWORT_MIN_SEK = 0.5         # kuerzer ist ein Huesteln
 # Nach einer Antwort hoert er noch eine Weile ohne Weckwort zu. Ohne das
 # muesste man "Hey Sarvis" vor jeden Folgesatz setzen -- auch direkt nach
 # seiner eigenen Rueckfrage, was albern ist.
 NACHHOEREN_SEK = 18.0
 
-WECKWORT_MAX_SEK = 9.0         # laenger meint nicht uns
+# Notbremse gegen Dauerbeschallung -- ein laufender Fernseher soll den
+# Puffer nicht endlos fuellen. Stand auf 9 Sekunden, und das war keine
+# Notbremse, sondern eine Wortmeldung: Wer einen Gedanken ausformuliert,
+# braucht laenger, und wurde mitten im Satz abgeschnitten.
+WECKWORT_MAX_SEK = 30.0
 
 # Antwort, wenn nur der Name gerufen wurde -- ohne Auftrag.
 # Feste kurze Saetze statt einer Runde zu Claude: So kommt die Antwort
@@ -179,6 +195,14 @@ Davon unberührt bleiben Rückfragen zur SACHE: Wenn dir eine Angabe fehlt, die 
 
 Wird eine Rückfrage des Systems abgelehnt oder anders beantwortet als gefragt, bekommst du den Wortlaut des Nutzers zu sehen. Richte dich danach. Versuch es nicht noch einmal unverändert.
 
+Bei größeren Vorhaben baust du nicht sofort los. Ein Programm, ein Dashboard, eine Webseite, ein Werkzeug — dafür sammelst du erst die Eckdaten. Was soll hinein, wofür ist es, wonach wird ausgewertet, was ist dem Nutzer wichtig. Frag EINZELN nach, eine Sache nach der anderen, nicht drei Fragen in einem Satz. Wenn er antwortet, hör zu Ende zu und hak nach, statt aus der halben Antwort ein ganzes Bild zu machen.
+
+Erst wenn das Bild steht, fasst du in einem Satz zusammen, was du verstanden hast, und fängst an. Diese Zusammenfassung ist keine Erlaubnisfrage — du sagst, was du gleich tust, und tust es.
+
+Klingt ein Zuruf abgebrochen oder unvollständig, ist er es meistens auch: Der Nutzer wurde mitten im Satz abgeschnitten. Frag dann nach dem fehlenden Stück, statt die Lücke selbst zu füllen. Eine geratene Anforderung ist teurer als eine Rückfrage.
+
+Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
+
 Du sprichst Deutsch."""
 
 # Haltung an den Systemprompt anhaengen
@@ -229,6 +253,30 @@ def telegram_bereit() -> bool:
 # Der Sandkasten. Bewusst NEBEN Privat, Mitra und Wissen, nicht darin:
 # Der Ordner ist die Grenze, nicht die Vernunft des Modells.
 PROJEKTE = Path("D:/Projekte")
+
+# Wohin ein neues Projekt darf. Der Schluessel ist das Wort, das Sarvis
+# versteht; der Wert der Ordner.
+#
+# Bisher gab es nur den Sandkasten, und deshalb konnte die Frage "wo
+# entwickeln wir?" gar nicht gestellt werden -- das Werkzeug hatte keinen
+# Ort. Es landete immer unter D:\\Projekte, und man erfuhr es erst,
+# wenn man nachfragte.
+#
+# Angelegt wird trotzdem nie ungefragt: projekt_anlegen steht auf
+# "fragen", und die Rueckfrage nennt den Ort. Wer "privat" hoert, wo er
+# "Arbeit" gemeint hat, sagt nein.
+PROJEKT_ORTE = {
+    "privat":     Path("D:/Privat"),
+    "arbeit":     Path("D:/Mitra"),
+    "sandkasten": PROJEKTE,
+}
+
+# Wie die Orte vorgelesen werden -- "Mitra" sagt beim Zuhoeren zu wenig.
+PROJEKT_ORT_NAMEN = {
+    "privat":     "deinen privaten Projekten",
+    "arbeit":     "den Arbeitsprojekten unter Mitra",
+    "sandkasten": "dem Sandkasten unter D Doppelpunkt Projekte",
+}
 AUFTRAG_DATEI = WURZEL / "auftraege.json"
 
 # Wie viele Zuege ein Arbeiter hoechstens machen darf. Notbremse gegen
