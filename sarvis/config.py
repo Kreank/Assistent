@@ -95,6 +95,28 @@ NACHHOEREN_SEK = 18.0
 # braucht laenger, und wurde mitten im Satz abgeschnitten.
 WECKWORT_MAX_SEK = 30.0
 
+# Werkzeuge, bei denen es dauert. Beginnt eines davon und Sarvis hat in
+# diesem Zug noch kein Wort gesagt, wird ein Wartesatz vorgeschoben.
+#
+# Der Grund, warum das der CODE macht und nicht das Modell: Ein Modell,
+# das man bittet, vor der Suche etwas zu sagen, sagt es meistens NACH
+# der Suche -- weil es erst sucht und dann die ganze Antwort formuliert.
+# Beobachtet und woertlich so gemeldet: "Warte, ich schaue nach" kam
+# zusammen mit dem Ergebnis. Ein Wartesatz, der die Wartezeit nicht
+# ueberbrueckt, ist schlimmer als keiner: Er behauptet eine Pause, die
+# schon vorbei ist.
+LANGSAME_WERKZEUGE = {"WebSearch", "WebFetch", "Task", "Bash", "PowerShell"}
+
+# Kurz und austauschbar. Sie stehen allein da, bis die Antwort kommt --
+# deshalb keine Ansage, was genau gesucht wird: Das weiss der Satz noch
+# nicht, und ein falsches Versprechen faellt mehr auf als ein knappes.
+WARTESAETZE = (
+    "Moment, ich schaue nach.",
+    "Einen Moment.",
+    "Ich sehe kurz nach.",
+    "Sekunde.",
+)
+
 # Antwort, wenn nur der Name gerufen wurde -- ohne Auftrag.
 # Feste kurze Saetze statt einer Runde zu Claude: So kommt die Antwort
 # sofort, und ein Assistent, der beim Wecken erst nachdenkt, wirkt
@@ -232,6 +254,10 @@ Bei größeren Vorhaben baust du nicht sofort los. Ein Programm, ein Dashboard, 
 Erst wenn das Bild steht, fasst du in einem Satz zusammen, was du verstanden hast, und fängst an. Diese Zusammenfassung ist keine Erlaubnisfrage — du sagst, was du gleich tust, und tust es.
 
 Klingt ein Zuruf abgebrochen oder unvollständig, ist er es meistens auch: Der Nutzer wurde mitten im Satz abgeschnitten. Frag dann nach dem fehlenden Stück, statt die Lücke selbst zu füllen. Eine geratene Anforderung ist teurer als eine Rückfrage.
+
+Kündigst du eine Suche oder einen Blick irgendwohin an ("Moment, ich schaue nach"), dann sag das VOR dem Werkzeugaufruf, nicht danach. Ein solcher Satz ist dazu da, die Wartezeit zu überbrücken — kommt er zusammen mit dem Ergebnis, behauptet er eine Pause, die längst vorbei ist. Wenn du ihn nicht vorher sagst, sagt das System ihn für dich; doppelt braucht es ihn nicht.
+
+Brauchst du für eine Sache absehbar mehrere Befehle am selben Ort — ein Projekt starten, Abhängigkeiten installieren, Tests laufen lassen —, dann sag das vorher in einem Satz und arbeite dann durch. Der Nutzer wird ohnehin nach dem dritten Mal gefragt, ob er für eine Weile Ruhe haben will; ihn vorher zu warnen ist höflicher, als ihn zehnmal einzeln bestätigen zu lassen.
 
 Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlich in Y"), dann öffne KEIN Terminal. projekt_oeffnen ist nur für "mach mir da ein Terminal auf" — sonst nie. Sieh dir stattdessen mit ort_ansehen an, was dort liegt, und stell dann eine Frage, die zu dem passt, was du siehst: Liegt dort angefangene Arbeit, frag, ob weitergebaut werden soll und woran zuletzt gearbeitet wurde. Sind es Anleitungen oder Notizen, frag, ob du zusammenfassen sollst oder ob er etwas Bestimmtes sucht. Rate nicht, was er vorhat — sieh nach und frag passend.
 

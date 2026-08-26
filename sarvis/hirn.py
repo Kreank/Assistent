@@ -5,6 +5,7 @@ Sekunden Startzeit -- gemessen. Eine offene Sitzung kostet die einmal beim
 Hochfahren, danach nur noch die eigentliche Antwort.
 """
 import asyncio
+import random
 from datetime import datetime
 from typing import AsyncIterator
 
@@ -351,6 +352,9 @@ class Hirn:
         self.letzte_kosten = None
         gestroemt = False
 
+        # Wurde in diesem Zug schon ein Wartesatz vorgeschoben?
+        gewartet = False
+
         vorspann = jetzt_zeile()
         # Was gerade laeuft, geht bei JEDEM Zuruf mit. Das ist Arbeits-
         # gedaechtnis: Sarvis muss sich nicht erinnern, dass ein Wecker
@@ -406,9 +410,21 @@ class Hirn:
                 # Eingebaute Werkzeuge melden sich nicht selbst im Kranz --
                 # die eigenen tun das in ihrem Code, hier fehlen nur die.
                 for block in nachricht.content:
-                    punkt = self.KRANZ.get(getattr(block, "name", ""))
+                    name = getattr(block, "name", "")
+                    punkt = self.KRANZ.get(name)
                     if punkt and self.leuchten:
                         self.leuchten(punkt)
+
+                    # Ein langsames Werkzeug faengt an, und gesagt wurde
+                    # noch nichts: Dann schiebt der Code den Wartesatz
+                    # vor. Er geht denselben Weg wie jeder andere Satz --
+                    # durch den Satzsammler in den Mund -- und ist damit
+                    # gesprochen, BEVOR das Werkzeug antwortet. Genau das
+                    # war der Punkt.
+                    if (not gestroemt and not gewartet
+                            and name in config.LANGSAME_WERKZEUGE):
+                        gewartet = True
+                        yield random.choice(config.WARTESAETZE) + " "
             elif isinstance(nachricht, ResultMessage):
                 self.letzte_kosten = nachricht.total_cost_usd
                 self._offen = False

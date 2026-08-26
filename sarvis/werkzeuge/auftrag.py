@@ -146,6 +146,53 @@ class Werkstatt:
         self.leuchten = leuchten
         self.auftraege: dict[int, Auftrag] = {}
         self._naechste = 1
+        self._laden()
+
+    def _laden(self) -> None:
+        """Was frueher lief, aus der Datei holen.
+
+        auftraege.json wurde bisher nur geschrieben und nie gelesen. Zwei
+        Folgen, beide unangenehm: Die Nummerierung fing nach jedem Start
+        wieder bei 1 an und ueberschrieb beim naechsten Sichern die alten
+        Eintraege -- und ein Auftrag, der beim Beenden noch lief, war
+        spurlos weg.
+
+        Er laeuft NICHT weiter: Der Arbeiter lebt im Prozess von Sarvis,
+        und der ist beendet worden. Genau das muss man aber erfahren
+        koennen, statt es aus einem Git-Zweig zu erraten. Deshalb wird
+        "laeuft" beim Laden zu "unterbrochen".
+        """
+        try:
+            roh = json.loads(config.AUFTRAG_DATEI.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(roh, list):
+            return
+        for e in roh:
+            try:
+                nummer = int(e["nummer"])
+                a = Auftrag(
+                    nummer=nummer,
+                    projekt=str(e.get("projekt") or ""),
+                    was=str(e.get("was") or ""),
+                    zweig=str(e.get("zweig") or ""),
+                    ordner=Path(str(e.get("ordner") or ".")),
+                    status=str(e.get("status") or "fertig"),
+                    begonnen=datetime.fromisoformat(e["begonnen"]),
+                    beendet=(datetime.fromisoformat(e["beendet"])
+                             if e.get("beendet") else None),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+            if a.status == "läuft":
+                a.status = "unterbrochen"
+                a.beendet = a.beendet or datetime.now()
+            self.auftraege[nummer] = a
+            self._naechste = max(self._naechste, nummer + 1)
+
+    def unterbrochene(self) -> list:
+        """Auftraege, die ein Neustart mittendrin erwischt hat."""
+        return [a for a in self.auftraege.values() if a.status == "unterbrochen"]
 
     # --- Erlaubnis des Arbeiters ------------------------------------------
 
@@ -301,7 +348,8 @@ class Werkstatt:
         if auftrag.status == "fertig":
             kurz = " ".join(auftrag.ergebnis.split())[:400]
             text = (f"Auftrag {auftrag.nummer} im Projekt {auftrag.projekt} "
-                    f"ist fertig, nach {minuten} Minuten. {kurz}")
+                    f"ist fertig, nach {minuten} Minuten. {kurz} "
+                    "Soll ich es dir zeigen?")
             titel = f"Auftrag fertig: {auftrag.projekt}"
         elif auftrag.status == "abgebrochen":
             text = f"Auftrag {auftrag.nummer} wurde abgebrochen."
@@ -337,6 +385,7 @@ class Werkstatt:
             config.AUFTRAG_DATEI.write_text(json.dumps([
                 {"nummer": a.nummer, "projekt": a.projekt, "was": a.was,
                  "zweig": a.zweig, "status": a.status,
+                 "ordner": str(a.ordner),
                  "begonnen": a.begonnen.isoformat(),
                  "beendet": a.beendet.isoformat() if a.beendet else None}
                 for a in self.auftraege.values()

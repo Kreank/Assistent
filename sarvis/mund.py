@@ -77,6 +77,18 @@ class Satzsammler:
     def __init__(self, mindestlaenge: int = 25):
         self.puffer = ""
         self.mindestlaenge = mindestlaenge
+        # Der ERSTE Satz einer Antwort geht ohne Mindestlaenge heraus.
+        #
+        # Er ist der einzige, bei dem es auf jede Zehntelsekunde ankommt,
+        # und er ist typischerweise genau der kurze Einleitungssatz, der
+        # die Wartezeit ueberbruecken soll. "Moment, ich schaue nach."
+        # hat 24 Zeichen -- eines zu wenig -- und waere zusammen mit dem
+        # Ergebnis gesprochen worden. Damit haette der Wartesatz eine
+        # Pause behauptet, die schon vorbei ist.
+        #
+        # Fuer alles Weitere bleibt die Mindestlaenge: Mitten in einer
+        # Antwort zerhackt jedes "Ja." als eigener Atemzug die Stimme.
+        self._erster = True
 
     def dazu(self, schnipsel: str) -> list[str]:
         self.puffer += schnipsel
@@ -91,9 +103,10 @@ class Satzsammler:
             # genau deshalb darf die Mindestlaenge hier nicht greifen:
             # sonst wird er mit dem Ergebnis zusammen gesprochen und die
             # ganze Ueberbrueckung ist dahin.
+            schwelle = 0 if self._erster else self.mindestlaenge
             grenze = next(
                 (t for t in _SATZENDE.finditer(self.puffer)
-                 if t.start() >= self.mindestlaenge or t.start() == t.end()),
+                 if t.start() >= schwelle or t.start() == t.end()),
                 None,
             )
             if grenze is None:
@@ -102,6 +115,7 @@ class Satzsammler:
             self.puffer = self.puffer[grenze.end():]
             if satz:
                 fertig.append(satz)
+                self._erster = False
         return fertig
 
     def rest(self) -> str:

@@ -81,6 +81,25 @@ def bauen(sagen, leuchten=None, melden=None):
     return server, namen, wecker, protokoll, werkstatt
 
 
+def unterbrochen_zeile(werkstatt) -> str:
+    """Auftraege, die ein Neustart mittendrin erwischt hat.
+
+    Gehoert ins Arbeitsgedaechtnis und nicht in eine Erinnerung: Sarvis
+    kann nicht wissen, dass er neu gestartet wurde -- der Arbeiter ist
+    einfach weg. Ohne diese Zeile fragt er den Nutzer, was zu tun sei,
+    waehrend halbfertige Arbeit auf einem Zweig liegt.
+    """
+    if werkstatt is None:
+        return ""
+    offen = werkstatt.unterbrochene()
+    if not offen:
+        return ""
+    teile = [f"Auftrag {a.nummer} ({a.projekt}, Zweig {a.zweig})" for a in offen]
+    return ("[Von einem Neustart unterbrochen und NICHT fertig geworden: "
+            + "; ".join(teile)
+            + ". Sieh im Projekt nach, wie weit es ist, bevor du fragst.]")
+
+
 def zustand_zeile(wecker) -> str:
     """Was gerade laeuft, als eine Zeile fuer den Vorspann.
 
