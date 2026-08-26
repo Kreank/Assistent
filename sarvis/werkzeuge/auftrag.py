@@ -16,7 +16,11 @@ nicht, ist es ein `git checkout master` -- und weg.
 import asyncio
 import json
 import re
+import os
 import subprocess
+import tempfile
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +32,7 @@ from claude_agent_sdk import (
     PermissionResultDeny,
     ResultMessage,
     TextBlock,
+    ToolUseBlock,
     tool,
 )
 
@@ -84,7 +89,22 @@ Kilometer und kaufmännischer Rundung. Zehn Tests laufen durch. Offen ist
 noch, wie mehrere Fahrten zusammengerechnet werden sollen.
 
 Grenzen: Du bleibst im Projektordner. Kein `git push`, kein Merge nach
-main, nichts außerhalb des Ordners."""
+main, nichts außerhalb des Ordners.
+
+Führe Buch, und zwar WÄHREND der Arbeit, nicht am Ende:
+
+* Lege gleich zu Beginn `fortschritt.md` im Projektordner an und schreibe
+  nach jedem abgeschlossenen Teilschritt eine Zeile hinein: was du getan
+  hast, was du geprüft hast, was als Nächstes drankommt. Diese Datei ist
+  für den Fall, dass du mitten in der Arbeit abgeschnitten wirst — dann
+  ist sie das Einzige, woran jemand anknüpfen kann. Ein Bericht, den es
+  erst am Ende gibt, gibt es genau dann nicht, wenn er gebraucht wird.
+* Committe nach jedem abgeschlossenen Teilschritt, mit einer Nachricht,
+  die sagt WAS fertig ist. Der Zweig wird ohnehin nie nach main
+  gemergt — häufige Commits kosten dich nichts und sind der einzige
+  verlässliche Zwischenstand.
+* Wirst du fortgesetzt, lies zuerst `git log`, `git status` und
+  `fortschritt.md`. Fang nicht von vorn an."""
 
 
 def vorlesbar(text: str) -> str:
@@ -131,10 +151,90 @@ class Auftrag:
     beendet: datetime | None = None
     ergebnis: str = ""
     aufgabe: object = None
+    stand_text: str = ""           # wie weit er kam, aus Git gelesen
+    # Die Kennung der Claude-Sitzung. Wird VOR dem Start vergeben und
+    # gesichert -- sonst waere ein Absturz nach zwei Sekunden nicht
+    # fortsetzbar, weil die Kennung erst am Ende zurueckkaeme.
+    sitzung: str = ""
+    zuletzt_gesehen: str = ""      # ISO-Zeit des letzten Lebenszeichens
 
     def dauer(self) -> int:
         ende = self.beendet or datetime.now()
         return int((ende - self.begonnen).total_seconds())
+
+
+def journal(nummer: int, ereignis: str, **felder) -> None:
+    """Eine Zeile ans Fortschritts-Journal anhaengen.
+
+    Anhaengen statt Ueberschreiben ist der ganze Trick: Stirbt der
+    Prozess mitten im Schreiben, ist hoechstens die letzte Zeile
+    zerrissen -- alles davor bleibt gueltig und lesbar. Beim
+    Ueberschreiben einer JSON-Datei ist dagegen im schlimmsten Fall
+    ALLES weg, weil das Schreiben mit einem Kuerzen auf null Bytes
+    beginnt.
+    """
+    zeile = {"zeit": datetime.now().isoformat(timespec="seconds"),
+             "nummer": nummer, "ereignis": ereignis, **felder}
+    try:
+        with open(config.AUFTRAG_JOURNAL, "a", encoding="utf-8") as f:
+            f.write(json.dumps(zeile, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass          # ein fehlendes Journal darf keinen Auftrag aufhalten
+
+
+def journal_lesen() -> list:
+    """Alle lesbaren Zeilen. Kaputte werden uebersprungen, nicht beklagt."""
+    zeilen = []
+    try:
+        roh = config.AUFTRAG_JOURNAL.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return zeilen
+    for z in roh:
+        z = z.strip()
+        if not z:
+            continue
+        try:
+            zeilen.append(json.loads(z))
+        except ValueError:
+            continue   # abgerissene letzte Zeile eines Absturzes
+    return zeilen
+
+
+def _atomar_schreiben(pfad, text: str) -> None:
+    """Datei ersetzen, ohne sie je halb dastehen zu lassen.
+
+    Erst in eine Nebendatei IM SELBEN ORDNER schreiben (sonst waere das
+    Ersetzen ein Kopiervorgang ueber Laufwerksgrenzen), auf die Platte
+    zwingen, dann tauschen.
+
+    Die Wiederholungsschleife ist keine Ziererei: Unter Windows wirft das
+    Ersetzen PermissionError, wenn irgendwer die Zieldatei gerade offen
+    hat -- ein Virenscanner, der die frisch geschriebene Datei prueft,
+    genuegt. Unter Linux liefe derselbe Aufruf klaglos durch.
+    """
+    pfad = Path(pfad)
+    fd, tmp = tempfile.mkstemp(dir=str(pfad.parent), prefix=pfad.name + ".",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        for versuch in range(5):
+            try:
+                os.replace(tmp, pfad)
+                return
+            except PermissionError:
+                if versuch == 4:
+                    raise
+                time.sleep(0.02 * (versuch + 1))
+    finally:
+        try:
+            Path(tmp).unlink()
+        except OSError:
+            pass
 
 
 class Werkstatt:
@@ -164,8 +264,14 @@ class Werkstatt:
         """
         try:
             roh = json.loads(config.AUFTRAG_DATEI.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             return
+        except (OSError, ValueError):
+            # Zerrissene oder leere Datei. Frueher hiess das: alle
+            # Auftraege stillschweigend vergessen, samt Nummerierung.
+            # Das Journal weiss es noch.
+            print("  (auftraege.json unlesbar -- rekonstruiere aus dem Journal)")
+            roh = self._aus_journal()
         if not isinstance(roh, list):
             return
         for e in roh:
@@ -184,11 +290,48 @@ class Werkstatt:
                 )
             except (KeyError, TypeError, ValueError):
                 continue
+            a.sitzung = str(e.get("sitzung") or "")
+            a.zuletzt_gesehen = str(e.get("zuletzt_gesehen") or "")
             if a.status == "läuft":
                 a.status = "unterbrochen"
                 a.beendet = a.beendet or datetime.now()
+                journal(nummer, "unterbrochen",
+                        grund="Sarvis wurde neu gestartet")
             self.auftraege[nummer] = a
             self._naechste = max(self._naechste, nummer + 1)
+        # Fuer die Unterbrochenen einmal nachsehen, wie weit sie kamen.
+        # Nur fuer die -- Git zu befragen kostet Zeit, und bei fertigen
+        # Auftraegen ist die Antwort ohne Wert.
+        for a in self.auftraege.values():
+            if a.status == "unterbrochen":
+                try:
+                    a.stand_text = self.stand(a)
+                except Exception:
+                    a.stand_text = ""
+
+    @staticmethod
+    def _aus_journal() -> list:
+        """Aus dem Journal wieder eine Auftragsliste falten.
+
+        Das Journal ist die Wahrheit ueber den Verlauf; auftraege.json
+        ist nur die bequeme Zusammenfassung. Geht die kaputt, laesst sie
+        sich hieraus neu bauen.
+        """
+        stand = {}
+        for z in journal_lesen():
+            nummer = z.get("nummer")
+            if not isinstance(nummer, int):
+                continue
+            e = stand.setdefault(nummer, {"nummer": nummer, "status": "läuft"})
+            for feld in ("projekt", "was", "zweig", "ordner", "sitzung",
+                         "begonnen", "beendet", "status", "zuletzt_gesehen"):
+                if z.get(feld):
+                    e[feld] = z[feld]
+            if z.get("ereignis") == "beendet":
+                e["status"] = z.get("status", "fertig")
+            elif z.get("ereignis") == "lebt":
+                e["zuletzt_gesehen"] = z.get("zeit", "")
+        return list(stand.values())
 
     def unterbrochene(self) -> list:
         """Auftraege, die ein Neustart mittendrin erwischt hat."""
@@ -286,17 +429,62 @@ class Werkstatt:
         except (subprocess.SubprocessError, OSError) as e:
             return None, f"Der Git-Zweig ließ sich nicht anlegen: {e}"
 
+        # Die Sitzungskennung wird HIER vergeben, nicht vom SDK, und
+        # steht damit in der Datei, bevor die erste Zeile Arbeit
+        # existiert. Kaeme sie erst mit der Schlussmeldung zurueck, waere
+        # ausgerechnet der abgebrochene Auftrag der einzige ohne Kennung
+        # -- also der einzige, den man nicht fortsetzen kann.
         auftrag = Auftrag(nummer=nummer, projekt=ordner.name, was=was,
-                          zweig=zweig, ordner=ordner)
+                          zweig=zweig, ordner=ordner,
+                          sitzung=str(uuid.uuid4()))
         self.auftraege[nummer] = auftrag
+        journal(nummer, "gestartet", projekt=ordner.name, was=was,
+                zweig=zweig, ordner=str(ordner), sitzung=auftrag.sitzung,
+                begonnen=auftrag.begonnen.isoformat(timespec="seconds"))
+        self._sichern()          # erst festhalten, dann loslaufen
         auftrag.aufgabe = asyncio.get_running_loop().create_task(
             self._arbeiten(auftrag)
         )
-        self._sichern()
         return auftrag, ""
 
-    async def _arbeiten(self, auftrag: Auftrag) -> None:
+    def stand(self, auftrag) -> str:
+        """Wie weit ist der Auftrag wirklich gekommen? Aus Git, nicht aus Absicht.
+
+        Nach einem Abbruch ist das Protokoll eine Behauptung, der Zweig
+        eine Tatsache. Deshalb wird hier nachgesehen und nicht geraten.
+        """
+        def git(*args):
+            try:
+                e = subprocess.run(["git", *args], cwd=auftrag.ordner,
+                                   capture_output=True, text=True, timeout=10)
+                return e.stdout.strip() if e.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError):
+                return ""
+        commits = [z for z in git("log", auftrag.zweig, "--not", "main",
+                                  "--oneline").splitlines() if z.strip()]
+        offen = [z for z in git("status", "--porcelain").splitlines() if z.strip()]
+        teile = []
+        if commits:
+            teile.append(f"{len(commits)} Commits, zuletzt: {commits[0][:60]}")
+        else:
+            teile.append("noch kein Commit")
+        if offen:
+            teile.append(f"{len(offen)} Dateien ungespeichert geändert")
+        fortschritt = auftrag.ordner / "fortschritt.md"
+        if fortschritt.exists():
+            try:
+                letzte = [z for z in fortschritt.read_text(
+                    encoding="utf-8", errors="replace").splitlines() if z.strip()]
+                if letzte:
+                    teile.append("zuletzt notiert: " + letzte[-1][:80])
+            except OSError:
+                pass
+        return "; ".join(teile)
+
+    async def _arbeiten(self, auftrag: Auftrag, fortsetzen: bool = False) -> None:
         klient = None
+        letztes_werkzeug = ""
+        letztes_zeichen = time.monotonic()
         try:
             klient = ClaudeSDKClient(options=ClaudeAgentOptions(
                 model=config.MODELL,
@@ -310,18 +498,44 @@ class Werkstatt:
                 strict_mcp_config=True,
                 effort="high",       # anders als Sarvis: hier zählt Gründlichkeit
                 max_turns=config.AUFTRAG_ZUEGE,
+                # Beim ersten Lauf die Kennung VORGEBEN, beim Fortsetzen
+                # dieselbe wieder aufnehmen. Gemessen: Der Arbeiter hat
+                # danach seinen eigenen Verlauf zurueck.
+                **({"resume": auftrag.sitzung} if fortsetzen
+                   else {"session_id": auftrag.sitzung}),
             ))
             await klient.connect()
-            await klient.query(
-                f"Projekt: {auftrag.ordner}\nZweig: {auftrag.zweig}\n\n"
-                f"Auftrag: {auftrag.was}"
-            )
+            if fortsetzen:
+                await klient.query(
+                    "Du wurdest mitten in der Arbeit unterbrochen. Sieh zuerst "
+                    "nach, wie weit du gekommen bist (git log, git status, "
+                    "fortschritt.md), und mach dann weiter. Fang NICHT von "
+                    "vorn an.\n\n"
+                    f"Ursprünglicher Auftrag: {auftrag.was}"
+                )
+            else:
+                await klient.query(
+                    f"Projekt: {auftrag.ordner}\nZweig: {auftrag.zweig}\n\n"
+                    f"Auftrag: {auftrag.was}"
+                )
             letzter = ""
             async for nachricht in klient.receive_response():
                 if hasattr(nachricht, "content"):
                     for block in getattr(nachricht, "content", []) or []:
                         if isinstance(block, TextBlock) and block.text.strip():
                             letzter = block.text.strip()
+                        elif isinstance(block, ToolUseBlock):
+                            letztes_werkzeug = block.name
+
+                # Lebenszeichen ins Journal. Nicht als Stoppuhr, sondern
+                # damit sich hinterher sagen laesst, wann er zuletzt
+                # gesehen wurde -- und woran er da war.
+                if (time.monotonic() - letztes_zeichen
+                        >= config.AUFTRAG_LEBENSZEICHEN_SEK):
+                    letztes_zeichen = time.monotonic()
+                    auftrag.zuletzt_gesehen = datetime.now().isoformat(
+                        timespec="seconds")
+                    journal(auftrag.nummer, "lebt", werkzeug=letztes_werkzeug)
                 if isinstance(nachricht, ResultMessage):
                     break
             auftrag.ergebnis = vorlesbar(letzter)
@@ -334,6 +548,8 @@ class Werkstatt:
             auftrag.ergebnis = f"{type(e).__name__}: {e}"
         finally:
             auftrag.beendet = datetime.now()
+            journal(auftrag.nummer, "beendet", status=auftrag.status,
+                    beendet=auftrag.beendet.isoformat(timespec="seconds"))
             if klient is not None:
                 try:
                     await klient.disconnect()
@@ -366,6 +582,35 @@ class Werkstatt:
 
     # --- Zustand ------------------------------------------------------------
 
+    def fortsetzen(self, nummer: int) -> tuple:
+        """Einen unterbrochenen Auftrag da weitermachen lassen, wo er war.
+
+        Bewusst NUR auf Ansage. Kein System, das ich gefunden habe, nimmt
+        so etwas von allein wieder auf -- und das aus gutem Grund: Der
+        Arbeiter wuerde auf seinem eigenen halbfertigen Stand
+        weiterbauen, ohne dass jemand ihn gesehen hat.
+        """
+        a = self.auftraege.get(int(nummer or 0))
+        if a is None:
+            return None, "Diesen Auftrag kenne ich nicht."
+        if a.status not in ("unterbrochen", "fehler", "abgebrochen"):
+            return None, f"Auftrag {a.nummer} ist {a.status} -- da gibt es nichts fortzusetzen."
+        if not a.sitzung:
+            return None, ("Von diesem Auftrag habe ich keine Sitzungskennung. "
+                          "Er stammt noch aus der Zeit davor -- ich kann nur "
+                          "einen neuen anlegen.")
+        if not a.ordner.exists():
+            return None, f"Den Projektordner {a.ordner} gibt es nicht mehr."
+
+        a.status = "läuft"
+        a.beendet = None
+        journal(a.nummer, "fortgesetzt", sitzung=a.sitzung)
+        self._sichern()
+        a.aufgabe = asyncio.get_running_loop().create_task(
+            self._arbeiten(a, fortsetzen=True)
+        )
+        return a, ""
+
     def alles_abbrechen(self) -> int:
         """Jeden laufenden Auftrag anhalten. Rueckgabe: wie viele es waren.
 
@@ -382,14 +627,16 @@ class Werkstatt:
 
     def _sichern(self) -> None:
         try:
-            config.AUFTRAG_DATEI.write_text(json.dumps([
+            _atomar_schreiben(config.AUFTRAG_DATEI, json.dumps([
                 {"nummer": a.nummer, "projekt": a.projekt, "was": a.was,
                  "zweig": a.zweig, "status": a.status,
                  "ordner": str(a.ordner),
+                 "sitzung": a.sitzung,
+                 "zuletzt_gesehen": a.zuletzt_gesehen,
                  "begonnen": a.begonnen.isoformat(),
                  "beendet": a.beendet.isoformat() if a.beendet else None}
                 for a in self.auftraege.values()
-            ], ensure_ascii=False, indent=1), encoding="utf-8")
+            ], ensure_ascii=False, indent=1))
         except OSError:
             pass
 
@@ -489,4 +736,29 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"Auftrag {a.nummer} abgebrochen. Der Zweig {a.zweig} bleibt."}]}
 
-    return [auftrag_geben, auftrag_status, auftrag_abbrechen]
+    @tool(
+        "auftrag_fortsetzen",
+        "Setzt einen unterbrochenen Auftrag dort fort, wo er aufgehört hat — "
+        "mit dem Gedächtnis des ursprünglichen Arbeiters. Für 'mach da weiter' "
+        "nach einem Neustart. Fängt NICHT von vorn an.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer", "description": "Auftragsnummer."}
+            },
+            "required": ["nummer"],
+        },
+    )
+    async def auftrag_fortsetzen(args):
+        a, fehler = werkstatt.fortsetzen(args.get("nummer"))
+        if a is None:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        blinken()
+        vermerken(f"auftrag_fortsetzen: Auftrag {a.nummer} läuft weiter.")
+        return {"content": [{"type": "text", "text":
+                f"Auftrag {a.nummer} läuft weiter, auf Zweig {a.zweig}. "
+                "Er sieht sich erst an, wie weit er war."}]}
+
+    return [auftrag_geben, auftrag_status, auftrag_abbrechen,
+            auftrag_fortsetzen]

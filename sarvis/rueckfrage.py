@@ -290,6 +290,10 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "projekt_oeffnen":
         return f"Soll ich {_kuerzen(e.get('name'), 50)} im Terminal öffnen?"
 
+    if werkzeug == "auftrag_fortsetzen":
+        return (f"Soll ich Auftrag {e.get('nummer')} dort fortsetzen, "
+                "wo er aufgehört hat?")
+
     if werkzeug == "auftrag_geben":
         # Der Auftragstext ist ein Arbeitsauftrag fuer den Arbeiter, kein
         # Satz zum Vorlesen: lang, mit Vorgeschichte, oft mehrere Absaetze.

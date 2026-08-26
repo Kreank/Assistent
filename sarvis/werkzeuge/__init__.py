@@ -94,10 +94,15 @@ def unterbrochen_zeile(werkstatt) -> str:
     offen = werkstatt.unterbrochene()
     if not offen:
         return ""
-    teile = [f"Auftrag {a.nummer} ({a.projekt}, Zweig {a.zweig})" for a in offen]
+    teile = []
+    for a in offen:
+        stand = f" -- {a.stand_text}" if getattr(a, "stand_text", "") else ""
+        teile.append(f"Auftrag {a.nummer} ({a.projekt}){stand}")
     return ("[Von einem Neustart unterbrochen und NICHT fertig geworden: "
             + "; ".join(teile)
-            + ". Sieh im Projekt nach, wie weit es ist, bevor du fragst.]")
+            + ". Biete an, ihn mit auftrag_fortsetzen dort weiterlaufen zu "
+              "lassen, wo er war -- oder den Zweig zu verwerfen. Entscheide "
+              "das NICHT selbst.]")
 
 
 def zustand_zeile(wecker) -> str:

@@ -349,6 +349,17 @@ PROJEKT_ORT_NAMEN = {
 }
 AUFTRAG_DATEI = WURZEL / "auftraege.json"
 
+# Das Fortschritts-Journal. Nur ANHAENGEN, nie ueberschreiben: Ein
+# Absturz kostet dann hoechstens die letzte Zeile, nie die Historie.
+# auftraege.json ist der bequeme Momentanstand, dieses Journal der
+# Verlauf -- und der Rettungsanker, wenn die JSON zerrissen ist.
+AUFTRAG_JOURNAL = WURZEL / "fortschritt.jsonl"
+
+# Wie oft ein laufender Arbeiter "ich lebe noch" ins Journal schreibt.
+# Haeufiger bringt nichts: Es geht darum, nach einem Absturz sagen zu
+# koennen, wann er zuletzt gesehen wurde, nicht um eine Stoppuhr.
+AUFTRAG_LEBENSZEICHEN_SEK = 60
+
 # Wie viele Zuege ein Arbeiter hoechstens machen darf. Notbremse gegen
 # einen Auftrag, der sich im Kreis dreht und dabei Kontingent frisst.
 AUFTRAG_ZUEGE = 120
@@ -446,6 +457,9 @@ WERKZEUG_STUFEN = {
     "auftrag_geben":      "fragen",
     "auftrag_status":     "still",
     "auftrag_abbrechen":  "still",
+    # Fortsetzen startet wieder einen Arbeiter, der selbstaendig Dateien
+    # schreibt -- also dieselbe Stufe wie auftrag_geben.
+    "auftrag_fortsetzen": "fragen",
 
     # Programme: Oeffnen ist harmlos und jederzeit rueckgaengig zu machen
     # -- ein Fenster schliesst man wieder. Beenden fragt nach, weil dabei
