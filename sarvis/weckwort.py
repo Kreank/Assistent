@@ -48,6 +48,26 @@ def _worte(text: str) -> set:
     return {w.strip(".,!?;:-–„“»«'\"") for w in roh} - {""}
 
 
+# Was Whisper aus Stille und Rauschen macht. Keine Vermutung: Diese
+# Saetze stehen in den Trainingsdaten als Video-Abspann und kommen bei
+# leisem Nichts zuverlaessig zurueck. Im Betrieb gehoert: "We'll see you
+# next time. Bye-bye. Bye-bye." -- und das ging als Zuruf weiter.
+#
+# Bewusst nur Unverwechselbares. "Vielen Dank" steht NICHT hier: Das
+# sagt man wirklich, und ein verschlucktes Danke ist schlimmer als eine
+# gelegentliche Halluzination.
+_HALLUZINATIONEN = (
+    "bye-bye", "bye bye", "thank you for watching", "thanks for watching",
+    "see you next time", "untertitel", "untertitelung", "amara.org",
+    "subtitles by", "subs by", "ondertiteling",
+)
+
+
+def _halluziniert(text: str) -> bool:
+    t = " ".join((text or "").lower().split())
+    return any(m in t for m in _HALLUZINATIONEN)
+
+
 def _klingt_wie_name(wort: str) -> bool:
     """Ist dieses eine Wort der Name? Whisper verhoert ihn gern."""
     return SequenceMatcher(None, wort, config.NAME).ratio() \
@@ -288,6 +308,9 @@ class Horcher:
             print(f"  (Weckwort: Whisper stolperte — {e})")
             return
         if not text:
+            return
+        if _halluziniert(text):
+            print(f"  (Whisper-Halluzination verworfen: {text!r})")
             return
         if self._eigen_echo(text):
             return

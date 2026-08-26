@@ -147,6 +147,10 @@ class Sarvis:
 
     def _antwort_geben(self, text: str) -> None:
         if self.antwort is not None and not self.antwort.done():
+            # Wer waehrend der Frage antwortet, will den Rest nicht mehr
+            # hoeren. Ohne das redet Sarvis die Frage zu Ende, obwohl sie
+            # laengst beantwortet ist -- und man sitzt daneben und wartet.
+            self.lautsprecher.abbrechen()
             self.antwort.set_result(text)
 
     def _verschieben_umschalten(self):
@@ -257,50 +261,75 @@ class Sarvis:
         print(f"\n  ? Sarvis fragt: {frage}")
 
         letztes = ""
-        for versuch in range(2):
-            text = frage if versuch == 0 else rueckfrage.NACHHAKEN
-            self.anzeige.zustand(FRAGT)
-            self.anzeige.untertitel("sarvis", text)
-            await asyncio.to_thread(self._sagen_und_warten, text)
+        # Das Antwortfenster steht, BEVOR die Frage gesprochen wird.
+        #
+        # Vorher wurde es erst danach angelegt. Wer schnell antwortet --
+        # und auf "soll ich das ausführen?" antwortet man schnell --,
+        # traf in die Luecke dazwischen: Das "ja" gehoerte dann zu keiner
+        # Frage, wurde als neuer Zuruf behandelt, und die Frage lief in
+        # den Zeitablauf. Im Protokoll sah das so aus:
+        #
+        #   * Nachhoeren: 'Ja'
+        #   Du     : Ja   (per Weckwort)
+        #   ? keine Antwort -- abgelehnt
+        #
+        # Man musste also zweimal antworten. Seit man ihm ins Wort fallen
+        # darf, ist die Luecke ausserdem so breit wie die Frage selbst.
+        self.antwort = self.schleife.create_future()
+        # Waehrend die Frage offen steht, braucht das "ja" kein Weckwort.
+        # Ohne das muesste man "Hey Sarvis, ja" sagen -- auf eine Frage,
+        # die er gerade selbst gestellt hat.
+        self.horcher.nachhoeren(config.RUECKFRAGE_SEKUNDEN + 12)
+        try:
+            for versuch in range(2):
+                # Der zweite Versuch wiederholt nicht, er erklaert: Wer
+                # zurueckfragt, hat die Frage gehoert und WILL mehr wissen.
+                text = frage if versuch == 0 else (
+                    rueckfrage.genauer(werkzeug, eingabe)
+                    or rueckfrage.NACHHAKEN
+                )
+                self.anzeige.zustand(FRAGT)
+                self.anzeige.untertitel("sarvis", text)
+                await asyncio.to_thread(self._sagen_und_warten, text)
 
-            self.antwort = self.schleife.create_future()
-            self.anzeige.zustand(FRAGT)
-            # Waehrend die Frage offen steht, braucht das "ja" kein
-            # Weckwort. Ohne das muesste man "Hey Sarvis, ja" sagen --
-            # auf eine Frage, die er gerade selbst gestellt hat.
-            self.horcher.nachhoeren(config.RUECKFRAGE_SEKUNDEN + 2)
-            try:
-                async with asyncio.timeout(config.RUECKFRAGE_SEKUNDEN):
-                    gehoert = await self.antwort
-            except (TimeoutError, asyncio.TimeoutError):
-                self.antwort = None
-                print("  ? keine Antwort -- abgelehnt")
-                await self._sagen(rueckfrage.ABGELAUFEN)
-                return "nein", ""
-            finally:
-                self.antwort = None
+                self.anzeige.zustand(FRAGT)
+                self.horcher.nachhoeren(config.RUECKFRAGE_SEKUNDEN + 2)
+                try:
+                    async with asyncio.timeout(config.RUECKFRAGE_SEKUNDEN):
+                        gehoert = await self.antwort
+                except (TimeoutError, asyncio.TimeoutError):
+                    print("  ? keine Antwort -- abgelehnt")
+                    await self._sagen(rueckfrage.ABGELAUFEN)
+                    return "nein", ""
 
-            entschieden = rueckfrage.deuten(gehoert)
-            letztes = (gehoert or "").strip()
-            print(f"  ? Antwort: {gehoert!r} -> {entschieden}")
+                entschieden = rueckfrage.deuten(gehoert)
+                letztes = (gehoert or "").strip()
+                print(f"  ? Antwort: {gehoert!r} -> {entschieden}")
 
-            if entschieden == "ja":
-                await self._freigabe_erteilen(werkzeug, eingabe, gehoert)
-                self.anzeige.zustand(RUHIG)
-                return "ja", gehoert
+                if entschieden == "ja":
+                    await self._freigabe_erteilen(werkzeug, eingabe, gehoert)
+                    self.anzeige.zustand(RUHIG)
+                    return "ja", gehoert
 
-            if entschieden == "nein":
-                await self._sagen(rueckfrage.ABGELEHNT)
-                return "nein", gehoert
+                if entschieden == "nein":
+                    await self._sagen(rueckfrage.ABGELEHNT)
+                    return "nein", gehoert
 
-            if entschieden == "anders":
-                # Hier wird bewusst NICHT nachgehakt und nichts gesagt:
-                # Der Nutzer hat klar geredet, nur eben etwas anderes als
-                # gefragt. Sein Satz geht ans Hirn zurueck, und Sarvis
-                # antwortet gleich selbst darauf -- ein "Ich lasse es"
-                # dazwischen waere schlicht falsch.
-                self.anzeige.zustand(DENKT)
-                return "anders", gehoert
+                if entschieden == "anders":
+                    # Hier wird bewusst NICHT nachgehakt und nichts gesagt:
+                    # Der Nutzer hat klar geredet, nur eben etwas anderes als
+                    # gefragt. Sein Satz geht ans Hirn zurueck, und Sarvis
+                    # antwortet gleich selbst darauf -- ein "Ich lasse es"
+                    # dazwischen waere schlicht falsch.
+                    self.anzeige.zustand(DENKT)
+                    return "anders", gehoert
+
+                # Vor dem Nachhaken ein frisches Fenster: Im alten liegt
+                # die eben gehoerte Antwort schon drin, der zweite Versuch
+                # waere sonst sofort mit demselben Satz zu Ende.
+                self.antwort = self.schleife.create_future()
+        finally:
+            self.antwort = None
 
         # Zweimal kein Ja und kein Nein -- aber es wurde etwas gesagt.
         # Dann ist es eher ein neuer Auftrag als ein Missverstaendnis:

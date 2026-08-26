@@ -361,6 +361,28 @@ def ist_stopp(text: str) -> bool:
     return False
 
 
+def genauer(werkzeug: str, eingabe: dict) -> str | None:
+    """Dieselbe Frage noch einmal -- mit dem, was beim ersten Mal fehlte.
+
+    Beim ersten Fragen ist Kuerze richtig. Wer aber zurueckfragt ("und
+    welcher Befehl?"), bekommt mit "Ich habe das nicht verstanden" genau
+    die Auskunft nicht, die er verlangt hat -- und sagt beim zweiten Mal
+    wieder nicht ja. Im Betrieb mehrfach so passiert.
+
+    Gibt None zurueck, wenn es nichts Genaueres zu sagen gibt; dann
+    bleibt es beim NACHHAKEN.
+    """
+    e = eingabe or {}
+    if werkzeug == "befehl_ausfuehren":
+        return (f"Er würde {schutz.absicht_lang(e.get('befehl'))}. "
+                "Soll ich?")
+    if werkzeug in ("datei_lesen", "datei_schreiben", "ordner_ansehen",
+                    "ordner_durchsuchen"):
+        return (f"Es geht um {schutz.sprechbar(e.get('pfad'))}. "
+                "Soll ich das machen?")
+    return None
+
+
 NACHHAKEN = "Ich habe das nicht verstanden. Ja oder nein?"
 ABGELEHNT = "Gut, ich lasse es."
 ABGELAUFEN = "Ich habe keine Antwort bekommen und lasse es lieber."

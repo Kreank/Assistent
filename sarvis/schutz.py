@@ -484,6 +484,23 @@ _ABSICHTEN = (
     (r"^pip\s+install\b", "", "Pakete installieren"),
     (r"^(npm|pnpm|yarn)\b", "", "einen npm-Befehl ausführen"),
     (r"^(python|py)\b", "", "ein Python-Skript ausführen"),
+    # Alles Weitere kam beim Bauen des Finanzdashboards vor -- und wurde
+    # mangels Muster als nackte Kommandozeile vorgelesen.
+    (r"^(for|while|foreach|ForEach-Object)\b", "",
+     "mehrere Dateien der Reihe nach durchgehen"),
+    (r"^if\b", "", "eine Bedingung prüfen"),
+    (r"^(cat|head|tail|more)\b", "{} lesen", "eine Datei lesen"),
+    (r"^echo\b", "", "etwas ausgeben"),
+    (r"^(pytest|py\.test)\b", "", "die Tests laufen lassen"),
+    (r"^(node|npx)\b", "", "ein Node-Programm ausführen"),
+    (r"^ng\b", "", "das Angular-Werkzeug aufrufen"),
+    (r"^docker(\s+compose)?\b", "", "einen Docker-Befehl ausführen"),
+    (r"^(uvicorn|gunicorn|flask)\b", "", "den Webserver starten"),
+    (r"^(pip|uv)\b", "", "Pakete verwalten"),
+    (r"^(where|which|Get-Command)\b", "", "nachsehen, wo ein Programm liegt"),
+    (r"^(findstr|Select-String|grep|rg)\b", "in {} suchen", "etwas suchen"),
+    (r"^(Test-Path|test)\b", "nachsehen, ob es {} gibt",
+     "nachsehen, ob etwas da ist"),
 )
 
 
@@ -506,9 +523,15 @@ def _erstes_ziel(rest: str) -> str:
         stuecke = rest.split()
     for wort in stuecke:
         wort = wort.strip("\"").strip("'")
-        # Schalter (-Recurse, --long, /s), Variablen und Verkettungen
-        # sind kein Ziel.
-        if not wort or wort[0] in "-/$" or wort in ("|", "&", "&&", ";"):
+        # Schalter (-Recurse, --long), Variablen und Verkettungen sind
+        # kein Ziel.
+        if not wort or wort[0] in "-$" or wort in ("|", "&", "&&", ";"):
+            continue
+        # "/s" ist ein Schalter, "/d/Projekte/Finanzdashboard" ein Pfad --
+        # so schreibt die Git-Bash Laufwerke. Ohne diese Unterscheidung
+        # fiel der Pfad durch, und die Rueckfrage las die ganze
+        # Kommandozeile vor statt zu sagen, worum es geht.
+        if wort.startswith("/") and "/" not in wort[1:]:
             continue
         return wort
     return ""
@@ -528,8 +551,62 @@ def _wie_pfad(wort: str) -> bool:
     return len(p.parts) > 1 or bool(p.suffix) or wort in (".", "..")
 
 
+_ZAHLWORTE = {2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "sechs",
+              7: "sieben", 8: "acht", 9: "neun"}
+
+
+def _schritte(befehl: str) -> list:
+    """Eine Befehlskette in ihre Schritte zerlegen.
+
+    Zwei Dinge passieren hier. Erstens wird an && und ; getrennt: Eine
+    Kette ist kein Befehl, sondern mehrere, und wer fragt "was machst du
+    da?" meint alle. Zweitens fliegt ein fuehrendes "cd" raus -- in
+    welchen Ordner er vorher wechselt, ist nicht die Handlung, nach der
+    gefragt wird. Genau daran scheiterte die Beschreibung von
+    "cd /d/Projekte/Finanzdashboard && cat README.md".
+    """
+    # NICHT am Semikolon trennen: In "for f in *.py; do echo $f; done"
+    # steht es mitten in EINEM Befehl, und das Zerlegen machte daraus
+    # drei sinnlose Schritte ("einen Befehl mit do ausfuehren").
+    roh = re.split(r"&&|\|\|", str(befehl or ""))
+    schritte = [t.strip() for t in roh if t.strip()]
+    ohne_cd = [t for t in schritte if not re.match(r"^cd\b", t, re.IGNORECASE)]
+    return ohne_cd or schritte or [""]
+
+
 def absicht(befehl: str) -> str:
-    """Was der Befehl vorhat, in wenigen Worten -- zum Vorlesen."""
+    """Was der Befehl vorhat, in wenigen Worten -- zum Vorlesen.
+
+    Bewusst NIE die Kommandozeile selbst: Vorgelesen kann damit niemand
+    etwas anfangen, und eine Frage, die man nicht versteht, beantwortet
+    man nicht -- man erduldet sie.
+    """
+    schritte = _schritte(befehl)
+    erste = _eine_absicht(schritte[0])
+    if len(schritte) == 1:
+        return erste
+    if len(schritte) == 2:
+        return f"{erste} und danach noch etwas machen"
+    # Ziffern werden vorgelesen wie Ziffern; Woerter klingen wie Sprache.
+    zahl = _ZAHLWORTE.get(len(schritte) - 1, str(len(schritte) - 1))
+    return f"{erste} und danach noch {zahl} weitere Schritte machen"
+
+
+def absicht_lang(befehl: str) -> str:
+    """Alle Schritte in Worten -- fuer "und welcher Befehl genau?".
+
+    Dieselbe Sprache wie absicht(), nur vollstaendig. Auch hier keine
+    Kommandozeile: Wer nachfragt, will es GENAUER wissen, nicht
+    technischer.
+    """
+    teile = [_eine_absicht(t) for t in _schritte(befehl)]
+    if len(teile) == 1:
+        return teile[0]
+    return ", dann ".join(teile[:-1]) + f", und zum Schluss {teile[-1]}"
+
+
+def _eine_absicht(befehl: str) -> str:
+    """Ein einzelner Schritt in Worten."""
     b = " ".join(str(befehl or "").split())
     erster = b.split("|")[0].strip()
     pfade = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", b)
@@ -548,10 +625,14 @@ def absicht(befehl: str) -> str:
             return ohne_ziel
     if ziel and _wie_pfad(roh):
         return f"einen Befehl auf {ziel} ausführen"
-    # Letzter Ausweg: den Befehl selbst nennen. Einen kurzen vorzulesen
-    # ist zumutbar, seit die Alternative "einen Befehl auf deinem
-    # Rechner" heisst -- das ist keine Frage, das ist ein Blankoscheck.
-    return f"den Befehl {kurz_befehl(b, 60)} ausführen"
+    # Letzter Ausweg: wenigstens das Programm nennen, das gerufen wird.
+    # Die Kommandozeile vorzulesen war der Versuch davor und ist an der
+    # Wirklichkeit gescheitert -- "cd Schraegstrich d Schraegstrich
+    # Projekte und und cat README punkt md" beantwortet niemand.
+    programm = teile[0] if teile else ""
+    if programm and programm.isascii() and len(programm) <= 20:
+        return f"einen Befehl mit {programm} ausführen"
+    return "einen Befehl auf deinem Rechner ausführen"
 
 
 def kurz_befehl(befehl: str, laenge: int = 90) -> str:
