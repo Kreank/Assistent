@@ -174,9 +174,9 @@ class Sarvis:
             await asyncio.sleep(1.0)
 
         print(f"\n  Sarvis : {text}   (von selbst)")
-        # Ohne das weckt ihn seine eigene Stimme aus dem Lautsprecher --
-        # mit Kopfhoerern egal, mit Boxen eine Endlosschleife.
-        self.horcher.pause(True)
+        # Mit Kopfhoerern bleibt das Ohr offen (config.REINREDEN), damit
+        # man ihm ins Wort fallen kann; mit Boxen schaltet spricht() ab.
+        self.horcher.spricht(text)
         self.anzeige.zustand(SPRICHT)
         self.anzeige.untertitel("sarvis", text)
         if mit_gong and config.GONG:
@@ -188,7 +188,7 @@ class Sarvis:
             self.lautsprecher.sagen(proben, rate)
             await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
-        self.horcher.pause(False)
+        self.horcher.spricht(None)
 
     # --- Begruessung auf Vorrat --------------------------------------------
 
@@ -220,14 +220,15 @@ class Sarvis:
         if not self.gruesse:
             return False
         text, proben, rate = random.choice(self.gruesse)
+        _reinreden = text          # gleich an spricht() weitergereicht
         print(f"\n  Sarvis : {text}")
-        self.horcher.pause(True)
+        self.horcher.spricht(_reinreden)
         self.anzeige.zustand(SPRICHT)
         self.anzeige.untertitel("sarvis", text)
         self.lautsprecher.sagen(proben, rate)
         await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
-        self.horcher.pause(False)
+        self.horcher.spricht(None)
         self.horcher.nachhoeren()
         self.anzeige.nachhoeren(config.NACHHOEREN_SEK)
         return True
@@ -358,14 +359,14 @@ class Sarvis:
 
     def _sagen_und_warten(self, text: str) -> None:
         """Einen Satz sprechen und abwarten, bis er zu Ende ist."""
-        self.horcher.pause(True)
+        self.horcher.spricht(text)
         try:
             proben, rate = self.mund.sprechen(text)
             if len(proben):
                 self.lautsprecher.sagen(proben, rate)
                 self.lautsprecher.warten()
         finally:
-            self.horcher.pause(False)
+            self.horcher.spricht(None)
 
     async def _sagen(self, text: str) -> None:
         print(f"  Sarvis : {text}")
@@ -394,6 +395,44 @@ class Sarvis:
         await self.hirn.unterbrechen()
         self.arbeitet = False
         print("  (unterbrochen)")
+
+    async def _alles_stoppen(self) -> None:
+        """Sofort still und alles Laufende anhalten.
+
+        Bewusst NICHT _unterbrechen(): Das killt self.aufgabe -- und diese
+        Methode laeuft selbst darin. Sie wuerde sich also selbst abraeumen,
+        bevor sie die Auftraege erreicht.
+        """
+        self.lautsprecher.abbrechen()
+        try:
+            await self.hirn.unterbrechen()
+        except Exception:
+            pass
+        wieviele = 0
+        if self.werkstatt is not None:
+            wieviele = self.werkstatt.alles_abbrechen()
+        self.abgebrochen = False
+        print(f"  (gestoppt -- {wieviele} laufende Auftraege abgebrochen)")
+        # Ein Wort. Wer "hör auf" sagt, will keinen Bericht darueber, was
+        # aufgehoert hat.
+        await self._sagen("Gestoppt." if not wieviele else
+                          f"Gestoppt, {wieviele} Auftrag abgebrochen."
+                          if wieviele == 1 else
+                          f"Gestoppt, {wieviele} Aufträge abgebrochen.")
+
+    def _stopp_taste(self) -> None:
+        """Die Stopp-Tastenkombination -- aus fremdem Faden gemeldet.
+
+        Der Ton wird HIER abgebrochen, nicht erst in der Schleife. Ist die
+        gerade beschaeftigt, laege die Meldung sonst in der Warteschlange,
+        waehrend Sarvis weiterredet -- und genau in dem Moment drueckt man
+        die Taste. Der Lautsprecher ist dafuer gebaut: eigener Faden,
+        eigene Warteschlange, von aussen ansprechbar.
+        """
+        self.lautsprecher.abbrechen()
+        print("\n  (Not-Aus gedrueckt)")
+        if self.schleife is not None:
+            self.schleife.call_soon_threadsafe(self.schlange.put_nowait, "stopp")
 
     def _begruessen(self) -> None:
         """Beim Start laut melden.
@@ -424,6 +463,14 @@ class Sarvis:
         # Zeitpunkt der Erteilung und waere sonst bald falsch.
         self.anzeige.freigabe(self.freigaben.kurz(),
                               self.freigaben.rest_sekunden())
+        # "Hör auf" ist ein Befehl, keine Gespraechseroeffnung. Ginge er
+        # ans Hirn, kaeme ein Lagebericht zurueck statt eines Abbruchs --
+        # woertlich passiert: "Das Angular-Frontend wird gerade gebaut,
+        # der Auftrag laeuft noch."
+        if rueckfrage.ist_stopp(gesagt):
+            await self._alles_stoppen()
+            return
+
         sammler = Satzsammler()
         erster_ton: float | None = None
         erstes_wort: float | None = None
@@ -434,8 +481,9 @@ class Sarvis:
             nonlocal erster_ton
             if self.abgebrochen:
                 return
-            # Sonst weckt ihn seine eigene Stimme aus dem Lautsprecher.
-            self.horcher.pause(True)
+            # Beim Reinreden bleibt das Ohr offen -- der Satz geht mit,
+            # damit _eigen_echo seine eigene Stimme aussortieren kann.
+            self.horcher.spricht(satz)
             proben, rate = self.mund.sprechen(satz)
             # Die Synthese laeuft in einem Faden und laesst sich nicht
             # abbrechen -- also danach nochmal nachsehen, sonst rutscht der
@@ -463,7 +511,7 @@ class Sarvis:
         print(f"  Sarvis : {text}")
         await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
-        self.horcher.pause(False)
+        self.horcher.spricht(None)
 
         jetzt = time.perf_counter()
         print(
@@ -580,20 +628,24 @@ class Sarvis:
 
         # Eigener Lauscher fuer die Tastenkombination -- der Push-to-talk-
         # Lauscher sieht nur einzelne Tasten, keine Kombinationen.
+        # Der Not-Aus haengt ausdruecklich NICHT an config.ANZEIGE. Wer die
+        # Anzeige abschaltet, verliert sonst die einzige Moeglichkeit, Sarvis
+        # mitten im Satz zu stoppen -- und merkt es erst, wenn er sie braucht.
         schalter = None
+        tasten = {config.TASTE_STOPP: self._stopp_taste}
         if config.ANZEIGE:
-            try:
-                schalter = keyboard.GlobalHotKeys(
-                    {config.TASTE_VERSCHIEBEN: self._verschieben_umschalten}
-                )
-                schalter.start()
-            except Exception as e:
-                print(f"  (Verschiebe-Tastenkombination ging nicht: {e})")
+            tasten[config.TASTE_VERSCHIEBEN] = self._verschieben_umschalten
+        try:
+            schalter = keyboard.GlobalHotKeys(tasten)
+            schalter.start()
+        except Exception as e:
+            print(f"  (Tastenkombinationen gingen nicht: {e})")
 
         print("\n" + "=" * 62)
         print(f"  Sarvis laeuft.  [{config.TASTE.upper()}] halten, reden, loslassen.")
         if config.ANZEIGE:
             print(f"  Anzeige verschieben: {config.TASTE_VERSCHIEBEN}")
+        print(f"  Sofort still: {config.TASTE_STOPP}")
         print("  Strg+C zum Beenden.")
         print("=" * 62)
 
@@ -626,6 +678,14 @@ class Sarvis:
                     self.aufgabe = asyncio.create_task(
                         self._weckwort_durchgang(zuruf)
                     )
+                    continue
+
+                if befehl == "stopp":
+                    # Geht vor allem anderen, auch vor einer offenen
+                    # Rueckfrage: Stopp heisst Stopp.
+                    if self.arbeitet or self.aufgabe is not None:
+                        await self._unterbrechen()
+                    await self._alles_stoppen()
                     continue
 
                 if befehl == "start":

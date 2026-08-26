@@ -39,6 +39,15 @@ def _sauber(text: str) -> str:
     return re.sub(r"[^\wäöüß ]+", " ", (text or "").lower()).strip()
 
 
+def _worte(text: str) -> set:
+    """Die Woerter eines Satzes, kleingeschrieben und ohne Satzzeichen.
+
+    Fuer den Vergleich "sagt er das gerade selbst?" -- siehe _eigen_echo.
+    """
+    roh = (text or "").lower().split()
+    return {w.strip(".,!?;:-–„“»«'\"") for w in roh} - {""}
+
+
 def _klingt_wie_name(wort: str) -> bool:
     """Ist dieses eine Wort der Name? Whisper verhoert ihn gern."""
     return SequenceMatcher(None, wort, config.NAME).ratio() \
@@ -93,6 +102,11 @@ class Horcher:
         self._faden = None
         self._laeuft = False
         self.pausiert = False     # waehrend Sarvis redet oder arbeitet
+        # Was er gerade sagt -- die letzten Saetze, nicht nur der neueste:
+        # Die Synthese laeuft dem Ton voraus, waehrend Satz 1 noch klingt,
+        # ist Satz 3 schon gebaut. Ein Filter, der nur den neuesten kennt,
+        # vergliche gegen etwas, das noch gar nicht zu hoeren war.
+        self._eigene_saetze: list = []
         self._puffer: list[np.ndarray] = []
         self._redet = False
         self._stille = 0.0
@@ -118,6 +132,54 @@ class Horcher:
 
     def stopp(self) -> None:
         self._laeuft = False
+
+    def spricht(self, text: str | None) -> None:
+        """Sarvis redet gerade diesen Satz -- oder ist fertig (None).
+
+        Ohne REINREDEN ist das schlicht pause(): Ohr zu, solange er redet.
+        Mit REINREDEN bleibt es offen, damit man ihn unterbrechen kann.
+        """
+        if not config.REINREDEN:
+            self.pause(text is not None)
+            return
+        if text is None:
+            self._eigene_saetze = []
+            self.pause(False)
+            return
+        self._eigene_saetze.append(_worte(text))
+        del self._eigene_saetze[:-3]
+        # Waehrend er redet, zaehlt jeder Satz als Antwort. Mitten in
+        # seinen Satz hinein "Hey Sarvis" zu rufen waere albern -- man
+        # faellt jemandem ins Wort, man meldet sich nicht an.
+        self._nachhoeren_bis = max(
+            self._nachhoeren_bis,
+            time.perf_counter() + config.NACHHOEREN_SEK,
+        )
+        if self.pausiert:
+            self.pausiert = False
+            self._verwerfen()
+
+    def _eigen_echo(self, text: str) -> bool:
+        """Kommt da seine eigene Stimme durchs Mikrofon zurueck?
+
+        Mit Kopfhoerern ist das wenig, aber nicht nichts. Was zurueck-
+        kommt, sind seine eigenen Worte -- und die kennen wir genau: es
+        ist der Satz, den er in diesem Moment sagt.
+
+        Kurzes bleibt ungeprueft. Sonst verschluckt der Filter ein "nein",
+        das zufaellig auch in seinem Satz vorkommt -- und ausgerechnet das
+        kurze Dazwischenrufen ist der Fall, um den es hier geht.
+        """
+        if not self._eigene_saetze:
+            return False
+        w = _worte(text)
+        if len(w) < 3:
+            return False
+        eigen = set().union(*self._eigene_saetze)
+        if len(w & eigen) / len(w) >= 0.7:
+            print(f"  (eigene Stimme verworfen: {text!r})")
+            return True
+        return False
 
     def pause(self, an: bool) -> None:
         """Waehrend Sarvis spricht, hoert er nicht auf sich selbst.
@@ -226,6 +288,8 @@ class Horcher:
             print(f"  (Weckwort: Whisper stolperte — {e})")
             return
         if not text:
+            return
+        if self._eigen_echo(text):
             return
 
         zuruf = erkennen(text)

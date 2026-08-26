@@ -305,6 +305,15 @@ class Hirn:
         self._offen = True
         await self.klient.query(vorspann + "\n" + text)
         async for nachricht in self.klient.receive_response():
+            # Text eines Unter-Arbeiters geht NICHT an den Mund. Die SDK
+            # markiert ihn mit parent_tool_use_id. Ohne diese Zeile sprach
+            # Sarvis mitten in seiner Antwort englische Saetze mit, die
+            # gar nicht seine waren -- "I will start by exploring the
+            # backend API", woertlich so passiert. Der Arbeiter meldet an
+            # den Orchestrator, nicht an den Nutzer.
+            if getattr(nachricht, "parent_tool_use_id", None) is not None:
+                continue
+
             if isinstance(nachricht, StreamEvent):
                 e = nachricht.event or {}
                 if e.get("type") == "content_block_delta":

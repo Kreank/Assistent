@@ -13,10 +13,11 @@ import math
 import sys
 from collections import deque
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QFontDatabase,
     QFontMetrics,
     QGuiApplication,
     QPainter,
@@ -29,12 +30,37 @@ from PySide6.QtWidgets import QApplication, QWidget
 from . import config
 from .anzeige import ADRESSE, DENKT, FRAGT, HOERT, RUHIG, SPRICHT
 
+# Das Raster, in dem gemalt wird. Alles darunter rechnet in diesen
+# Zahlen -- sie sind KEINE Bildschirmpixel mehr, seit es SKALA gibt.
 BREITE, HOEHE = 660, 548
+# Wie gross das Fenster daraus wird. Der Maler wird gestreckt, nicht die
+# Konstanten: sonst muesste man zwei Dutzend Abstaende einzeln nachziehen.
+SKALA = max(0.6, min(3.0, config.ANZEIGE_SKALA))
+FENSTER_BREITE = round(BREITE * SKALA)
+FENSTER_HOEHE = round(HOEHE * SKALA)
 MITTE = QPointF(BREITE / 2, 222)
 RADIUS = 58
 KRANZ = 176              # Abstand der Werkzeuge von der Mitte
 BALKEN = 72              # Striche rund um den Ring
+ICON_PIXEL = 17          # Kantenlaenge der Werkzeug-Zeichen im Malraster
+# In dieser Reihenfolge gesucht: Windows 11 bringt die erste mit, Windows
+# 10 die zweite -- die Zeichencodes sind dieselben.
+ICON_SCHRIFTEN = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
 VERLAUF_LAENGE = BALKEN // 2
+
+
+def _icon_schrift():
+    """Die vorhandene Icon-Schrift -- oder None.
+
+    Erst zur Laufzeit zu beantworten: QFontDatabase braucht eine laufende
+    QApplication, beim Import gibt es die noch nicht. Fehlt beides, malt
+    der Kranz wieder Punkte statt Zeichen -- lieber schlichter als leer.
+    """
+    vorhanden = set(QFontDatabase.families())
+    for name in ICON_SCHRIFTEN:
+        if name in vorhanden:
+            return name
+    return None
 
 FARBEN = {
     RUHIG: QColor(126, 158, 200),
@@ -75,8 +101,17 @@ class Hud(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.resize(BREITE, HOEHE)
+        # Feste Groesse, nicht resize(): Beim Ueberqueren einer
+        # Skalierungsgrenze rechnet Qt die Fenstergroesse sonst mit dem
+        # DPI-Verhaeltnis um -- und zwar jedes Mal neu. Siehe
+        # _schirm_gewechselt.
+        self.setFixedSize(FENSTER_BREITE, FENSTER_HOEHE)
         self._platzieren()
+        # winId() erzwingt das Fenster, sonst gibt es noch kein
+        # windowHandle, an dem der Bildschirmwechsel haengen koennte.
+        self.winId()
+        if self.windowHandle() is not None:
+            self.windowHandle().screenChanged.connect(self._schirm_gewechselt)
 
         self.zustand = RUHIG
         self.verlauf = deque([0.0] * VERLAUF_LAENGE, maxlen=VERLAUF_LAENGE)
@@ -99,6 +134,14 @@ class Hud(QWidget):
         # Name -> (Zustand, Aufleuchten 0..1)
         self.werkzeuge = {n: [z, 0.0] for n, z in config.WERKZEUGE}
         self.reihenfolge = [n for n, _ in config.WERKZEUGE]
+        self.icon_schrift = _icon_schrift()
+        # Code -> Zeichen, einmal statt sechzigmal je Sekunde.
+        self.icons = {}
+        for name, code in config.WERKZEUG_ICONS.items():
+            try:
+                self.icons[name] = chr(int(code, 16))
+            except (TypeError, ValueError):
+                pass
 
         self.sock = QUdpSocket(self) if lauschen else None
         if lauschen and not self.sock.bind(QHostAddress("127.0.0.1"), ADRESSE[1]):
@@ -123,16 +166,36 @@ class Hud(QWidget):
             # Anzeige unsichtbar und man haelt sie fuer kaputt.
             for schirm in QGuiApplication.screens():
                 g = schirm.availableGeometry()
-                if g.contains(x + BREITE // 2, y + 60):
+                if g.contains(x + FENSTER_BREITE // 2, y + round(60 * SKALA)):
                     self.move(x, y)
                     return
         except (OSError, ValueError, KeyError, TypeError):
             pass
         flaeche = QGuiApplication.primaryScreen().availableGeometry()
         self.move(
-            flaeche.center().x() - BREITE // 2,
-            flaeche.bottom() - HOEHE + 12,
+            flaeche.center().x() - FENSTER_BREITE // 2,
+            flaeche.bottom() - FENSTER_HOEHE + 12,
         )
+
+    def _schirm_gewechselt(self, _schirm=None):
+        """Nach einem Bildschirmwechsel die Groesse wieder festnageln.
+
+        Wer zwei Bildschirme mit verschiedener Skalierung hat, schiebt die
+        Anzeige ueber eine DPI-Grenze. Windows meldet WM_DPICHANGED, und
+        Qt rechnet die Fenstergroesse mit dem Verhaeltnis um -- aber vom
+        bereits umgerechneten Wert aus. Das schaukelt sich auf. Gemessen
+        auf 100 % -> 125 % und zurueck:
+
+            660x548 -> 1031x856 -> 1289x1070 -> 2518x2091
+
+        In der anderen Richtung geht es mit 0,8 je Uebergang nach unten,
+        bis die Anzeige ganz verschwunden ist. Genau so ist es passiert.
+        Die feste Groesse allein reicht nicht: Qt setzt die Schranken beim
+        Umrechnen mit um. Also hier neu setzen, nach jedem Wechsel.
+        """
+        soll = QSize(FENSTER_BREITE, FENSTER_HOEHE)
+        if self.size() != soll:
+            self.setFixedSize(soll)
 
     def _position_merken(self):
         try:
@@ -245,6 +308,9 @@ class Hud(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        # Ab hier wird im gebauten Raster gemalt, nicht in Bildschirm-
+        # pixeln. Deshalb bleiben alle Konstanten unten unveraendert.
+        p.scale(SKALA, SKALA)
         p.setOpacity(self.deckkraft)
         farbe = FARBEN[self.zustand]
 
@@ -319,7 +385,10 @@ class Hud(QWidget):
         r = KRANZ * 1.85
         g = QRadialGradient(MITTE, r)
         for stelle, alpha in ((0.0, 178), (0.45, 146), (0.72, 74), (1.0, 0)):
-            g.setColorAt(stelle, QColor(6, 10, 20, int(alpha * (0.8 + 0.2 * staerke))))
+            # ANZEIGE_GRUND deckt den Untergrund staerker ab; 255 ist die
+            # Grenze, sonst faerbt der Verlauf nach aussen falsch.
+            deckung = alpha * config.ANZEIGE_GRUND * (0.8 + 0.2 * staerke)
+            g.setColorAt(stelle, QColor(6, 10, 20, min(255, int(deckung))))
         p.setPen(Qt.NoPen)
         p.setBrush(g)
         p.drawEllipse(MITTE, r, r * 0.92)
@@ -354,21 +423,59 @@ class Hud(QWidget):
             s.setAlphaF(kraft * 0.35)
             p.setPen(QPen(s, 1.0))
             p.drawLine(
-                QPointF(MITTE.x() + ci * (KRANZ - 26), MITTE.y() + si * (KRANZ - 26)),
-                QPointF(MITTE.x() + ci * (KRANZ - 12), MITTE.y() + si * (KRANZ - 12)),
+                # Endet weiter innen als frueher: ein Zeichen ist hoeher
+                # als ein Punkt, sonst stoesst die Speiche daran an.
+                QPointF(MITTE.x() + ci * (KRANZ - 30), MITTE.y() + si * (KRANZ - 30)),
+                QPointF(MITTE.x() + ci * (KRANZ - 17), MITTE.y() + si * (KRANZ - 17)),
             )
 
-            # Punkt
-            r = 2.6 + glut * 3.0
-            p.setPen(Qt.NoPen)
-            p.setBrush(f)
-            p.drawEllipse(punkt, r, r)
+            zeichen = self.icons.get(name) if self.icon_schrift else None
 
-            # Beschriftung, nach aussen versetzt
+            if zeichen is None:
+                # Punkt -- der Rueckfall, wenn die Icon-Schrift fehlt.
+                r = 2.6 + glut * 3.0
+                p.setPen(Qt.NoPen)
+                p.setBrush(f)
+                p.drawEllipse(punkt, r, r)
+            else:
+                # Aufleuchten: ein weicher Schein HINTER dem Zeichen. Das
+                # Zeichen selbst nur heller zu faerben reicht nicht -- eine
+                # duenne Linie hat zu wenig Flaeche, um aus dem Augenwinkel
+                # aufzufallen. Genau darum geht es hier aber.
+                if glut > 0.02:
+                    weite = ICON_PIXEL * 1.6
+                    sch = QRadialGradient(punkt, weite)
+                    innen = QColor(f)
+                    innen.setAlphaF(min(1.0, 0.50 * glut))
+                    aussen = QColor(f)
+                    aussen.setAlpha(0)
+                    sch.setColorAt(0.0, innen)
+                    sch.setColorAt(1.0, aussen)
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(sch)
+                    p.drawEllipse(punkt, weite, weite)
+
+                zf = QFont(self.icon_schrift)
+                # Waechst beim Aufleuchten leicht mit -- dieselbe Geste wie
+                # beim Punkt vorher, nur sichtbarer.
+                zf.setPixelSize(round(ICON_PIXEL + glut * 3))
+                p.setFont(zf)
+                p.setPen(f)
+                p.setBrush(Qt.NoBrush)
+                kante = ICON_PIXEL * 2
+                p.drawText(
+                    QRectF(punkt.x() - kante / 2, punkt.y() - kante / 2,
+                           kante, kante),
+                    Qt.AlignCenter, zeichen,
+                )
+                p.setFont(schrift)   # zurueck auf die Beschriftung
+
+            # Beschriftung, nach aussen versetzt. Weiter weg als beim
+            # Punkt: ein Zeichen ist gut dreimal so breit.
             breite = mass.horizontalAdvance(name) + 16
             kasten = QRectF(
-                punkt.x() + ci * (breite / 2 + 9) - breite / 2,
-                punkt.y() + si * 15 - 8,
+                punkt.x() + ci * (breite / 2 + 15) - breite / 2,
+                punkt.y() + si * 19 - 8,
                 breite,
                 16,
             )

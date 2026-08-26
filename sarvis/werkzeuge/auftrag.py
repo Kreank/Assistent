@@ -318,6 +318,20 @@ class Werkstatt:
 
     # --- Zustand ------------------------------------------------------------
 
+    def alles_abbrechen(self) -> int:
+        """Jeden laufenden Auftrag anhalten. Rueckgabe: wie viele es waren.
+
+        Fuer das gesprochene "Stopp". Ueber auftrag_abbrechen muesste
+        Sarvis erst die Nummer nennen -- und dazu das Hirn fragen, das
+        genau in diesem Moment nicht mehr gefragt werden soll.
+        """
+        n = 0
+        for a in self.auftraege.values():
+            if a.status == "läuft" and a.aufgabe is not None and not a.aufgabe.done():
+                a.aufgabe.cancel()
+                n += 1
+        return n
+
     def _sichern(self) -> None:
         try:
             config.AUFTRAG_DATEI.write_text(json.dumps([

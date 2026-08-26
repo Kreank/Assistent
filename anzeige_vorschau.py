@@ -7,7 +7,11 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QPainter, QColor, QLinearGradient, QBrush
 from PySide6.QtCore import Qt, QRectF
 app = QApplication(sys.argv)
-from sarvis.hud import Hud, BREITE, HOEHE, DECKKRAFT
+from sarvis.hud import Hud, DECKKRAFT
+# Die Vorschau muss das FENSTER rendern, nicht das Malraster --
+# seit ANZEIGE_SKALA sind das zwei verschiedene Groessen, und mit
+# dem Raster als Bildgroesse waere der Rand abgeschnitten.
+from sarvis.hud import FENSTER_BREITE as BREITE, FENSTER_HOEHE as HOEHE
 from sarvis.anzeige import RUHIG, HOERT, DENKT, SPRICHT
 
 zustaende = [

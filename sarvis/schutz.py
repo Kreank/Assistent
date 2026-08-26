@@ -18,6 +18,7 @@ nicht selbst aendern duerfen, und Befehle, die ein verhoertes "ja" nicht
 tragen wuerde.
 """
 import re
+import shlex
 from pathlib import Path
 
 from . import config
@@ -462,7 +463,9 @@ def sprechbar(pfad: str, fall: str = "akkusativ") -> str:
 # das beantwortet man nicht, das erduldet man.
 _ABSICHTEN = (
     (r"^(Get-ChildItem|gci|dir|ls|tree)\b", "nachsehen, was in {} liegt",
-     "nachsehen, was dort liegt"),
+     # Kein "dort": Ohne Argument MEINT der Befehl den Arbeitsordner --
+     # das ist eine Auskunft, "dort" ist keine.
+     "nachsehen, was im aktuellen Ordner liegt"),
     (r"^(Get-Content|type|cat)\b", "{} lesen", "eine Datei lesen"),
     (r"^(Remove-Item|del|rm|rmdir)\b", "{} löschen", "etwas löschen"),
     (r"^(New-Item|mkdir|md)\b", "{} anlegen", "etwas anlegen"),
@@ -484,14 +487,58 @@ _ABSICHTEN = (
 )
 
 
+def _erstes_ziel(rest: str) -> str:
+    """Das erste Argument, das ein Ziel sein koennte -- ohne Schalter.
+
+    Frueher galt nur ein voller Pfad mit Laufwerksbuchstaben als Ziel.
+    Ein relativer wie "app/routers" oder schlicht "tests" wurde
+    uebersehen, und uebrig blieb die Frage "Soll ich nachsehen, was DORT
+    liegt?" -- die kann niemand beantworten, der nur zuhoert. Genau
+    daran ist es im Betrieb gescheitert.
+
+    shlex statt eigener Zerlegung, damit ein Pfad mit Leerzeichen in
+    Anfuehrungszeichen ein Argument bleibt. posix=False, weil der
+    Backslash hier Pfadtrenner ist und kein Fluchtzeichen.
+    """
+    try:
+        stuecke = shlex.split(rest, posix=False)
+    except ValueError:          # unpaarige Anfuehrungszeichen
+        stuecke = rest.split()
+    for wort in stuecke:
+        wort = wort.strip("\"").strip("'")
+        # Schalter (-Recurse, --long, /s), Variablen und Verkettungen
+        # sind kein Ziel.
+        if not wort or wort[0] in "-/$" or wort in ("|", "&", "&&", ";"):
+            continue
+        return wort
+    return ""
+
+
+def _wie_pfad(wort: str) -> bool:
+    """Sieht das Argument ueberhaupt nach einem Ort aus?
+
+    Ohne diese Frage wurde aus "docker compose up" ein "Soll ich einen
+    Befehl auf compose ausfuehren?" -- ein Unterbefehl als Ort verkauft.
+    Dann lieber den Befehl selbst nennen.
+    """
+    try:
+        p = Path(wort)
+    except (OSError, ValueError):
+        return False
+    return len(p.parts) > 1 or bool(p.suffix) or wort in (".", "..")
+
+
 def absicht(befehl: str) -> str:
     """Was der Befehl vorhat, in wenigen Worten -- zum Vorlesen."""
     b = " ".join(str(befehl or "").split())
     erster = b.split("|")[0].strip()
     pfade = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", b)
     # "was in X liegt" verlangt Dativ, "X lesen" Akkusativ.
-    ziel_dativ = sprechbar(pfade[0], "dativ") if pfade else ""
-    ziel = sprechbar(pfade[0]) if pfade else ""
+    # Kein voller Pfad? Dann taugt das erste Argument als Ziel.
+    teile = erster.split(None, 1)
+    roh = pfade[0] if pfade else _erstes_ziel(teile[1] if len(teile) > 1 else "")
+    ziel_dativ = sprechbar(roh, "dativ") if roh else ""
+    ziel = sprechbar(roh) if roh else ""
 
     for muster, mit_ziel, ohne_ziel in _ABSICHTEN:
         if re.match(muster, erster, re.IGNORECASE):
@@ -499,9 +546,12 @@ def absicht(befehl: str) -> str:
                 dativ = " in {}" in mit_ziel or mit_ziel.startswith("in {}")
                 return mit_ziel.format(ziel_dativ if dativ else ziel)
             return ohne_ziel
-    if ziel:
+    if ziel and _wie_pfad(roh):
         return f"einen Befehl auf {ziel} ausführen"
-    return "einen Befehl auf deinem Rechner ausführen"
+    # Letzter Ausweg: den Befehl selbst nennen. Einen kurzen vorzulesen
+    # ist zumutbar, seit die Alternative "einen Befehl auf deinem
+    # Rechner" heisst -- das ist keine Frage, das ist ein Blankoscheck.
+    return f"den Befehl {kurz_befehl(b, 60)} ausführen"
 
 
 def kurz_befehl(befehl: str, laenge: int = 90) -> str:

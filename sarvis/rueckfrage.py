@@ -319,6 +319,48 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     return f"Soll ich {werkzeug} ausführen{', mit ' + teile if teile else ''}?"
 
 
+# Woerter, die einen laufenden Vorgang beenden. Bewusst getrennt von den
+# NEIN-Woertern: Ein "nein" beantwortet eine Frage, ein "stopp" bricht ab,
+# ohne dass eine Frage offen steht.
+_STOPP_WORTE = {"stopp", "stop", "stoppen", "stoppe", "aufhören", "aufhoeren",
+                "abbrechen", "abbruch", "beenden", "beende"}
+# Dieselbe Absicht in zwei Woertern.
+_STOPP_PAARE = (("hör", "auf"), ("hoer", "auf"), ("hört", "auf"),
+                ("brich", "ab"), ("sei", "still"), ("lass", "das"))
+# Diese zaehlen nur in einem KURZEN Zuruf. "halt" ist im Deutschen ein
+# Fuellwort ("das ist halt so") -- als Abbruchbefehl gilt es nur, wenn
+# nicht viel anderes daneben steht.
+_STOPP_KURZ = {"halt", "still", "schluss", "ruhe"}
+# Wird eines davon genannt, ist ein bestimmtes Ding gemeint und nicht
+# alles. "Timer beenden" oder "stopp die Musik" haben ihr eigenes
+# Werkzeug -- ein Not-Aus daraus zu machen waere schlimmer als die
+# Rueckfrage, die es ersetzt.
+_ANDERES = {"timer", "wecker", "uhr", "musik", "lied", "song", "titel",
+            "wiedergabe", "programm", "programme", "fenster", "app"}
+
+
+def ist_stopp(text: str) -> bool:
+    """Heisst dieser Zuruf: sofort aufhoeren?
+
+    Wird VOR dem Hirn gefragt. Sonst antwortet Claude auf "hör auf" mit
+    einem Lagebericht statt aufzuhoeren -- genau das ist passiert.
+    """
+    worte = [w.strip(".,!?;:-–\"'„“»«") for w in (text or "").lower().split()]
+    menge = {w for w in worte if w}
+    if not menge:
+        return False
+    if menge & _ANDERES:
+        return False
+    if menge & _STOPP_WORTE:
+        return True
+    for a, b in _STOPP_PAARE:
+        if a in menge and b in menge:
+            return True
+    if menge & _STOPP_KURZ and (len(worte) <= 3 or worte[0] in _STOPP_KURZ):
+        return True
+    return False
+
+
 NACHHAKEN = "Ich habe das nicht verstanden. Ja oder nein?"
 ABGELEHNT = "Gut, ich lasse es."
 ABGELAUFEN = "Ich habe keine Antwort bekommen und lasse es lieber."

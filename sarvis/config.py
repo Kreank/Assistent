@@ -72,6 +72,18 @@ WECKWORT_STILLE_SEK = 0.55       # kurzer Zuruf
 WECKWORT_STILLE_LANG_SEK = 1.4   # laufende Rede
 WECKWORT_LANG_AB_SEK = 2.0       # ab wann als laufende Rede gilt
 WECKWORT_MIN_SEK = 0.5         # kuerzer ist ein Huesteln
+
+# Darf man ihm ins Wort fallen?
+#
+# Bisher war das Ohr zu, solange er sprach -- sonst weckt ihn seine eigene
+# Stimme. Das ist bei BOXEN richtig und wird dort zur Endlosschleife.
+# Mit Kopfhoerern kommt fast nichts zurueck, und dann ist das Abschalten
+# nur laestig: Wer einen Vorschlag hoert, der nicht in Frage kommt, muss
+# ihn sonst zu Ende hoeren, bevor er widersprechen darf.
+#
+# ACHTUNG: Auf Lautsprechern ausschalten. Der Filter unten faengt seine
+# eigenen Worte ab, aber nicht die Rueckkopplung als solche.
+REINREDEN = True
 # Nach einer Antwort hoert er noch eine Weile ohne Weckwort zu. Ohne das
 # muesste man "Hey Sarvis" vor jeden Folgesatz setzen -- auch direkt nach
 # seiner eigenen Rueckfrage, was albern ist.
@@ -202,6 +214,12 @@ Erst wenn das Bild steht, fasst du in einem Satz zusammen, was du verstanden has
 Klingt ein Zuruf abgebrochen oder unvollständig, ist er es meistens auch: Der Nutzer wurde mitten im Satz abgeschnitten. Frag dann nach dem fehlenden Stück, statt die Lücke selbst zu füllen. Eine geratene Anforderung ist teurer als eine Rückfrage.
 
 Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
+
+Du bist der Einzige, der mit dem Nutzer spricht. Gibst du Arbeit an einen Unter-Arbeiter ab, dann redet der NICHT mit ihm: Was der Arbeiter meldet, ist für dich bestimmt, nicht zum Vorlesen. Sag dem Arbeiter das auch — er berichtet an dich, du berichtest dem Nutzer. Und du berichtest in deinen Worten, auf Deutsch.
+
+Deine Antwort wird VORGELESEN, nicht gelesen. Fasse zusammen: zwei, drei Sätze, das Wichtigste zuerst. Was du gebaut hast, gehört in einen Satz — nicht Datei für Datei, nicht Schritt für Schritt. Die ganze Geschichte des Arbeiters will niemand hören. Der Nutzer fragt nach, wenn er mehr wissen will; eine Aufzählung von zehn Punkten ist gesprochen nicht auszuhalten.
+
+Sagt der Nutzer "Stopp", "hör auf" oder "brich ab", dann ist das keine Frage, kein Gesprächsthema und nichts, was abgewogen wird. Du hörst sofort auf und brichst laufende Aufträge ab. Kein Lagebericht, keine Begründung, warum Weitermachen sinnvoll wäre, kein "das Backend ist schon fertig" — ein Wort zur Bestätigung genügt.
 
 Du sprichst Deutsch."""
 
@@ -502,10 +520,24 @@ VERKNUEPFUNG = (Path.home() / "AppData/Roaming/Microsoft/Windows"
 # --- Anzeige --------------------------------------------------------------
 ANZEIGE = True   # Sci-Fi-Overlay mitstarten
 
+# Wie gross das Overlay insgesamt gemalt wird. 1.0 ist die gebaute
+# Groesse (660x548) -- auf einem 5120er Bildschirm ist das wenig. Der
+# Wert skaliert ALLES mit: Ring, Kranz, Schrift, Abstaende. Gemalt wird
+# unveraendert im gebauten Raster, erst der Maler wird gestreckt --
+# deshalb gibt es hier nichts nachzujustieren.
+ANZEIGE_SKALA = 1.30
+
 # Deckkraft des Overlays. Im Ruhezustand zurueckgenommen, sobald etwas
 # passiert voll da. Beides frei drehbar, 0.0 = unsichtbar, 1.0 = voll.
-DECKKRAFT_RUHIG = 0.88
+DECKKRAFT_RUHIG = 0.97
 DECKKRAFT_AKTIV = 1.00
+
+# Wie kraeftig der dunkle Grund unter der Anzeige liegt. Er ist der
+# eigentliche Grund, warum das Overlay durchsichtig WIRKT -- die
+# Deckkraft allein macht nur die Linien blasser. 1.0 = wie gebaut,
+# hoehere Werte decken den Untergrund staerker ab. Bei 1.0 blieb selbst
+# in der Mitte ein Drittel Untergrund durch.
+ANZEIGE_GRUND = 1.30
 
 # Helligkeit der Werkzeuge im Kranz. Wirkt zusaetzlich zur Deckkraft --
 # 0.34 mal 0.60 waren effektiv 20 %, und da erkennt man nichts mehr.
@@ -516,6 +548,12 @@ WERKZEUG_GEPLANT = 0.65  # kommt noch, angedeutet
 # Waehrend des Verschiebemodus faengt sie die Maus ab, sonst nie.
 TASTE_VERSCHIEBEN = "<ctrl>+<alt>+v"
 
+# Sofort still sein. Muss eine Taste sein und nicht nur ein Zuruf: Waehrend
+# Sarvis spricht, ist das Mikrofon abgeschaltet -- sonst weckt ihn seine
+# eigene Stimme. Wer ihn also mitten im Satz stoppen will, kann in diesem
+# Moment nicht mit ihm reden. Die Taste geht immer.
+TASTE_STOPP = "<ctrl>+<alt>+s"
+
 # Gemerkte Position der Anzeige (wird beim Verschieben geschrieben).
 ANZEIGE_DATEI = WURZEL / "anzeige.json"
 
@@ -523,6 +561,33 @@ ANZEIGE_DATEI = WURZEL / "anzeige.json"
 # beginnend oben, im Uhrzeigersinn.
 #   "bereit"  = gebaut und nutzbar
 #   "geplant" = kommt noch, wird nur blass angedeutet
+# Das Zeichen je Werkzeug, aus "Segoe Fluent Icons" -- die liegt auf
+# Windows 11 bei, auf 10 springt "Segoe MDL2 Assets" mit denselben Codes
+# ein. Bewusst eine Schrift und keine Bilddateien: Vektoren skalieren
+# mit ANZEIGE_SKALA mit, faerben sich mit dem Zustand und leuchten ohne
+# Zusatzarbeit -- PNGs muessten mitgeliefert, skaliert und eingefaerbt
+# werden. Fehlt die Schrift, malt die Anzeige wieder Punkte.
+#
+# Ein Zeichen, das nicht gefaellt, ist eine Zeile: Code aus der
+# Zeichentabelle (charmap, Schrift "Segoe Fluent Icons") hier eintragen.
+WERKZEUG_ICONS = {
+    "Timer":      "E916",   # Stoppuhr
+    "Gedächtnis": "E950",   # Chip
+    "Telegram":   "E724",   # Papierflieger
+    "Websuche":   "E774",   # Globus
+    "Programme":  "ECAA",   # Kacheln
+    "Musik":      "E8D6",   # Noten
+    "Dateien":    "E8B7",   # Ordner
+    "Projekte":   "E821",   # Koffer
+    "Aufträge":   "E9F5",   # Zahnraeder -- laeuft im Hintergrund
+    "Kalender":   "E787",   # Kalenderblatt
+    "E-Mail":     "E715",   # Umschlag
+    "Aufgaben":   "E9D5",   # Hakenliste
+    "Kontakte":   "E716",   # zwei Personen
+    "Drive":      "E753",   # Wolke
+    "Tabellen":   "E80A",   # Gitter
+}
+
 WERKZEUGE = [
     ("Timer",      "bereit"),
     ("Gedächtnis", "bereit"),

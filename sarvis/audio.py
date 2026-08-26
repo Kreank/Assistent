@@ -105,6 +105,10 @@ class Lautsprecher:
     def __init__(self, melden: Callable[[float], None] | None = None):
         self.melden = melden
         self._schlange: queue.Queue = queue.Queue()
+        # Wird beim Abbrechen gesetzt: sonst laeuft die Pegelschleife unten
+        # die volle Satzlaenge weiter, obwohl laengst nichts mehr zu hoeren
+        # ist -- der Ring schlaegt dann zu einer Stimme aus, die schweigt.
+        self._abbruch = threading.Event()
         self.leer = threading.Event()
         self.leer.set()
         self._faden = threading.Thread(target=self._schleife, daemon=True)
@@ -141,7 +145,7 @@ class Lautsprecher:
         i = 0
         while True:
             vergangen = time.perf_counter() - beginn
-            if vergangen >= dauer:
+            if vergangen >= dauer or self._abbruch.is_set():
                 break
             i = min(len(huelle) - 1, int(vergangen / HOP))
             self.melden(float(huelle[i]))
@@ -165,6 +169,7 @@ class Lautsprecher:
                     self.leer.set()
 
     def sagen(self, proben: np.ndarray, rate: int) -> None:
+        self._abbruch.clear()
         self.leer.clear()
         self._schlange.put((proben, rate))
 
@@ -175,6 +180,7 @@ class Lautsprecher:
         stoppen. Andersherum zieht der Abspielfaden den naechsten Satz
         heraus und redet weiter.
         """
+        self._abbruch.set()
         while True:
             try:
                 self._schlange.get_nowait()
