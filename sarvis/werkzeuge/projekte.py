@@ -16,12 +16,13 @@ aufgeloesten Pfad -- nicht an der Vernunft des Modells.
 """
 import re
 import subprocess
+from pathlib import Path
 import sys
 from datetime import datetime
 
 from claude_agent_sdk import tool
 
-from .. import config
+from .. import config, schutz
 
 UMLAUTE = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
                          "Ä": "Ae", "Ö": "Oe", "Ü": "Ue"})
@@ -84,6 +85,151 @@ def _finden(name: str):
         if ziel is not None and ziel.exists():
             return ziel, ort
     return None, None
+
+
+
+# Woran man erkennt, was an einem Ort gemacht wird. Reihenfolge zaehlt:
+# Das Spezifischere zuerst, sonst ist jedes Angular-Projekt nur ein
+# "Node-Projekt".
+_MARKER = (
+    ("angular.json", "Angular-Frontend"),
+    ("next.config.js", "Next.js-Frontend"),
+    ("vite.config.ts", "Vite-Frontend"),
+    ("package.json", "Node-Projekt"),
+    ("pyproject.toml", "Python-Projekt"),
+    ("requirements.txt", "Python-Projekt"),
+    ("docker-compose.yml", "Docker-Aufbau"),
+    ("Dockerfile", "Docker-Aufbau"),
+    ("Cargo.toml", "Rust-Projekt"),
+    ("go.mod", "Go-Projekt"),
+    ("index.html", "Webseite"),
+)
+
+# Ordner, die nichts ueber den Ort aussagen, aber alles ueberwiegen
+# wuerden: In node_modules liegen mehr Dateien als im ganzen Projekt.
+_UEBERGEHEN = {".git", "node_modules", ".venv", "venv", "__pycache__",
+               "dist", "build", ".next", ".angular", ".idea", ".vscode"}
+
+_TEXTARTEN = {".md", ".txt", ".pdf", ".docx", ".doc", ".rtf", ".odt"}
+_BILDARTEN = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".mp4",
+              ".mov", ".psd", ".ai", ".blend"}
+_CODEARTEN = {".py", ".ts", ".js", ".tsx", ".jsx", ".html", ".css", ".scss",
+              ".java", ".cs", ".go", ".rs", ".php", ".sql", ".sh", ".ps1"}
+
+
+def _durchgehen(wurzel, tiefe=3):
+    """Dateien sammeln, ohne sich in node_modules zu verlieren."""
+    dateien = []
+    def rein(ordner, stufe):
+        if stufe > tiefe:
+            return
+        try:
+            eintraege = list(ordner.iterdir())
+        except OSError:
+            return
+        for e in eintraege:
+            if e.name in _UEBERGEHEN or e.name.startswith("."):
+                if e.name not in (".gitignore", ".env.example"):
+                    continue
+            if e.is_dir():
+                rein(e, stufe + 1)
+            elif e.is_file():
+                dateien.append(e)
+            if len(dateien) > 4000:      # Notbremse, nicht Genauigkeit
+                return
+    rein(wurzel, 1)
+    return dateien
+
+
+def _git_stand(ordner):
+    """Zweig, letzter Commit und ob etwas offen ist -- oder ''."""
+    if not (ordner / ".git").exists():
+        return ""
+    def git(*args):
+        try:
+            e = subprocess.run(["git", *args], cwd=ordner, capture_output=True,
+                               text=True, timeout=6)
+            return e.stdout.strip() if e.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    zweig = git("rev-parse", "--abbrev-ref", "HEAD")
+    letzter = git("log", "-1", "--format=%s (%cr)")
+    offen = [z for z in git("status", "--porcelain").splitlines() if z.strip()]
+    teile = []
+    if zweig:
+        teile.append(f"Zweig {zweig}")
+    if letzter:
+        teile.append(f"zuletzt: {letzter}")
+    teile.append(f"{len(offen)} offene Änderungen" if offen
+                 else "nichts Offenes")
+    return "; ".join(teile)
+
+
+def lage(ordner) -> str:
+    """Was fuer ein Ort ist das? Ein kurzer Bericht fuer das Modell.
+
+    Der Zweck ist nicht Vollstaendigkeit, sondern eine gute naechste
+    Frage. Wer sieht, dass dort ein halbfertiges Angular-Frontend liegt,
+    fragt "weiterbauen?" -- und nicht "was soll rein?".
+    """
+    dateien = _durchgehen(ordner)
+    if not dateien:
+        return f"{ordner.name}: leer oder nicht lesbar."
+
+    namen = {d.name for d in dateien}
+    arten = {}
+    for d in dateien:
+        arten[d.suffix.lower()] = arten.get(d.suffix.lower(), 0) + 1
+
+    zeilen = [f"Ort: {ordner}", f"{len(dateien)} Dateien"]
+
+    gefunden = []
+    for marker, was in _MARKER:
+        if marker in namen and was not in gefunden:
+            gefunden.append(was)
+    if gefunden:
+        zeilen.append("Erkannt: " + ", ".join(gefunden[:3]))
+
+    text = sum(n for a, n in arten.items() if a in _TEXTARTEN)
+    bild = sum(n for a, n in arten.items() if a in _BILDARTEN)
+    code = sum(n for a, n in arten.items() if a in _CODEARTEN)
+    if not gefunden:
+        if text > len(dateien) * 0.5:
+            zeilen.append("Ueberwiegend Texte -- Anleitungen, Notizen, "
+                          "Dokumente.")
+        elif bild > len(dateien) * 0.5:
+            zeilen.append("Ueberwiegend Bilder oder Videos.")
+        elif code > len(dateien) * 0.3:
+            zeilen.append("Ueberwiegend Quelltext, aber keine bekannte "
+                          "Projektdatei.")
+    zeilen.append("Dateiarten: " + ", ".join(
+        f"{a or 'ohne'} {n}" for a, n in
+        sorted(arten.items(), key=lambda x: -x[1])[:6]))
+
+    if text and (text > code or not gefunden):
+        titel = [d.stem for d in dateien
+                 if d.suffix.lower() in _TEXTARTEN][:8]
+        if titel:
+            zeilen.append("Dokumente u.a.: " + ", ".join(titel))
+
+    git = _git_stand(ordner)
+    if git:
+        zeilen.append("Git: " + git)
+
+    neu = sorted(dateien, key=lambda d: -d.stat().st_mtime)[:5]
+    zeilen.append("Zuletzt geändert: " + "; ".join(
+        f"{d.relative_to(ordner)} ({datetime.fromtimestamp(d.stat().st_mtime):%d.%m. %H:%M})"
+        for d in neu))
+
+    liesmich = ordner / "README.md"
+    if liesmich.exists():
+        try:
+            anfang = " ".join(liesmich.read_text(
+                encoding="utf-8", errors="replace").split())[:300]
+            zeilen.append("README: " + anfang)
+        except OSError:
+            pass
+    return "\n".join(zeilen)
 
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:
@@ -254,4 +400,51 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"Terminal für {ziel.name} ist offen."}]}
 
-    return [projekt_anlegen, projekt_liste, projekt_oeffnen]
+    @tool(
+        "ort_ansehen",
+        "Sieht sich einen Ordner oder ein Projekt an und sagt, WAS für ein "
+        "Ort das ist: Wird dort entwickelt und womit, wie weit ist es, "
+        "liegen dort Anleitungen, Bilder oder Notizen? Mit Git-Stand und "
+        "den zuletzt geänderten Dateien. "
+        "BENUTZE DAS, wenn der Nutzer den Ort wechselt ('gehen wir mal ins "
+        "Projekt X', 'was liegt in Y'). Öffne dafür KEIN Terminal. Und frag "
+        "danach etwas, das zu dem passt, was du siehst — bei angefangener "
+        "Arbeit, ob weitergebaut werden soll; bei einer Sammlung von "
+        "Anleitungen, ob du zusammenfassen oder etwas Bestimmtes suchen "
+        "sollst.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Projektname oder ganzer Pfad."},
+            },
+            "required": ["name"],
+        },
+    )
+    async def ort_ansehen(args):
+        roh = (args.get("name") or "").strip()
+        ziel, _ort = _finden(roh)
+        if ziel is None:
+            try:
+                versuch = Path(roh).expanduser()
+                if versuch.is_dir():
+                    ziel = versuch.resolve()
+            except (OSError, ValueError):
+                ziel = None
+        if ziel is None or not ziel.is_dir():
+            return {"content": [{"type": "text", "text":
+                    f"Den Ort {roh} finde ich nicht."}], "is_error": True}
+
+        # Dieses Werkzeug laeuft ohne Rueckfrage. Damit das vertretbar
+        # bleibt, gilt hier dieselbe Grenze wie beim stillen Auflisten --
+        # sonst waere es ein Weg, an der Pruefung vorbei in fremde Ordner
+        # zu sehen.
+        if schutz.auflisten_stufe(str(ziel)) != "frei":
+            return {"content": [{"type": "text", "text":
+                    "Dort sehe ich nicht ungefragt nach. Nimm ordner_ansehen "
+                    "— das fragt den Nutzer."}], "is_error": True}
+
+        blinken()
+        return {"content": [{"type": "text", "text": lage(ziel)}]}
+
+    return [projekt_anlegen, projekt_liste, projekt_oeffnen, ort_ansehen]

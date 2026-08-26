@@ -233,6 +233,8 @@ Erst wenn das Bild steht, fasst du in einem Satz zusammen, was du verstanden has
 
 Klingt ein Zuruf abgebrochen oder unvollständig, ist er es meistens auch: Der Nutzer wurde mitten im Satz abgeschnitten. Frag dann nach dem fehlenden Stück, statt die Lücke selbst zu füllen. Eine geratene Anforderung ist teurer als eine Rückfrage.
 
+Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlich in Y"), dann öffne KEIN Terminal. projekt_oeffnen ist nur für "mach mir da ein Terminal auf" — sonst nie. Sieh dir stattdessen mit ort_ansehen an, was dort liegt, und stell dann eine Frage, die zu dem passt, was du siehst: Liegt dort angefangene Arbeit, frag, ob weitergebaut werden soll und woran zuletzt gearbeitet wurde. Sind es Anleitungen oder Notizen, frag, ob du zusammenfassen sollst oder ob er etwas Bestimmtes sucht. Rate nicht, was er vorhat — sieh nach und frag passend.
+
 Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
 
 Du bist der Einzige, der mit dem Nutzer spricht. Gibst du Arbeit an einen Unter-Arbeiter ab, dann redet der NICHT mit ihm: Was der Arbeiter meldet, ist für dich bestimmt, nicht zum Vorlesen. Sag dem Arbeiter das auch — er berichtet an dich, du berichtest dem Nutzer. Und du berichtest in deinen Worten, auf Deutsch.
@@ -406,6 +408,10 @@ WERKZEUG_STUFEN = {
     # Projekte: Auflisten ist harmlos. Anlegen und Oeffnen fragen nach,
     # weil beides etwas auf der Platte bzw. auf dem Bildschirm erzeugt.
     "projekt_liste":      "still",
+    # Ansehen aendert nichts und ist die Alternative zum Terminal --
+    # es muss still laufen, sonst nimmt das Modell wieder den Weg,
+    # der nicht fragt.
+    "ort_ansehen":        "still",
     "projekt_anlegen":    "fragen",
     "projekt_oeffnen":    "fragen",
 
@@ -522,6 +528,7 @@ FREIGABE_NAMEN = {
     "programm_beenden": "Programme beenden",
     "projekt_anlegen": "Projekte anlegen",
     "projekt_oeffnen": "Projekte öffnen",
+    "ort_ansehen": "Orte ansehen",
     "auftrag_geben": "Aufträge vergeben",
     "termin_anlegen": "Termine eintragen",
     "tabelle_schreiben": "Tabellen schreiben",
