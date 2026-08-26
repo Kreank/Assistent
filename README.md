@@ -374,16 +374,105 @@ redet; wer im Büro sitzt, drückt. Solange die Frage offen steht, braucht
 das „ja" **kein Weckwort** — auf eine Frage, die er gerade selbst
 gestellt hat, wäre das albern.
 
-Drei Dinge, die dabei nicht offensichtlich sind:
+#### Vier Antworten, nicht zwei
 
-**Verneinung wird zuerst geprüft.** „Ja, aber nicht jetzt" ist kein Ja.
+Lange gab es nur ja, nein und „nicht verstanden". Das war zu grob, und
+zwar messbar: Weil Verneinungen im **ganzen Satz** gesucht wurden und
+`lass` als Absage galt, wurde
 
-**Unklar ist kein Nein.** Wer etwas antwortet, das weder ja noch nein
-ist, wird einmal nachgefragt, statt dass geraten wird.
+> „Ja, lass uns das machen"
+
+als **Nein** verstanden. Ebenso „ja, warte kurz" und „mach das, aber
+nicht löschen". Umgekehrt fehlten „auf jeden Fall", „jup", „sicher" und
+„tu das" in der Ja-Liste — darauf kam ein Nachhaken, obwohl die Antwort
+eindeutig war. Beides fühlte sich an, als höre er nicht zu.
+
+Geprüft wird deshalb **wortweise und am Satzanfang**, und es gibt einen
+vierten Ausgang:
+
+| | |
+|---|---|
+| **ja** | wird ausgeführt |
+| **nein** | wird nicht ausgeführt |
+| **anders** | wird nicht ausgeführt — aber es war keine Absage |
+| **unklar** | einmal nachhaken |
+
+**„Anders" ist der eigentliche Gewinn.** „Ja, aber nur die erste" ist
+keine Zustimmung zu dem, was gefragt wurde. Vorher lief das Werkzeug mit
+den ursprünglichen Angaben los, und Sarvis erfuhr **nie**, dass etwas
+eingeschränkt worden war — die Erlaubnisschicht meldet nur ja oder nein
+zurück, nicht den Satz. Jetzt geht der Wortlaut mit, und Sarvis setzt
+dieselbe Sache geändert neu an.
+
+Aus demselben Grund geht auch ein Satz weiter, den er zweimal nicht als
+Antwort deuten konnte, sofern er aus mindestens drei Wörtern besteht:
+Wer mitten in einer Rückfrage „ach, mach lieber erst die Mail von
+gestern auf" sagt, erteilt einen neuen Auftrag. Kurze Laute — „ähm",
+„hm" — bleiben ein Missverständnis.
 
 **Im Zweifel wird abgelehnt.** Nach 25 Sekunden ohne Antwort
 (`RUECKFRAGE_SEKUNDEN`) gilt die Handlung als abgelehnt. Ein Assistent,
 der im Zweifel handelt, ist schlimmer als einer, der im Zweifel fragt.
+
+#### Sarvis fragt nicht selbst um Erlaubnis
+
+Es gab **zwei** Fragewege, die nichts voneinander wussten: Claude fragte
+im Text „Soll ich das anlegen?", man sagte „ja, mach das" — und *dann*
+kam die eigentliche Rückfrage der Erlaubnisschicht. Zweimal dasselbe
+hintereinander.
+
+Im Systemprompt stand nämlich kein Wort darüber, dass ohnehin gefragt
+wird. Jetzt steht es dort: **Sarvis fragt nie um Erlaubnis.** Er sagt
+an, was er tut, und tut es — das laute Nachfragen übernimmt das System,
+mit seinen Worten, kurz bevor es geschieht.
+
+Rückfragen zur **Sache** bleiben davon unberührt. Fehlt eine Angabe, die
+er nicht erraten kann — welche Anna, welcher Termin —, fragt er
+selbstverständlich. Der Unterschied: Er fragt, *was* gemeint ist, nicht
+*ob* er darf.
+
+### Freigaben auf Zeit
+
+„Ja, und frag die nächste halbe Stunde nicht mehr." Ein Assistent, der
+alle zehn Sekunden dieselbe Erlaubnis einholt, wird abgeschaltet.
+
+Ausgelöst wird es nicht über eine Einstellung, sondern durch das, was man
+sowieso sagen würde:
+
+> „Ja, frag nicht nochmal." — „Ja, für die nächste halbe Stunde." —
+> „Mach das, du musst nicht mehr fragen."
+
+Ein blosses „ja" bleibt ein einzelnes Ja. Bequemlichkeit allein darf
+keine Dauererlaubnis erzeugen.
+
+Eine Freigabe hängt an **zwei** Dingen, nicht an einem:
+
+```
+was   das Werkzeug   Dateien lesen
+wo    der Ort        unter D:\Mitra\MCN  (und darunter)
+```
+
+Nur am Werkzeug wäre zu breit — wer Lesen im Projektordner freigibt,
+hätte damit auch Lesen in `D:\Strato Server` freigegeben. Nur am Ort
+wäre ebenso falsch: lesen dürfen heißt nicht schreiben dürfen.
+
+Drei Dinge sind dabei Absicht:
+
+**Zeitlich begrenzt.** Vorgabe 30 Minuten (`FREIGABE_MINUTEN`),
+Obergrenze vier Stunden (`FREIGABE_MAX_MINUTEN`), und ein Neustart hebt
+jede auf. Es gibt bewusst kein „für immer": Eine Freigabe, an die man
+sich nicht mehr erinnert, ist keine Zusage mehr, sondern eine
+Einstellung — und die gehört in `config.py`, wo man sie sieht.
+
+**Sichtbar.** Solange eine läuft, steht sie in der Anzeige und blendet
+sich beim Ablaufen selbst wieder aus. Sie steht außerdem im Vorspann
+jedes Zurufs, damit Sarvis selbst weiß, was gerade ohne Rückfrage
+durchgeht, statt es raten zu müssen.
+
+**Nicht für alles.** Was hinausgeht und sich nicht zurückholen lässt —
+Mail, Telegram, Dateifreigabe, Löschen im Gedächtnis, Termine absagen —
+steht in `FREIGABE_NIE` und fragt jedes Mal. Dort ist die Rückfrage
+nicht das Lästige am Vorgang, sondern der Zweck.
 
 ### Timer und Wecker
 

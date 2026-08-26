@@ -53,15 +53,20 @@ class Hirn:
              "Bash": "Dateien"}
 
     def __init__(self, werkzeuge=None, namen=None, leuchten=None,
-                 nachfragen=None, protokoll=None, zustand_zeile=None):
+                 nachfragen=None, protokoll=None, zustand_zeile=None,
+                 freigaben=None):
         self.klient: ClaudeSDKClient | None = None
         self.letzte_kosten: float | None = None
         self.hinweise: list[str] = []
         self.werkzeuge = werkzeuge   # In-Process-Werkzeugserver oder None
         self.namen = namen or []
         self.leuchten = leuchten
-        # nachfragen(kurzname, eingabe) -> bool; von Sarvis gestellt
+        # nachfragen(kurzname, eingabe) -> (entscheidung, wortlaut);
+        # von Sarvis gestellt. entscheidung ist "ja", "nein" oder "anders".
         self.nachfragen = nachfragen
+        # Laufende Freigaben auf Zeit ("frag die naechste halbe Stunde
+        # nicht mehr"). Siehe freigabe.py.
+        self.freigaben = freigaben
         self._offen = False  # laeuft gerade eine Antwortrunde?
         self.protokoll = protokoll   # was in diesem Zug schon wirkte
         self._nachtrag = ""          # Hinweis fuer den naechsten Zuruf
@@ -177,16 +182,38 @@ class Hirn:
             )
 
         if stufe == "fragen":
+            # Eine laufende Freigabe ersetzt die Rueckfrage -- aber nur
+            # fuer dasselbe Werkzeug am selben Ort, und nur solange sie
+            # laeuft. Das ist die einzige Stelle, an der etwas ohne
+            # Nachfrage durchgeht, das sonst fragen wuerde.
+            if self.freigaben is not None and self.freigaben.erlaubt(kurz, eingabe):
+                print(f"  ~ {kurz}: läuft unter einer Freigabe durch")
+                return PermissionResultAllow()
+
             if self.nachfragen is None:
                 return PermissionResultDeny(
                     message="Rückfragen sind gerade nicht möglich."
                 )
-            erlaubt = await self.nachfragen(kurz, eingabe)
-            if erlaubt:
+
+            entscheidung, wortlaut = await self.nachfragen(kurz, eingabe)
+            if entscheidung == "ja":
                 return PermissionResultAllow()
+
+            # Der Wortlaut geht mit. Ohne ihn erfaehrt das Modell nur
+            # "abgelehnt" und nie, WAS gesagt wurde -- eine Einschraenkung
+            # wie "ja, aber nur die erste" war damit verloren, bevor sie
+            # irgendwo ankommen konnte.
+            gesagt = f' Er sagte: "{wortlaut}".' if wortlaut else ""
+            if entscheidung == "anders":
+                return PermissionResultDeny(
+                    message="Der Nutzer hat nicht abgelehnt, sondern es "
+                            f"anders gewollt.{gesagt} Setz dieselbe Sache "
+                            "geändert noch einmal an. Frag nicht, ob du "
+                            "darfst — tu es einfach richtig."
+                )
             return PermissionResultDeny(
-                message="Der Nutzer hat abgelehnt. Tu es nicht und frag nicht "
-                        "nochmal nach."
+                message=f"Der Nutzer hat abgelehnt.{gesagt} Tu es nicht und "
+                        "frag nicht nochmal nach."
             )
 
         return PermissionResultDeny(
@@ -255,6 +282,13 @@ class Hirn:
             laufendes = self.zustand_zeile()
             if laufendes:
                 vorspann += "\n" + laufendes
+        # Was gerade ohne Rueckfrage durchgeht, gehoert genauso ins
+        # Arbeitsgedaechtnis wie ein laufender Timer -- sonst kann
+        # Sarvis auf "was darfst du gerade" nur raten.
+        if self.freigaben is not None:
+            frei = self.freigaben.zeile()
+            if frei:
+                vorspann += "\n" + frei
         if self._nachtrag:
             vorspann += "\n" + self._nachtrag
             self._nachtrag = ""

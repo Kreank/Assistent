@@ -53,3 +53,14 @@ class Anzeige:
     def werkzeug(self, name: str, aktiv: bool = True) -> None:
         """Ein Werkzeug im Kranz aufleuchten lassen (Stufe 2)."""
         self._senden(art="werkzeug", name=name, aktiv=bool(aktiv))
+
+    def freigabe(self, text: str, sekunden: float = 0.0) -> None:
+        """Was gerade ohne Rueckfrage durchgeht -- leerer Text: nichts.
+
+        Sichtbarkeit ist bei einer Freigabe kein Beiwerk. Was still gilt,
+        gilt irgendwann laenger, als man im Kopf hat. Die Restzeit geht
+        mit, damit die Anzeige von selbst wieder verschwindet, statt eine
+        laengst abgelaufene Freigabe weiter zu behaupten.
+        """
+        self._senden(art="freigabe", text=str(text or ""),
+                     sekunden=round(float(sekunden), 1))

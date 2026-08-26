@@ -128,7 +128,7 @@ HALTUNGEN = {
     "diener": """
 Du bedienst deinen Meister. Sprich ihn mit "Meister" an — nicht in jedem Satz, aber regelmäßig genug, dass klar ist, wer hier wem dient.
 Bestätigungen klingen bei dir nach Dienst: "Sehr wohl", "Wie du wünschst", "Ist erledigt, Meister" statt "ok" oder "mach ich".
-Rückfragen stellst du in derselben Haltung: "Soll ich das für dich erledigen, Meister?"
+Musst du zur Sache nachfragen, weil dir eine Angabe fehlt, tust du es in derselben Haltung: "Welche Anna meinst du, Meister?" Um Erlaubnis fragst du auch als Diener nicht — das erledigt das System.
 Das bleibt aber Form, nicht Inhalt. Du kriechst nicht, schleimst nicht und lobst ihn nicht. Wenn er im Irrtum ist, sagst du es — höflich, aber deutlich. Ein Diener, der alles abnickt, ist wertlos.
 Kurz bleibst du trotzdem. Die Höflichkeit ersetzt keine Sätze, sie färbt sie.
 """,
@@ -160,6 +160,14 @@ Wenn du für eine Antwort erst nachsehen, suchen oder rechnen musst, sag ZUERST 
 Das gilt nur, wenn wirklich ein Werkzeug nötig ist. Was du sofort weißt, sagst du sofort — ein "Moment" vor einer Antwort, die schon feststeht, ist albern.
 
 Diesen Einleitungssatz wiederholst du danach nicht. Du sagst also nicht "Ich schau nach ... ich habe nachgesehen ...", sondern gehst direkt zum Ergebnis über.
+
+Du fragst nie um Erlaubnis. Wenn der Nutzer will, dass du etwas tust, tu es. Bei allem Heiklen fragt das System von selbst laut nach — mit deinen Worten, kurz bevor es geschieht. Fragst du vorher noch selbst "soll ich das wirklich?", wird dieselbe Sache zweimal hintereinander gefragt, und das nervt.
+
+Also keine Sätze wie "Soll ich das anlegen?", "Möchtest du, dass ich ...?" oder "Sag Bescheid, dann mache ich das". Sag in einem kurzen Satz an, was du tust, und tu es dann.
+
+Davon unberührt bleiben Rückfragen zur SACHE: Wenn dir eine Angabe fehlt, die du nicht erraten kannst — welche Anna, welcher Termin, welches Projekt —, dann fragst du selbstverständlich nach. Der Unterschied ist: Du fragst, WAS gemeint ist, nicht OB du darfst.
+
+Wird eine Rückfrage des Systems abgelehnt oder anders beantwortet als gefragt, bekommst du den Wortlaut des Nutzers zu sehen. Richte dich danach. Versuch es nicht noch einmal unverändert.
 
 Du sprichst Deutsch."""
 
@@ -331,14 +339,57 @@ WERKZEUG_STUFEN = {
     "PowerShell": "pfad",
 }
 
-# Eingebaute Werkzeuge von Claude Code, die Sarvis mitbenutzen darf.
-# Bash steht bewusst nicht hier und soll auch nie hier stehen.
 # Wie lange Sarvis auf eine Antwort wartet. Danach: abgelehnt.
 RUECKFRAGE_SEKUNDEN = 25
 
+# Eingebaute Werkzeuge von Claude Code, die Sarvis mitbenutzen darf.
+# Bash steht bewusst nicht hier und soll auch nie hier stehen.
 EINGEBAUTE_WERKZEUGE = [
     "WebSearch",
 ]
+
+# --- Freigaben auf Zeit ---------------------------------------------------
+# "Ja, und frag die naechste halbe Stunde nicht mehr." Ein Assistent, der
+# alle zehn Sekunden dieselbe Erlaubnis einholt, wird abgeschaltet.
+#
+# Eine Freigabe haengt immer an Werkzeug UND Ort -- wer Lesen im
+# Projektordner freigibt, hat damit nicht Lesen ueberall freigegeben.
+# Naeheres in freigabe.py.
+
+# Vorgabe, wenn keine Dauer genannt wurde ("ja, frag nicht nochmal").
+FREIGABE_MINUTEN = 30
+
+# Obergrenze, auch wenn laenger verlangt wird. Es gibt bewusst kein
+# "fuer immer": Eine Freigabe, an die man sich nicht mehr erinnert, ist
+# keine Zusage mehr, sondern eine Einstellung -- und die gehoert hierher
+# in die Datei, wo man sie sieht, nicht in ein Gespraech von gestern.
+FREIGABE_MAX_MINUTEN = 240
+
+# Was sich nie pauschal freigeben laesst. Alles, was nach draussen geht
+# und sich nicht zurueckholen laesst. Bei einer Mail ist die Rueckfrage
+# nicht das Laestige am Vorgang, sie ist der Zweck.
+FREIGABE_NIE = {
+    "mail_senden", "telegram_senden", "drive_teilen", "vergessen",
+    "termin_absagen", "mail_verschieben",
+}
+
+# Wie eine laufende Freigabe genannt wird -- vorgelesen und in der
+# Anzeige. "datei lesen" waere richtig, klingt aber nach Fehlermeldung.
+FREIGABE_NAMEN = {
+    "datei_lesen": "Dateien lesen",
+    "datei_schreiben": "Dateien schreiben",
+    "ordner_ansehen": "Ordner ansehen",
+    "befehl_ausfuehren": "Befehle ausführen",
+    "programm_beenden": "Programme beenden",
+    "projekt_anlegen": "Projekte anlegen",
+    "projekt_oeffnen": "Projekte öffnen",
+    "auftrag_geben": "Aufträge vergeben",
+    "termin_anlegen": "Termine eintragen",
+    "tabelle_schreiben": "Tabellen schreiben",
+    "tabelle_anlegen": "Tabellen anlegen",
+    "kontakt_anlegen": "Kontakte anlegen",
+    "merken": "sich Dinge merken",
+}
 
 # Kurzer Zweiklang, bevor Sarvis sich von selbst meldet (Timer).
 GONG = True

@@ -23,6 +23,7 @@ from pynput import keyboard  # noqa: E402
 from . import config, rueckfrage  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .audio import Aufnehmer, Lautsprecher, gong  # noqa: E402
+from .freigabe import Freigaben  # noqa: E402
 from .hinweis import zeigen  # noqa: E402
 from .hirn import Hirn  # noqa: E402
 from .mund import Mund, Satzsammler, taste_aussprechen, tageszeit  # noqa: E402
@@ -89,11 +90,16 @@ class Sarvis:
             leuchten=self.anzeige.werkzeug,
             melden=zeigen,
         )
+        # Freigaben auf Zeit. Bewusst hier und nicht im Hirn: Sie
+        # gehoeren zum Gespraech, nicht zum Modell -- ein Neustart hebt
+        # jede auf.
+        self.freigaben = Freigaben()
         self.hirn = Hirn(self.werkzeugserver, self.werkzeugnamen,
                          leuchten=self.anzeige.werkzeug,
                          nachfragen=self.nachfragen,
                          protokoll=self.protokoll,
-                         zustand_zeile=lambda: zustand_zeile(self.wecker))
+                         zustand_zeile=lambda: zustand_zeile(self.wecker),
+                         freigaben=self.freigaben)
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         self.schleife: asyncio.AbstractEventLoop | None = None
         self.haelt = False           # Taste gerade gedrueckt?
@@ -228,19 +234,28 @@ class Sarvis:
 
     # --- Rueckfrage --------------------------------------------------------
 
-    async def nachfragen(self, werkzeug: str, eingabe: dict) -> bool:
-        """Laut nachfragen und auf ja oder nein warten.
+    async def nachfragen(self, werkzeug: str, eingabe: dict):
+        """Laut nachfragen. Gibt (Entscheidung, Wortlaut) zurueck.
+
+        Entscheidung ist "ja", "nein" oder "anders" -- und der Wortlaut
+        geht mit, weil er sonst verloren geht. Frueher kam hier nur ein
+        bool heraus: Auf "ja, aber nur die erste" lief das Werkzeug mit
+        den urspruenglichen Angaben los, und Sarvis erfuhr nie, dass
+        ueberhaupt etwas eingeschraenkt worden war.
 
         Antwort per Stimme (Taste halten und "ja" sagen) oder per Taste
         (Enter = ja, Escape = nein). Beides, weil beides seine Situation
         hat: Wer die Haende frei hat, redet; wer im Buero sitzt, drueckt.
 
-        Bei Zeitablauf oder Unklarheit wird abgelehnt. Ein Assistent, der
-        im Zweifel handelt, ist schlimmer als einer, der im Zweifel fragt.
+        Bei Zeitablauf wird abgelehnt. Ein Assistent, der im Zweifel
+        handelt, ist schlimmer als einer, der im Zweifel fragt. Wurde
+        dagegen etwas Ganzes gesagt, das nur keine Antwort auf die Frage
+        war, geht es als Zuruf weiter statt verloren.
         """
         frage = rueckfrage.formulieren(werkzeug, eingabe)
         print(f"\n  ? Sarvis fragt: {frage}")
 
+        letztes = ""
         for versuch in range(2):
             text = frage if versuch == 0 else rueckfrage.NACHHAKEN
             self.anzeige.zustand(FRAGT)
@@ -260,21 +275,73 @@ class Sarvis:
                 self.antwort = None
                 print("  ? keine Antwort -- abgelehnt")
                 await self._sagen(rueckfrage.ABGELAUFEN)
-                return False
+                return "nein", ""
             finally:
                 self.antwort = None
 
             entschieden = rueckfrage.deuten(gehoert)
+            letztes = (gehoert or "").strip()
             print(f"  ? Antwort: {gehoert!r} -> {entschieden}")
-            if entschieden is True:
+
+            if entschieden == "ja":
+                await self._freigabe_erteilen(werkzeug, eingabe, gehoert)
                 self.anzeige.zustand(RUHIG)
-                return True
-            if entschieden is False:
+                return "ja", gehoert
+
+            if entschieden == "nein":
                 await self._sagen(rueckfrage.ABGELEHNT)
-                return False
+                return "nein", gehoert
+
+            if entschieden == "anders":
+                # Hier wird bewusst NICHT nachgehakt und nichts gesagt:
+                # Der Nutzer hat klar geredet, nur eben etwas anderes als
+                # gefragt. Sein Satz geht ans Hirn zurueck, und Sarvis
+                # antwortet gleich selbst darauf -- ein "Ich lasse es"
+                # dazwischen waere schlicht falsch.
+                self.anzeige.zustand(DENKT)
+                return "anders", gehoert
+
+        # Zweimal kein Ja und kein Nein -- aber es wurde etwas gesagt.
+        # Dann ist es eher ein neuer Auftrag als ein Missverstaendnis:
+        # "ach, mach lieber erst die Mail von gestern auf". Frueher fiel
+        # so ein Satz ersatzlos weg, und Sarvis wirkte, als hoerte er
+        # nicht zu. Kurze Laute bleiben ein Missverstaendnis.
+        if len(letztes.split()) >= 3:
+            print("  ? nicht als Antwort verstanden -- geht als Zuruf weiter")
+            self.anzeige.zustand(DENKT)
+            return "anders", letztes
 
         await self._sagen(rueckfrage.ABGELAUFEN)
-        return False
+        return "nein", ""
+
+    async def _freigabe_erteilen(self, werkzeug: str, eingabe: dict,
+                                 gehoert: str) -> None:
+        """Aus "ja, und frag nicht nochmal" eine Freigabe auf Zeit machen.
+
+        Nur auf ausdruecklichen Wunsch. Ein blosses "ja" gilt weiter fuer
+        genau diesen einen Aufruf -- Bequemlichkeit allein darf keine
+        Dauererlaubnis erzeugen.
+        """
+        minuten = rueckfrage.freigabe_erkennen(gehoert)
+        if minuten is None:
+            return
+
+        if not self.freigaben.erteilbar(werkzeug):
+            # Was hinausgeht, wird jedes Mal gefragt. Das ist keine
+            # Einstellung, die man vergessen hat -- das ist der Zweck.
+            await self._sagen(
+                "Das mache ich diesmal. Aber bei so etwas frage ich jedes "
+                "Mal neu, das lässt sich nicht abstellen."
+            )
+            return
+
+        was = self.freigaben.erteilen(werkzeug, eingabe, minuten)
+        if not was:
+            return
+        print(f"  ~ Freigabe erteilt: {was}")
+        self.anzeige.freigabe(self.freigaben.kurz(),
+                              self.freigaben.rest_sekunden())
+        await self._sagen(f"Gut. {was} frage ich nicht mehr nach.")
 
     async def _antwort_hoeren(self) -> None:
         """Aufnahme als Antwort auf eine offene Rueckfrage auswerten."""
@@ -352,6 +419,11 @@ class Sarvis:
         self.anzeige.untertitel("sarvis", text)
 
     async def _antworten(self, gesagt: str, t_los: float) -> None:
+        # Die Freigabe-Anzeige bei jedem Zuruf nachziehen: Sie zaehlt
+        # zwar von selbst herunter, aber die Minutenangabe stammt vom
+        # Zeitpunkt der Erteilung und waere sonst bald falsch.
+        self.anzeige.freigabe(self.freigaben.kurz(),
+                              self.freigaben.rest_sekunden())
         sammler = Satzsammler()
         erster_ton: float | None = None
         erstes_wort: float | None = None

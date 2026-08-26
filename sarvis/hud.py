@@ -89,6 +89,11 @@ class Hud(QWidget):
         self.hervor = 0.0        # Sekunden, die wir voll sichtbar bleiben
         self.nachhoeren = 0.0    # Sekunden, in denen kein Weckwort noetig ist
         self.nachhoeren_ganz = 1.0
+        # Was gerade ohne Rueckfrage durchgeht. Steht dauerhaft da,
+        # solange es gilt -- eine Freigabe, die man nicht sieht, ist
+        # keine Zusage mehr, sondern eine Gewohnheit.
+        self.freigabe = ""
+        self.freigabe_rest = 0.0
         self.verschiebbar = False  # Verschiebemodus?
         self._griff = None         # Mausversatz beim Ziehen
         # Name -> (Zustand, Aufleuchten 0..1)
@@ -202,6 +207,9 @@ class Hud(QWidget):
             elif art == "nachhoeren":
                 self.nachhoeren = float(m.get("sekunden") or 0.0)
                 self.nachhoeren_ganz = max(0.1, self.nachhoeren)
+            elif art == "freigabe":
+                self.freigabe = str(m.get("text") or "")
+                self.freigabe_rest = float(m.get("sekunden") or 0.0)
             elif art == "werkzeug":
                 eintrag = self.werkzeuge.get(m.get("name", ""))
                 if eintrag and m.get("aktiv"):
@@ -220,6 +228,10 @@ class Hud(QWidget):
 
         self.hervor = max(0.0, self.hervor - 0.016)
         self.nachhoeren = max(0.0, self.nachhoeren - 0.016)
+        if self.freigabe:
+            self.freigabe_rest -= 0.016
+            if self.freigabe_rest <= 0.0:
+                self.freigabe = ""
         ziel_deck = DECKKRAFT[self.zustand]
         if self.hervor > 0.0:
             ziel_deck = max(ziel_deck, 0.97)
@@ -453,6 +465,16 @@ class Hud(QWidget):
             self._beschriften(
                 p, QRectF(0, MITTE.y() + RADIUS + 74, BREITE, 18),
                 Qt.AlignHCenter, wort, c,
+            )
+
+        if self.freigabe:
+            f = QFont("Segoe UI", 7)
+            f.setLetterSpacing(QFont.PercentageSpacing, 160)
+            f.setCapitalization(QFont.AllUppercase)
+            p.setFont(f)
+            self._beschriften(
+                p, QRectF(0, MITTE.y() + RADIUS + 92, BREITE, 16),
+                Qt.AlignHCenter, self.freigabe, QColor(255, 186, 92, 225),
             )
 
         if self.untertitel:

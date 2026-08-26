@@ -235,7 +235,8 @@ class Horcher:
             # Ein einzelnes Wort waere sonst zu wenig -- ausser es ist
             # genau die Antwort auf eine Rueckfrage. "Ja." hat ein Wort,
             # und mehr sagt man da auch nicht.
-            if len(text.split()) < 2 and rueckfrage.deuten(text) is None:
+            if (len(text.split()) < 2
+                    and rueckfrage.deuten(text) == rueckfrage.UNKLAR):
                 return
             zuruf = text.strip()
             wie = "Nachhören"
