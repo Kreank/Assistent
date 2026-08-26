@@ -481,7 +481,17 @@ Wäsche-Timer um fünf Minuten" setzt Sarvis aus Liste, Abbrechen und Neu
 zusammen. Getestet.
 
 **Timer überleben einen Neustart** (`timer.json`). Was ablief, während
-Sarvis aus war, meldet er beim nächsten Start nach.
+Sarvis aus war, meldet er beim nächsten Start nach — **aber nur, wenn es
+noch eine Nachricht ist.** Ein Wecker, der vor zwei Stunden klingeln
+wollte, wird angesagt; einer von vorgestern wird still weggeräumt
+(`TIMER_NACHMELDEN_STUNDEN`, Vorgabe 6). Das Wegräumen wird mitgesichert,
+sonst stünde er beim nächsten Start wieder da.
+
+Schlägt das Schreiben von `timer.json` fehl — gesperrte Datei,
+Virenscanner, versehentlich zwei laufende Sarvis —, steht das jetzt in
+der Konsole. Vorher wurde der Fehler stumm verschluckt, und das ist
+genau der, den man nie findet: Ein abgelaufener Timer bleibt dann in der
+Datei stehen und wird bei **jedem** Start neu angesagt.
 
 Der Wecker läuft **komplett in Sarvis** — keine Windows-Weckfunktion.
 Ist Sarvis zu, klingelt nichts. Gewartet wird gegen die Wanduhr, nicht

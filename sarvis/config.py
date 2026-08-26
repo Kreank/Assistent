@@ -6,6 +6,16 @@ GEDAECHTNIS = WURZEL / "gedaechtnis"
 # Laufende Timer, damit sie einen Neustart ueberleben.
 TIMER_DATEI = WURZEL / "timer.json"
 
+# Wie alt ein verpasster Timer hoechstens sein darf, damit er beim Start
+# noch angesagt wird. Was laenger her ist, wird still weggeraeumt.
+#
+# Ein Wecker, der vor zwei Stunden klingeln wollte, ist eine Nachricht.
+# Einer von vorgestern ist keine mehr -- den anzusagen, kostet nur
+# Aufmerksamkeit, und beim dritten Mal hoert man ohnehin weg. Die Grenze
+# ist bewusst grosszuegig: Ein Neustart ueber Mittag soll den Wecker fuer
+# nachmittags nicht verschlucken, eine Nacht dazwischen schon.
+TIMER_NACHMELDEN_STUNDEN = 6
+
 # --- Google ---------------------------------------------------------------
 # Zugangsdaten aus der Cloud Console (Desktop-App) und das Token, das die
 # einmalige Anmeldung erzeugt. Beide stehen in der .gitignore -- das Token

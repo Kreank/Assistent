@@ -136,8 +136,14 @@ class Wecker:
                 ),
                 encoding="utf-8",
             )
-        except OSError:
-            pass  # ein Timer ist es nicht wert, den Assistenten anzuhalten
+        except OSError as e:
+            # Frueher stand hier ein stilles pass. Das ist genau der
+            # Fehler, den man nie findet: Schlaegt das Schreiben fehl --
+            # gesperrte Datei, Virenscanner, zweite Instanz --, bleibt ein
+            # abgelaufener Timer in der Datei stehen und wird bei JEDEM
+            # Start neu angesagt. Aufhalten soll es Sarvis weiter nicht,
+            # aber sichtbar muss es sein.
+            print(f"  ! timer.json ließ sich nicht schreiben: {e}")
 
     async def wiederherstellen(self) -> list[str]:
         """Beim Start: was noch laeuft, wieder scharf machen.
@@ -153,6 +159,7 @@ class Wecker:
             return []
 
         verpasst: list[str] = []
+        verworfen = 0
         jetzt = datetime.now()
         for e in gespeichert:
             try:
@@ -161,14 +168,26 @@ class Wecker:
                 continue
             was = e.get("was", "")
             if faellig <= jetzt:
-                verpasst.append(
-                    f"Dein Timer{' für ' + was if was else ''} ist abgelaufen, "
-                    "während ich aus war."
-                )
+                stunden = (jetzt - faellig).total_seconds() / 3600
+                if stunden <= config.TIMER_NACHMELDEN_STUNDEN:
+                    verpasst.append(
+                        f"Dein Timer{' für ' + was if was else ''} ist "
+                        "abgelaufen, während ich aus war."
+                    )
+                else:
+                    # Zu alt, um noch eine Nachricht zu sein. Nicht
+                    # ansagen, aber auch nicht liegen lassen -- sonst
+                    # steht er beim naechsten Start wieder da.
+                    verworfen += 1
+                    print(f"  (Timer{' für ' + was if was else ''} war vor "
+                          f"{stunden:.0f} Stunden fällig -- nicht mehr angesagt)")
                 continue
             self.stellen(int((faellig - jetzt).total_seconds()), was)
 
-        if verpasst:
+        # Auch das stille Wegraeumen muss auf die Platte: Ohne das taucht
+        # ein zu alter Timer bei jedem Start erneut auf und wird jedes Mal
+        # aufs Neue verworfen.
+        if verpasst or verworfen:
             self._sichern()
         return verpasst
 
