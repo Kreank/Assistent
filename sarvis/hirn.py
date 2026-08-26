@@ -147,9 +147,16 @@ class Hirn:
             return (schutz.auflisten_stufe(pfad), "ordner_ansehen",
                     {"pfad": pfad})
 
-        # Read und Grep lesen Inhalte -- die bleiben streng.
-        if werkzeug == "Grep" and not pfad:
-            return "still", werkzeug, e     # ohne Pfad = Arbeitsverzeichnis
+        # Grep durchsucht einen ganzen Baum. Das ist etwas anderes als
+        # eine Datei zu lesen: Beim Lesen sieht die Pruefung vorher in
+        # die Datei hinein, beim Baum kann sie das nicht.
+        if werkzeug == "Grep":
+            if not pfad:
+                return "still", werkzeug, e   # ohne Pfad = Arbeitsverzeichnis
+            return (schutz.durchsuchen_stufe(pfad), "ordner_durchsuchen",
+                    {"pfad": pfad, "muster": e.get("pattern") or ""})
+
+        # Read liest Inhalte -- streng, aber mit Blick in die Datei.
         return (schutz.lesen_stufe(pfad), "datei_lesen", {"pfad": pfad})
 
     async def darf_ich(self, name: str, eingabe: dict, zusammenhang):

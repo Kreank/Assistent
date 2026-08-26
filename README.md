@@ -505,23 +505,158 @@ Assistent, der nichts anfassen darf, nützt nichts.
 
 | | |
 |---|---|
-| frei lesen | `D:\Projekte`, `D:\Mitra`, `D:\Wissen` |
+| frei lesen | **`D:\`, `E:\`, `A:\`** — ganz |
 | frei schreiben | `D:\Projekte` |
-| überall sonst | er darf, er fragt eben vorher |
+| überall sonst — auch `C:\` | er darf, er fragt eben vorher |
 
-Dateien, deren Inhalt Zugänge öffnet — `.env`, `.pem`, `.key`, `id_rsa`,
-`.kdbx`, alles mit „passw", „secret" oder „token" im Namen — lösen eine
-**deutlichere Rückfrage** aus: „das ist eine Datei mit Zugangsdaten".
+**„Fragen" heißt nicht „nein".** Das ist der ganze Punkt: „Leg mir eine
+Notiz auf E" und „schieb das von D nach E" funktionieren — Sarvis sagt
+einmal einen Satz („Soll ich die Datei alt.zip auf Laufwerk E
+verschieben?"), und mit „ja" passiert es. Wer viel am Stück verschiebt,
+sagt „ja, und frag die nächste halbe Stunde nicht mehr" (siehe
+*Freigaben auf Zeit*).
 
-Dazu eine sehr kurze harte Sperre. Nicht, weil Sarvis dort nichts zu
-suchen hätte, sondern weil es **Einwegtüren** sind:
+Lesen ist frei, Schreiben fragt. Das ist keine Inkonsequenz: Einen Blick
+nimmt man zurück, indem man ihn vergisst. Eine geänderte Datei nicht.
 
-| gesperrt | warum |
+D:, E: und A: sind bewusst als **ganze Laufwerke** frei — vorher
+standen dort drei einzelne Ordner, und alles daneben löste eine
+Rückfrage aus. Bei Laufwerken, auf denen ohnehin nur Eigenes liegt, ist
+das kein Schutz, sondern Lärm; wer bei jedem Blick gefragt wird, hört
+irgendwann weg. `C:` bleibt bei „fragen" — dort liegt das
+Nutzerprofil, und ein Satz vorher ist dort angemessen.
+
+Zwei Ausnahmen bleiben:
+
+| trotz Freiliste: fragen | warum |
 |---|---|
-| `sarvis/config.py`, `sarvis/schutz.py` | Wer die Erlaubnisstufen ändert, schaltet alle künftigen Rückfragen ab. Eine einzige Zustimmung würde jede weitere ersetzen. |
-| `sarvis.session`, `.env` | Wer die Sitzungsdatei liest, hat das Telegram-Konto. |
-| `C:\Windows`, `C:\Program Files` | Repariert kein „war doch nicht so gemeint". |
-| `format`, `shutdown`, `diskpart`, `Clear-Disk`, `curl \| sh` … | Befehle, die sich mit einem gesprochenen „ja" nicht verantworten lassen. |
+| `D:\Strato Server` | Zugangsdaten. Nicht gesperrt — Sarvis darf dort hinsehen, wenn man es ihm sagt. Er tut es nur nicht still nebenbei. Auch das bloße Auflisten fragt: welche Zugänge es überhaupt gibt, ist selbst eine Auskunft. |
+| Dateien mit Zugängen im Namen | `.env`, `.pem`, `.key`, `id_rsa`, `.kdbx`, dazu alles mit „passw", „secret", „token", „api-key", „zugang", „login", „geheim". Lösen eine **deutlichere Rückfrage** aus: „das ist eine Datei mit Zugangsdaten". |
+
+Die zweite Zeile trug vorher niemand: Solange `D:\Privat` nicht in der
+Freiliste stand, fiel `D:\Privat\API-Key's.md` schon deshalb auf
+„fragen". Jetzt hängt es an dieser Musterliste — beim Testen ging die
+Datei still durch, bis „api-key" und „zugang" ergänzt waren.
+
+#### Namen reichen nicht — es wird hineingesehen
+
+Eine Musterliste ist eine **Sperrliste**, und die kann nur verbieten,
+woran jemand gedacht hat. Was, wenn der Ordner nicht „Passwörter" heißt,
+sondern „Tresor"? Wenn nächsten Monat irgendwo tief in einem Projekt
+eine neue Konfigurationsdatei entsteht? Genau der Fall, den die
+Architektur sonst überall vermeidet — und seit D: ganz frei ist, trüge
+die Liste ihn allein.
+
+Deshalb sieht Sarvis vor dem **stillen** Lesen in die Datei hinein:
+
+| erkannt wird | Beispiel |
+|---|---|
+| Zuweisungen mit echtem Wert | `DB_PASSWORD=Sommer2024!intern`, `api_key = 4f8a…` |
+| private Schlüssel | `-----BEGIN RSA PRIVATE KEY-----` |
+| Token nach Bauart | AWS `AKIA…`, GitHub `ghp_…`, Slack `xox…`, `sk-…`, JWT |
+| Zugänge in Verbindungsstrings | `postgres://admin:GeHeim@server/db` |
+| `Authorization: Bearer …` | |
+
+Und ebenso wichtig, was **nicht** anschlägt — sonst hört man die
+Rückfrage nach der dritten Wiederholung nicht mehr:
+
+- Anleitungen mit `API_KEY=dein_schluessel_hier`
+- Quelltext, der Zugänge nur *benutzt*: `token = response.json()['access_token']`, `os.environ['API_KEY']`
+- Text, der über Passwörter *redet*, ohne eines zu enthalten
+
+Der Blick geht nur in die ersten 64 KB, überspringt Binärdateien und
+alles über 8 MB, und er greift **nur dort, wo sonst still gelesen
+würde** — wo ohnehin gefragt wird, bringt er nichts. Der Inhalt bleibt
+dabei in diesem Programm; er geht nicht ans Modell. Das ist der Punkt:
+Die Prüfung liest, damit Sarvis es nicht ungefragt tut.
+
+**Gemessen an echten Dateien:** 400 Textdateien aus `D:\Privat`, davon
+lösen **8 eine Rückfrage aus (2 %)** — Auth-Quelltext und generierte
+Next.js-Chunks. Rund 20 ms pro Datei. `API-Key's.md` fragt jetzt nach,
+über den Namen *und* über den Inhalt.
+
+#### Durchsuchen ist kein Lesen
+
+Eine einzelne Datei zu lesen ist ein gezielter Griff: Man weiß vorher,
+was man holt, und die Prüfung kann hineinsehen. Ein `Grep` über einen
+Ordnerbaum ist ein **Netz** — man weiß nicht, was hängen bleibt, und
+prüfen ließe es sich nur, indem vorher jede Datei geöffnet wird.
+
+Warum das kein Weg ist, ist gemessen: `D:\Privat` enthält **82.327
+Dateien**, ein einziger Durchlauf dauert **47 Sekunden**.
+
+Also andersherum — eine eigene, viel engere Liste:
+
+| | |
+|---|---|
+| still durchsuchen | `D:\Projekte` und das Arbeitsverzeichnis |
+| überall sonst | eine Rückfrage: „Soll ich in dem Ordner Privat auf Laufwerk D nach passwort suchen?" |
+
+Das gilt auch über die Shell: `Get-ChildItem D:\Privat -Recurse |
+Select-String passwort` lief vorher **still** durch, weil der geprüfte
+Pfad ein Ordner ist — und ein Ordner hat keinen Inhalt, in den man
+hineinsehen könnte. `Select-String`, `findstr`, `grep` und `rg` werden
+deshalb nach derselben strengeren Regel behandelt.
+
+Wer länger sucht, sagt einmal „ja, und frag die nächste halbe Stunde
+nicht mehr".
+
+#### Dokumente, in die sich nicht hineinsehen lässt
+
+Die Inhaltsprüfung funktioniert nur bei Text. Ein PDF trägt seinen Text
+komprimiert im Binärstrom — die Musterprüfung ist dort blind, aber
+Claude Codes `Read` kann PDFs sehr wohl lesen. Auf `E:` liegen Dokumente
+und, laut Ansage, „auch gerne mal Passwörter". Also wird dort nicht
+geraten:
+
+| Format | |
+|---|---|
+| `.pdf`, `.doc`, `.xls`, `.ppt`, `.rtf`, `.msg` | **fragen** — nicht prüfbar |
+| `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp` | **hineinsehen** — das sind ZIP-Archive mit XML, da kommt man mit Bordmitteln rein |
+
+Bei den ZIP-Formaten werden die XML-Teile ausgepackt und die Marken
+entfernt, sonst stünde zwischen jedem Wort ein Tag und „Passwort:
+geheim" wäre nie ein zusammenhängender Text. Geprüft: Ein Word-Dokument
+mit einem Passwort fragt nach, ein Brief nicht, ein kaputtes Archiv
+stürzt nicht ab.
+
+Das ist kein Verdacht gegen PDFs — es ist die ehrliche Antwort darauf,
+dass die Prüfung an dieser Stelle nichts sehen kann. Wo hineingesehen
+werden kann, wird hineingesehen. Wo nicht, wird gefragt.
+
+#### Was hart gesperrt bleibt
+
+Sehr wenig, und aus zwei ganz verschiedenen Gründen.
+
+**Sarvis' eigene Regeln.** Ein Assistent fragt seinen Chef, wenn er
+unsicher ist. Aber er fragt ihn nicht „darf ich die Regel ändern, dass
+ich dich fragen muss?" — ein Ja darauf wäre keine Erlaubnis für eine
+Handlung, sondern die Abschaffung des Fragens. Eine Vollmacht, die sich
+selbst ändern darf, ist keine.
+
+Es sind alle sechs Dateien, an denen die Prüfung hängt, nicht nur die
+zwei naheliegenden:
+
+| Datei | was daran hängt |
+|---|---|
+| `config.py` | die Werkzeugstufen und die Freilisten |
+| `schutz.py` | die Pfadregeln |
+| `hirn.py` | `darf_ich()` — die Prüfung selbst |
+| `rueckfrage.py` | `deuten()` — wer das ändert, macht aus jedem Nein ein Ja |
+| `freigabe.py` | `erlaubt()` — was ohne Rückfrage durchläuft |
+| `main.py` | `nachfragen()` — die Frage, die überhaupt gestellt wird |
+
+Sarvis' übriger Code fällt ohnehin auf „fragen", weil `D:\Privat` nicht
+in `FREI_SCHREIBEN` steht.
+
+**Was ein verhörtes „ja" nicht tragen würde.** `format`, `shutdown`,
+`diskpart`, `Clear-Disk`, `curl | sh` … Das sind keine Verbote im
+eigentlichen Sinn, sondern eine Eigenschaft des Kanals: Die Rückfrage
+läuft über Whisper, und bei `format D:` ist ein missverstandenes „ja"
+nicht reparierbar. Am Bildschirm würde man das anders regeln.
+
+`C:\Windows` und `C:\Program Files` standen früher auch hier. Sie sind
+jetzt „fragen" — auch dort darf Sarvis, er fragt eben.
 
 Der Prüfer ist bewusst **handgeschrieben statt mustergesteuert**, damit
 nachvollziehbar bleibt, was durchkommt. Er kennt auch `PowerShell`, nicht

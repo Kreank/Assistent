@@ -7,9 +7,15 @@ brauchst, in einem hoerbaren Satz.
 
 Drei Stufen:
 
-  frei     Lesen dort, wo ohnehin gearbeitet wird -- laeuft durch.
-  fragen   Alles Schreibende, alles Ausserhalb, alles Heikle.
-  nie      Eine sehr kurze Liste. Begruendung unten.
+  frei     Lesen auf D: -- der Platte, auf der ohnehin nur Eigenes liegt.
+  fragen   Alles Schreibende, alles auf C:, alles Heikle. Der Regelfall.
+  nie      Nur noch Sarvis' eigene Regeldateien. Begruendung unten.
+
+"Nie" ist bewusst fast leer. Ein Assistent, der etwas grundsaetzlich
+nicht darf, ist an der Stelle kein Assistent mehr -- er soll fragen
+duerfen. Was uebrig bleibt, sind zwei Sorten Ausnahme: Regeln, die sich
+nicht selbst aendern duerfen, und Befehle, die ein verhoertes "ja" nicht
+tragen wuerde.
 """
 import re
 from pathlib import Path
@@ -22,20 +28,40 @@ HEIKEL = (
     r"\.env$", r"\.pem$", r"\.key$", r"\.pfx$", r"\.p12$", r"\.ppk$",
     r"\.session$", r"id_rsa", r"\.kdbx$", r"\.ovpn$",
     r"passw", r"kennwor", r"secret", r"credential", r"token",
+    # Erst noetig, seit D: als Ganzes frei zu lesen ist: Vorher fiel
+    # "D:\\Privat\\API-Key's.md" schon deshalb auf "fragen", weil
+    # D:\\Privat nicht in der Freiliste stand. Jetzt haengt es an dieser
+    # Zeile -- gemessen, die Datei ging vorher still durch.
+    r"api.{0,2}key", r"zugang", r"zugaeng", r"zugäng", r"login",
+    r"geheim", r"\.pw$", r"\.kdb$",
     r"\.aws[/\\]", r"\.ssh[/\\]", r"\.gnupg[/\\]",
 )
 
-# Die einzige harte Sperre. Nicht weil Sarvis dort nichts zu suchen
-# haette, sondern weil es EINWEGTUEREN sind:
-#   - Wer WERKZEUG_STUFEN aendert, schaltet alle kuenftigen Rueckfragen
-#     ab. Eine einzige Zustimmung wuerde jede weitere ersetzen.
-#   - Wer die Sitzungsdatei liest, hat das Telegram-Konto.
-#   - Windows-Systemordner repariert kein "war doch nicht so gemeint".
+# Die einzige harte Sperre -- und sie betrifft nur noch Sarvis' eigene
+# Regeln. Alles andere darf er, er fragt eben vorher. Windows und
+# Program Files standen hier frueher auch; die sind jetzt "fragen".
+#
+# Warum ausgerechnet diese Dateien nicht:
+#
+# Ein Assistent fragt seinen Chef, wenn er unsicher ist. Aber er fragt
+# ihn nicht "darf ich die Regel aendern, dass ich dich fragen muss?" --
+# ein Ja darauf waere keine Erlaubnis fuer eine Handlung, sondern die
+# Abschaffung des Fragens. Eine Vollmacht, die sich selbst aendern darf,
+# ist keine.
+#
+# Es sind alle sechs, nicht nur die naheliegenden zwei:
+#   config.py     die Werkzeugstufen und die Freilisten
+#   schutz.py     diese Datei
+#   hirn.py       darf_ich() -- die Pruefung selbst
+#   rueckfrage.py deuten() -- wer das aendert, macht aus jedem Nein ein Ja
+#   freigabe.py   erlaubt() -- was ohne Rueckfrage durchlaeuft
+#   main.py       nachfragen() -- die Frage, die ueberhaupt gestellt wird
+#
+# Sarvis' uebriger Code faellt ohnehin auf "fragen": D:\Privat steht
+# nicht in FREI_SCHREIBEN.
 NIE_SCHREIBEN = (
-    r"^[A-Z]:[/\\]Windows[/\\]",
-    r"^[A-Z]:[/\\]Program Files",
-    r"[/\\]sarvis[/\\]config\.py$",
-    r"[/\\]sarvis[/\\]schutz\.py$",
+    r"[/\\]sarvis[/\\]"
+    r"(config|schutz|hirn|rueckfrage|freigabe|main)\.py$",
 )
 NIE_LESEN = (
     r"[/\\]sarvis\.session$",
@@ -90,7 +116,15 @@ def lesen_stufe(pfad: str) -> str:
         return "nie"
     if heikel(pfad):
         return "fragen"
+    # Vor der Freiliste, sonst zieht D: als Ganzes den Passwortordner mit.
+    if _unter(pfad, config.FRAGEN_TROTZ_FREI):
+        return "fragen"
     if _unter(pfad, config.FREI_LESEN):
+        # Der letzte Halt vor dem stillen Lesen. Nur hier, nicht bei
+        # "fragen" -- dort wird ohnehin gefragt, und die Datei zweimal
+        # zu oeffnen bringt nichts.
+        if unpruefbares_dokument(pfad) or inhalt_heikel(pfad):
+            return "fragen"
         return "frei"
     return "fragen"
 
@@ -107,7 +141,41 @@ def auflisten_stufe(pfad: str) -> str:
         return "frei"
     if _passt(pfad, NIE_SCHREIBEN) or _passt(pfad, NIE_LESEN):
         return "nie"
+    # Auch blosse Dateinamen verraten dort schon zu viel -- welche
+    # Zugaenge es ueberhaupt gibt, ist selbst eine Auskunft.
+    if _unter(pfad, config.FRAGEN_TROTZ_FREI):
+        return "fragen"
     return "frei"
+
+
+def durchsuchen_stufe(pfad: str) -> str:
+    """Einen ganzen Ordnerbaum nach Inhalten absuchen.
+
+    Strenger als lesen_stufe, und zwar aus einem sachlichen Grund: Beim
+    Lesen einer einzelnen Datei kann inhalt_heikel() vorher hineinsehen.
+    Bei einem Baum mit zehntausenden Dateien kann es das nicht -- die
+    Pruefung wuerde laenger dauern als die Suche. Ein Grep ueber
+    D:\\Privat brachte frueher Zeilen aus jeder Datei zurueck, die
+    zufaellig passten, Zugangsdaten eingeschlossen.
+
+    Deshalb hier keine Inhaltspruefung, sondern eine engere Freiliste.
+    """
+    if not pfad:
+        return "frei"                      # Arbeitsverzeichnis
+    if _passt(pfad, NIE_LESEN):
+        return "nie"
+    if _unter(pfad, config.FRAGEN_TROTZ_FREI):
+        return "fragen"
+    # Eine einzelne Datei ist auch beim Suchen ein gezielter Griff --
+    # dort gelten dieselben Regeln wie beim Lesen, samt Blick hinein.
+    try:
+        if Path(pfad).is_file():
+            return lesen_stufe(pfad)
+    except (OSError, ValueError):
+        pass
+    if _unter(pfad, config.FREI_DURCHSUCHEN):
+        return "frei"
+    return "fragen"
 
 
 def schreiben_stufe(pfad: str) -> str:
@@ -144,11 +212,39 @@ NUR_SCHAUEN = (
     r"^where\s", r"^which\s", r"^echo\b",
 )
 
+# Befehle, die INHALTE ueber einen Baum hinweg zusammensuchen. Sie
+# stehen teils in NUR_SCHAUEN -- schauen tun sie ja auch --, aber fuer
+# sie gilt durchsuchen_stufe statt lesen_stufe. Ohne diese Zeile lief
+# "Get-ChildItem D:\\Privat -Recurse | Select-String passwort" still
+# durch: Der geprüfte Pfad ist ein Ordner, und ein Ordner hat keinen
+# Inhalt, in den man hineinsehen koennte.
+SUCHBEFEHLE = (
+    r"^(Select-String|sls|findstr|grep|rg|ack|ag)\b",
+)
+
+
+def _heikler_ort_erwaehnt(text: str) -> bool:
+    """Kommt ein Ordner aus FRAGEN_TROTZ_FREI im Befehlstext vor?
+
+    Noetig, weil der Pfad-Regex weiter unten am Leerzeichen abbricht:
+    "dir D:\\Strato Server" lieferte nur "D:\\Strato", und das liegt
+    nicht im geschuetzten Ordner -- der Befehl waere frei durchgelaufen.
+    Ein Teilstringvergleich kennt das Problem nicht und trifft auch
+    "dir \"D:\\Strato Server\"".
+    """
+    t = str(text or "").replace(chr(92), "/").lower()
+    for wurzel in config.FRAGEN_TROTZ_FREI:
+        if str(wurzel).replace(chr(92), "/").lower() in t:
+            return True
+    return False
+
 
 def befehl_stufe(befehl: str) -> str:
     befehl = (befehl or "").strip()
     if any(re.search(m, befehl, re.IGNORECASE) for m in NIE_BEFEHL):
         return "nie"
+    if _heikler_ort_erwaehnt(befehl):
+        return "fragen"
 
     # Verkettungen aufteilen: "git status && rm -rf x" ist nicht harmlos,
     # nur weil es harmlos anfaengt.
@@ -167,13 +263,165 @@ def befehl_stufe(befehl: str) -> str:
                      r"|Format-Table|Measure-Object)\b", t, re.IGNORECASE)
             for t in teile
         )
-        pruefer = auflisten_stufe if nur_namen else lesen_stufe
+        sucht = any(
+            re.match(m, t, re.IGNORECASE) for t in teile for m in SUCHBEFEHLE
+        )
+        if sucht:
+            pruefer = durchsuchen_stufe
+        else:
+            pruefer = auflisten_stufe if nur_namen else lesen_stufe
         for pfad in re.findall(r"[a-zA-Z]:[\\/][^\s\"']*", befehl):
             if pruefer(pfad) != "frei":
                 return "fragen"
         return "frei"
 
     return "fragen"
+
+
+# --- Zugangsdaten am Inhalt erkennen -------------------------------------
+#
+# Die Namensliste oben ist eine SPERRLISTE, und die kann nur verbieten,
+# woran jemand gedacht hat. Solange nur einzelne Ordner frei zu lesen
+# waren, trug das nicht viel: Alles Unbekannte fiel ohnehin auf "fragen".
+# Seit D: als Ganzes frei ist, haengt der Schutz allein an ihr -- und
+# damit an der Frage, ob ein Ordner zufaellig "Passwoerter" heisst und
+# nicht "Tresor", "Zugaenge alt" oder "Kram".
+#
+# Deshalb zusaetzlich der Blick hinein. Er ist billig (die ersten 64 KB),
+# er greift nur dort, wo sonst STILL gelesen wuerde, und er sieht nur
+# innerhalb dieses Programms nach -- der Inhalt geht nicht ans Modell.
+# Genau das ist der Punkt: Die Pruefung liest, damit Sarvis es nicht
+# ungefragt tut.
+
+# Dokumente, die Text tragen, sich aber nicht als Text lesen lassen.
+# Sie werden NICHT still gelesen -- nicht weil sie verdaechtig waeren,
+# sondern weil die Pruefung hier blind ist. Claude Codes Read-Werkzeug
+# kann PDFs, die Musterpruefung kann es nicht: Der Text steht dort
+# komprimiert im Binaerstrom. Auf E: liegen 11 PDFs und laut Ansage
+# "auch gerne mal Passwoerter" -- geraten wird da nicht.
+DOKUMENT_UNPRUEFBAR = (".pdf", ".doc", ".xls", ".ppt", ".rtf", ".msg",
+                       ".one", ".kdb", ".pages", ".numbers")
+
+# Diese dagegen sind ZIP-Archive mit XML darin -- da kommt man mit
+# Bordmitteln hinein, also wird hineingesehen statt gefragt.
+DOKUMENT_ZIP = (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp")
+
+PRUEF_BYTES = 64 * 1024
+PRUEF_GROESSE_MAX = 8 * 1024 * 1024   # groessere Dateien sind keine Zugangsdaten
+
+# Eindeutig, ohne dass der Wert danach noch geprueft werden muesste.
+INHALT_EINDEUTIG = (
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    r"-----BEGIN OPENSSH PRIVATE KEY-----",
+    r"\bAKIA[0-9A-Z]{16}\b",              # AWS
+    r"\bsk-[A-Za-z0-9_-]{20,}",              # OpenAI/Anthropic-Stil
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",         # GitHub
+    r"\bxox[baprs]-[A-Za-z0-9-]{10,}",       # Slack
+    r"\bAIza[0-9A-Za-z_-]{30,}",             # Google
+    r"\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",   # JWT
+    r"Authorization\s*:\s*(Bearer|Basic)\s+\S{10,}",
+    r"://[^/\s:@]+:[^/\s@]{6,}@",         # user:pass@host
+)
+
+# "irgendwas = wert" -- hier muss der Wert noch geprueft werden, sonst
+# schlaegt jede Zeile Quelltext an, die das Wort "token" enthaelt.
+# Die Wortgrenze davor darf kein \b sein: In "DB_PASSWORD" steht ein
+# Unterstrich vor dem Wort, und der ist selbst ein Wortzeichen -- \b
+# findet dort keine Grenze und das Muster ging daran vorbei. Gemessen.
+INHALT_ZUWEISUNG = re.compile(
+    r"(?<![A-Za-z])(api[_-]?key|apikey|client[_-]?secret|secret|token|"
+    r"passwor[dt]|kennwort|passphrase|pwd|auth[_-]?token)(?![A-Za-z])"
+    r"""\s*[:=]\s*["']?([^\s"',;]{8,})""",
+    re.IGNORECASE,
+)
+
+# Was wie ein Zugang aussieht, aber keiner ist. Ohne diese Liste fragt
+# Sarvis vor jeder README nach, in der "API_KEY=dein_schluessel_hier"
+# als Beispiel steht -- und vor halbem Quelltext.
+PLATZHALTER = re.compile(
+    r"^(your|dein|deine|my|xxx|\.\.\.|<|\\{|\$|%|null|none|true|false|"
+    r"changeme|change_me|example|beispiel|todo|test|dummy|placeholder|"
+    r"secret|token|password|passwort|os\.|process\.|getenv|env\.|"
+    r"config\.|self\.|this\.|req\.|resp)",
+    re.IGNORECASE,
+)
+
+
+def unpruefbares_dokument(pfad: str) -> bool:
+    """Ein Dokument, in das die Pruefung nicht hineinsehen kann?"""
+    try:
+        p = Path(pfad)
+        return p.suffix.lower() in DOKUMENT_UNPRUEFBAR and p.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _zip_text(pfad: Path) -> str:
+    """Den Text aus einem Office- oder OpenDocument-Container holen.
+
+    Nur die XML-Teile, nur die ersten paar hundert Kilobyte. Bilder und
+    Einbettungen interessieren nicht -- gesucht wird Geschriebenes.
+    """
+    import zipfile
+    stuecke: list[str] = []
+    gesamt = 0
+    try:
+        with zipfile.ZipFile(pfad) as archiv:
+            for eintrag in archiv.namelist():
+                if not eintrag.lower().endswith((".xml", ".txt", ".rels")):
+                    continue
+                try:
+                    roh = archiv.read(eintrag)[:PRUEF_BYTES]
+                except (KeyError, OSError, RuntimeError, zipfile.BadZipFile):
+                    continue
+                stuecke.append(roh.decode("utf-8", errors="replace"))
+                gesamt += len(roh)
+                if gesamt > 4 * PRUEF_BYTES:
+                    break
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return ""
+    # Die XML-Marken raus, sonst steht zwischen jedem Wort ein Tag und
+    # "Passwort: geheim" ist nie ein zusammenhaengender Text.
+    text = " ".join(stuecke)
+    return re.sub(r"<[^>]{0,200}>", " ", text)
+
+
+def inhalt_heikel(pfad: str) -> bool:
+    """Stehen in der Datei mutmasslich Zugangsdaten?
+
+    Bewusst wohlwollend: Im Zweifel False. Ein Fehlalarm bei jeder
+    zweiten Datei waere schlimmer als keine Pruefung -- dann klickt man
+    die Rueckfrage weg, ohne hinzuhoeren, und der Schutz ist weg.
+    """
+    try:
+        p = Path(pfad)
+        if not p.is_file() or p.stat().st_size > PRUEF_GROESSE_MAX:
+            return False
+    except (OSError, ValueError):
+        return False
+
+    if p.suffix.lower() in DOKUMENT_ZIP:
+        text = _zip_text(p)
+        if not text:
+            return False
+    else:
+        try:
+            with p.open("rb") as datei:
+                roh = datei.read(PRUEF_BYTES)
+        except (OSError, ValueError):
+            return False
+        if b"\x00" in roh[:4096]:
+            return False                   # binaer, kein Textgeheimnis
+        text = roh.decode("utf-8", errors="replace")
+
+    if any(re.search(m, text, re.IGNORECASE) for m in INHALT_EINDEUTIG):
+        return True
+
+    for treffer in INHALT_ZUWEISUNG.finditer(text):
+        wert = treffer.group(2)
+        if not PLATZHALTER.match(wert):
+            return True
+    return False
 
 
 # --- Wie man einen Pfad ausspricht ---------------------------------------
@@ -197,8 +445,15 @@ def sprechbar(pfad: str, fall: str = "akkusativ") -> str:
         # klaenge nach einem beliebigen Ordner irgendwo. Vierter Fall,
         # damit die Rueckfrage grammatisch aufgeht: eingesetzt wird der
         # Text in "Soll ich ... lesen?", also Akkusativ.
+        laufwerk = p.drive.rstrip(":")
+        # Eine Endung heisst Datei. Ohne diese Unterscheidung fragte
+        # Sarvis "Soll ich den Ordner alt.zip verschieben?" -- und wer
+        # das hoert, sagt nein, weil er denkt, es sei das Falsche gemeint.
+        if p.suffix:
+            artikel = "der" if fall == "dativ" else "die"
+            return f"{artikel} Datei {p.name} auf Laufwerk {laufwerk}"
         artikel = "dem" if fall == "dativ" else "den"
-        return f"{artikel} Ordner {p.name} auf Laufwerk {p.drive.rstrip(':')}"
+        return f"{artikel} Ordner {p.name} auf Laufwerk {laufwerk}"
     return p.name or str(pfad)
 
 

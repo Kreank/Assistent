@@ -231,13 +231,51 @@ AUFTRAG_ZUEGE = 120
 # darf er auch -- er fragt eben vorher.
 #
 # Lesen ist harmloser als Schreiben, deshalb ist die Leseliste laenger.
+#
+# D: ist ganz frei zu lesen, und zwar bewusst als GANZE Platte. Vorher
+# standen hier drei einzelne Ordner, und alles daneben loeste eine
+# Rueckfrage aus -- bei einem Laufwerk, auf dem ohnehin nur eigene
+# Sachen liegen, ist das kein Schutz, sondern Laerm. Wer bei jedem
+# Blick gefragt wird, hoert irgendwann weg.
 FREI_LESEN = [
-    PROJEKTE,
-    Path("D:/Mitra"),
-    Path("D:/Wissen"),
+    Path("D:/"),
+    Path("E:/"),        # Dokumente
+    Path("A:/"),
 ]
+
+# Schreiben bleibt eng. Das ist keine Inkonsequenz, sondern der
+# Unterschied, um den es geht: Ein Blick ist zurueckzunehmen, indem man
+# ihn vergisst. Eine geaenderte Datei nicht. Ueberall sonst darf Sarvis
+# auch schreiben -- er fragt vorher.
 FREI_SCHREIBEN = [
     PROJEKTE,
+]
+
+# Wo ganze Ordner still DURCHSUCHT werden duerfen.
+#
+# Bewusst viel enger als FREI_LESEN, und das ist kein Widerspruch: Eine
+# einzelne Datei zu lesen ist ein gezielter Griff -- man weiss vorher,
+# was man holt, und die Inhaltspruefung sieht vorher hinein. Ein Grep
+# ueber einen Baum ist ein Netz: Man weiss nicht, was haengen bleibt,
+# und geprueft werden koennte es nur, indem vorher jede Datei geoeffnet
+# wird. Gemessen: D:\\Privat hat 82.327 Dateien, ein Durchlauf
+# dauert 47 Sekunden. Das ist kein Weg.
+#
+# Also andersherum: Durchsucht wird still nur dort, wo ohnehin
+# gearbeitet wird. Ueberall sonst fragt er einmal -- und wer laenger
+# sucht, sagt "ja, und frag die naechste halbe Stunde nicht mehr".
+FREI_DURCHSUCHEN = [
+    PROJEKTE,
+]
+
+# Orte, an denen trotz Freiliste gefragt wird.
+#
+# Nicht gesperrt -- gefragt. Der Unterschied ist der ganze Punkt: Sarvis
+# DARF dort hinsehen, wenn er es sagen soll. Er tut es nur nicht still
+# nebenbei, weil hier Zugangsdaten liegen und ein Passwort, das einmal
+# durch ein Sprachmodell gelaufen ist, nicht wieder unbekannt wird.
+FRAGEN_TROTZ_FREI = [
+    Path("D:/Strato Server"),
 ]
 
 # --- Werkzeuge ------------------------------------------------------------
@@ -379,6 +417,7 @@ FREIGABE_NAMEN = {
     "datei_lesen": "Dateien lesen",
     "datei_schreiben": "Dateien schreiben",
     "ordner_ansehen": "Ordner ansehen",
+    "ordner_durchsuchen": "Ordner durchsuchen",
     "befehl_ausfuehren": "Befehle ausführen",
     "programm_beenden": "Programme beenden",
     "projekt_anlegen": "Projekte anlegen",
