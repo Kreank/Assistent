@@ -3,6 +3,20 @@ from pathlib import Path
 
 WURZEL = Path(__file__).resolve().parent.parent
 GEDAECHTNIS = WURZEL / "gedaechtnis"
+
+# Wie viele Eintraege die IMMER geladene Schicht hoechstens traegt.
+#
+# Der Grund steht in gedaechtnis/LIESMICH.md: kern.md soll unter 60
+# Zeilen bleiben. Fuer gemerkt.md und beobachtet.md galt das bisher
+# nicht -- sie wuchsen ohne Bremse, und alles davon haengt an JEDEM
+# Zuruf mit dran. Nicht wegen der Kosten (der Systemprompt wird
+# zwischengespeichert), sondern weil Wichtiges zwischen Belanglosem
+# untergeht, sobald es ein paar hundert Zeilen sind.
+#
+# Was darueber hinausgeht, wird NICHT geloescht, sondern als datierte
+# Notiz eine Schicht tiefer gelegt und bleibt ueber
+# gedaechtnis_nachschlagen auffindbar.
+GEDAECHTNIS_MAX_EINTRAEGE = 60
 # Laufende Timer, damit sie einen Neustart ueberleben.
 TIMER_DATEI = WURZEL / "timer.json"
 
@@ -270,6 +284,10 @@ Kündigst du eine Suche oder einen Blick irgendwohin an ("Moment, ich schaue nac
 
 Brauchst du für eine Sache absehbar mehrere Befehle am selben Ort — ein Projekt starten, Abhängigkeiten installieren, Tests laufen lassen —, dann sag das vorher in einem Satz und arbeite dann durch. Der Nutzer wird ohnehin nach dem dritten Mal gefragt, ob er für eine Weile Ruhe haben will; ihn vorher zu warnen ist höflicher, als ihn zehnmal einzeln bestätigen zu lassen.
 
+Dein Gedächtnis hat zwei Schichten, und du entscheidest beim Merken, wohin etwas gehört. Dauerhafte Eigenschaften des NUTZERS ("mag keine Umlaute in Dateinamen") → merken. Alles über einen anderen MENSCHEN → person_merken. Ereignisse, Zwischenstände, was heute besprochen wurde → notiz_schreiben. Der Unterschied ist nicht Ordnungsliebe: Was du mit merken speicherst, hängt an JEDEM künftigen Zuruf mit dran; die anderen beiden werden nur gelesen, wenn jemand danach fragt. Ein Gedächtnis, in dem alles gleich laut ist, findet nichts mehr.
+
+Fragt der Nutzer nach einem Menschen oder nach etwas Vergangenem, das nicht in deinem Kontext steht, dann schlag mit gedaechtnis_nachschlagen nach, bevor du sagst, du wüsstest es nicht.
+
 Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlich in Y"), dann öffne KEIN Terminal. projekt_oeffnen ist nur für "mach mir da ein Terminal auf" — sonst nie. Sieh dir stattdessen mit ort_ansehen an, was dort liegt, und stell dann eine Frage, die zu dem passt, was du siehst: Liegt dort angefangene Arbeit, frag, ob weitergebaut werden soll und woran zuletzt gearbeitet wurde. Sind es Anleitungen oder Notizen, frag, ob du zusammenfassen sollst oder ob er etwas Bestimmtes sucht. Rate nicht, was er vorhat — sieh nach und frag passend.
 
 Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
@@ -442,6 +460,12 @@ WERKZEUG_STUFEN = {
     # und jederzeit nachlesbar. Loeschen fragt nach, weil es sich nicht
     # rueckgaengig machen laesst.
     "merken":             "still",
+    # Schicht 2 des Gedaechtnisses. Schreiben und Nachschlagen laufen
+    # still durch -- es ist lokal, datiert und jederzeit nachlesbar,
+    # genau wie merken. Nur Loeschen fragt (vergessen).
+    "person_merken":           "still",
+    "notiz_schreiben":         "still",
+    "gedaechtnis_nachschlagen": "still",
     "gedaechtnis_zeigen": "still",
     "vergessen":          "fragen",
 

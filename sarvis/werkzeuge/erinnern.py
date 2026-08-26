@@ -1,11 +1,26 @@
 """Gedaechtnis schreiben und lesen.
 
-Zwei Ablagen, streng getrennt -- das ist der ganze Trick:
+ZWEI SCHICHTEN, und die Trennung entscheidet, ob das Ding auf Dauer
+taugt:
 
-  gemerkt.md      Was du ausdruecklich gesagt hast. Gilt als Tatsache.
-  beobachtet.md   Was Sarvis von selbst geschlossen hat. Gilt als Vermutung.
+  Schicht 1, immer geladen -- haengt an jedem Zuruf mit dran:
+    kern.md         Wenige dauerhafte Fakten (siehe gedaechtnis.py).
+    gemerkt.md      Was du ausdruecklich gesagt hast. Gilt als Tatsache.
+    beobachtet.md   Was Sarvis geschlossen hat. Gilt als Vermutung.
 
-Die Trennung ist nicht Ordnungsliebe. Eine Vermutung zu speichern ist
+  Schicht 2, nur auf Nachfrage -- kostet einen Werkzeugaufruf:
+    personen/<name>.md        alles ueber einen Menschen
+    notizen/JJJJ-MM-TT-*.md   Episodisches, datiert
+
+Schicht 1 ist teuer und deshalb begrenzt (config.GEDAECHTNIS_MAX_
+EINTRAEGE). Schicht 2 darf beliebig wachsen -- sie wird nur gelesen,
+wenn jemand danach fragt. Ohne Schicht 2 gaebe es fuer alles nur den
+teuren Platz, und genau daran kippen Gedaechtnisse: Nicht weil sie zu
+viel wissen, sondern weil alles gleich laut ist.
+
+Quer dazu liegt die Trennung nach SICHERHEIT, und die bleibt in
+Schicht 1 wie sie war: gemerkt gegen beobachtet. Sie ist nicht
+Ordnungsliebe. Eine Vermutung zu speichern ist
 harmlos; sie spaeter als Tatsache zu behandeln ist es nicht. Getrennte
 Dateien machen den Unterschied nachlesbar -- fuer Sarvis und fuer dich.
 
@@ -36,6 +51,121 @@ _ABLAUF = re.compile(r"\(gilt bis (\d{1,2})\.(\d{1,2})\.(\d{4})\)")
 
 def _datei(art: str):
     return config.GEDAECHTNIS / (BEMERKT if art == "bemerkt" else GESAGT)
+
+
+def _sauberer_name(text: str, laenge: int = 40) -> str:
+    """Aus einem gesprochenen Namen einen Dateinamen machen.
+
+    Gesprochen kommt "Thomas Müller" oder "das Finanzdashboard" -- daraus
+    muss ein Name werden, den man auf jedem Dateisystem anlegen kann und
+    unter dem man ihn spaeter wiederfindet.
+    """
+    t = " ".join(str(text or "").split()).lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        t = t.replace(alt, neu)
+    t = re.sub(r"[^a-z0-9]+", "-", t).strip("-")
+    return t[:laenge] or "ohne-namen"
+
+
+def _personenordner():
+    p = config.GEDAECHTNIS / "personen"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _notizenordner():
+    p = config.GEDAECHTNIS / "notizen"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def notiz_anlegen(titel: str, inhalt: str) -> str:
+    """Eine datierte Notiz in Schicht 2. Gibt den Dateinamen zurueck."""
+    ordner = _notizenordner()
+    stamm = f"{datetime.now():%Y-%m-%d}-{_sauberer_name(titel)}"
+    pfad = ordner / f"{stamm}.md"
+    zaehler = 2
+    while pfad.exists():          # zwei Notizen am selben Tag, gleicher Titel
+        pfad = ordner / f"{stamm}-{zaehler}.md"
+        zaehler += 1
+    pfad.write_text(
+        f"# {' '.join(str(titel).split())}\n\n"
+        f"_{datetime.now():%d.%m.%Y %H:%M}_\n\n{inhalt.strip()}\n",
+        encoding="utf-8")
+    return pfad.name
+
+
+def _datum_von(zeile: str) -> str:
+    """Das fuehrende Datum eines Eintrags -- zum Sortieren nach Alter."""
+    t = re.match(r"- (\d{4}-\d{2}-\d{2})", zeile.strip())
+    return t.group(1) if t else "0000-00-00"
+
+
+def umschichten(art: str) -> int:
+    """Was ueber die Grenze hinausgeht, wandert eine Schicht tiefer.
+
+    Bewusst NICHT loeschen. Was der Nutzer ausdruecklich gesagt hat, darf
+    nicht verschwinden, nur weil viel dazugekommen ist -- es steht danach
+    in einer datierten Notiz und bleibt ueber gedaechtnis_nachschlagen
+    auffindbar. Es haengt nur nicht mehr an jedem einzelnen Zuruf mit
+    dran.
+
+    Das Aelteste zuerst: Was lange niemand bestaetigt hat, ist eher eine
+    Erinnerung als eine Tatsache.
+    """
+    pfad = _datei(art)
+    zeilen = _zeilen(pfad)
+    ueber = len(zeilen) - config.GEDAECHTNIS_MAX_EINTRAEGE
+    if ueber <= 0:
+        return 0
+    zeilen.sort(key=_datum_von)
+    raus, bleiben = zeilen[:ueber], zeilen[ueber:]
+    # EINE Sammeldatei je Monat, nicht eine je Auslagerung. Sonst
+    # entstehen im Lauf eines Jahres Dutzende Schnipsel mit je zwei
+    # Zeilen -- und die zu durchsuchen ist muehsamer, als sie wert sind.
+    ablage = _notizenordner() / f"{datetime.now():%Y-%m}-ausgelagert-{art}.md"
+    if not ablage.exists():
+        ablage.write_text(
+            f"# Ausgelagert aus {art}\n\n"
+            "Diese Einträge standen im immer geladenen Gedächtnis und sind "
+            "dort ausgelaufen — zu viele, um sie bei jedem Zuruf "
+            "mitzuschleppen.\n**Gelöscht ist nichts**, über "
+            "gedaechtnis_nachschlagen sind sie weiter zu finden.\n\n",
+            encoding="utf-8")
+    with open(ablage, "a", encoding="utf-8") as f:
+        f.write("\n".join(raus) + "\n")
+    _schreiben(pfad, bleiben)
+    print(f"  (Gedächtnis: {len(raus)} alte Einträge in eine Notiz ausgelagert)")
+    return len(raus)
+
+
+def nachschlagen(stichwort: str, hoechstens: int = 6) -> list:
+    """Schicht 2 durchsuchen: Personen und Notizen.
+
+    Rueckgabe: Liste von (Datei, passende Zeilen). Bewusst zeilenweise --
+    eine ganze Notiz vorzulesen ist unzumutbar, die passende Zeile
+    beantwortet die Frage.
+    """
+    suche = " ".join(str(stichwort or "").lower().split())
+    if not suche:
+        return []
+    treffer = []
+    for ordner in (_personenordner(), _notizenordner()):
+        for datei in sorted(ordner.glob("*.md"), reverse=True):
+            if datei.stem == "BEISPIEL":
+                continue
+            try:
+                text = datei.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            passt = suche in datei.stem.lower()
+            zeilen = [z.strip() for z in text.splitlines()
+                      if z.strip() and (passt or suche in z.lower())]
+            if zeilen:
+                treffer.append((datei.name, zeilen[:8]))
+            if len(treffer) >= hoechstens:
+                return treffer
+    return treffer
 
 
 def _zeilen(pfad) -> list[str]:
@@ -149,11 +279,105 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         zeilen = [z for z in zeilen if kern not in z.lower()]
         zeilen.append(eintrag)
         _schreiben(pfad, zeilen)
+        umschichten(art)      # Schicht 1 bleibt klein genug, um zu wirken
 
         blinken()
         vermerken(f"merken ({art}): {inhalt}")
         return {"content": [{"type": "text", "text":
                 f"Gemerkt ({'Beobachtung' if art == 'bemerkt' else 'gesagt'})."}]}
+
+    @tool(
+        "person_merken",
+        "Schreibt etwas über einen MENSCHEN in dessen eigene Akte — nicht "
+        "ins immer geladene Gedächtnis. Für alles, was einen bestimmten "
+        "Menschen betrifft: Vorlieben, Geburtstag, Beruf, was zuletzt war. "
+        "Solche Angaben müssen nicht bei jedem Zuruf mitgeschleppt werden, "
+        "sie werden nachgeschlagen, wenn es um die Person geht.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string",
+                         "description": "Name des Menschen, wie gesagt."},
+                "inhalt": {"type": "string",
+                           "description": "Was über ihn gilt, ein Satz."},
+            },
+            "required": ["name", "inhalt"],
+        },
+    )
+    async def person_merken(args):
+        name = " ".join(str(args.get("name") or "").split())
+        inhalt = " ".join(str(args.get("inhalt") or "").split())
+        if not name or not inhalt:
+            return {"content": [{"type": "text", "text":
+                    "Dafür brauche ich Name und Inhalt."}], "is_error": True}
+        pfad = _personenordner() / f"{_sauberer_name(name)}.md"
+        if not pfad.exists():
+            pfad.write_text(f"# {name}\n\n", encoding="utf-8")
+        with open(pfad, "a", encoding="utf-8") as f:
+            f.write(f"- {datetime.now():%Y-%m-%d} — {inhalt}\n")
+        blinken()
+        vermerken(f"person_merken ({name}): {inhalt}")
+        return {"content": [{"type": "text", "text":
+                f"In der Akte von {name} vermerkt."}]}
+
+    @tool(
+        "notiz_schreiben",
+        "Legt eine datierte Notiz an — für Episodisches: was heute besprochen "
+        "wurde, wie ein Problem gelöst wurde, was bei einem Projekt der Stand "
+        "ist. Das gehört NICHT ins immer geladene Gedächtnis, sondern hierher: "
+        "Es ist später nachschlagbar, ohne jeden Zuruf zu belasten. "
+        "Faustregel: Dauerhafte Eigenschaften des Nutzers -> merken. "
+        "Ereignisse und Zwischenstände -> hierher.",
+        {
+            "type": "object",
+            "properties": {
+                "titel": {"type": "string",
+                          "description": "Worum es geht, wenige Worte."},
+                "inhalt": {"type": "string",
+                           "description": "Der Text der Notiz."},
+            },
+            "required": ["titel", "inhalt"],
+        },
+    )
+    async def notiz_schreiben(args):
+        titel = " ".join(str(args.get("titel") or "").split())
+        inhalt = str(args.get("inhalt") or "").strip()
+        if not titel or not inhalt:
+            return {"content": [{"type": "text", "text":
+                    "Dafür brauche ich Titel und Inhalt."}], "is_error": True}
+        name = notiz_anlegen(titel, inhalt)
+        blinken()
+        vermerken(f"notiz_schreiben: {titel}")
+        return {"content": [{"type": "text", "text":
+                f"Notiert unter {name}."}]}
+
+    @tool(
+        "gedaechtnis_nachschlagen",
+        "Durchsucht die Akten und Notizen — also alles, was NICHT bei jedem "
+        "Zuruf mitgeladen wird. Benutze das, wenn nach einem Menschen gefragt "
+        "wird ('was weißt du über Thomas?') oder nach etwas Vergangenem ('was "
+        "war damals mit dem Dashboard?'). Findest du hier nichts, sag das — "
+        "rate nicht.",
+        {
+            "type": "object",
+            "properties": {
+                "stichwort": {"type": "string",
+                              "description": "Name oder Stichwort."},
+            },
+            "required": ["stichwort"],
+        },
+    )
+    async def gedaechtnis_nachschlagen(args):
+        stichwort = str(args.get("stichwort") or "")
+        treffer = nachschlagen(stichwort)
+        blinken()
+        if not treffer:
+            return {"content": [{"type": "text", "text":
+                    f"Zu {stichwort} steht nichts in den Akten oder Notizen."}]}
+        teile = []
+        for datei, zeilen in treffer:
+            teile.append(f"{datei}:\n" + "\n".join(f"  {z}" for z in zeilen))
+        return {"content": [{"type": "text", "text": "\n\n".join(teile)}]}
 
     @tool(
         "gedaechtnis_zeigen",
@@ -222,4 +446,5 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"{len(geloescht)} Eintrag/Einträge gelöscht."}]}
 
-    return [merken, gedaechtnis_zeigen, vergessen]
+    return [merken, gedaechtnis_zeigen, vergessen,
+            person_merken, notiz_schreiben, gedaechtnis_nachschlagen]
