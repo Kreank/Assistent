@@ -318,23 +318,58 @@ BEGRUESSUNGEN = [
     "{tageszeit}. Ich bin wach. Drück {taste} und leg los.",
 ]
 
+# --- Finanzdashboard ------------------------------------------------------
+# Laeuft auf einem eigenen Server; Sarvis spricht dieselbe Schnittstelle
+# wie die Weboberflaeche und darf dort dasselbe. Der Unterschied ist nur
+# der Nachweis: dort ein Sitzungs-Cookie, hier eine Kopfzeile.
+FINANZ_BASIS = "https://finanz.tech-artist.de/api"
+
+# Der Schluessel steht in .env, NIE im Quelltext -- so verlangt es auch
+# die Referenz des Dashboards. Er laeuft nicht ab, bis er getauscht wird,
+# und ist damit so viel wert wie der Zugang zur Oberflaeche selbst.
+FINANZ_SCHLUESSEL_NAME = "FD_API_SCHLUESSEL"
+
+# Ein haengender Server darf ein Gespraech nicht anhalten.
+FINANZ_ZEITGRENZE = 20.0
+
+# Wie viele Posten hoechstens vorgelesen werden. Zwanzig Kategorien am
+# Stueck haelt niemand aus -- wer mehr will, fragt nach.
+FINANZ_HOECHSTENS = 6
+
+
+def finanz_schluessel():
+    """Der API-Schluessel aus der .env, oder None."""
+    return _env_werte().get(FINANZ_SCHLUESSEL_NAME)
+
+
 # --- Telegram -------------------------------------------------------------
 # Zugangsdaten stehen in .env, nicht hier. Die Sitzungsdatei ist so viel
 # wert wie das Konto selbst -- beide stehen in der .gitignore.
 TELEGRAM_SITZUNG = WURZEL / "sarvis.session"
 
 
-def telegram_zugang():
-    """(api_id, api_hash) aus der .env, oder None."""
+def _env_werte() -> dict:
+    """Alles aus der .env als Verzeichnis. Fehlt sie, ist es leer.
+
+    Eine Stelle fuer alle Zugaenge: Vorher las telegram_zugang() die
+    Datei selbst, und der naechste Zugang haette dieselben zehn Zeilen
+    noch einmal gebraucht.
+    """
     datei = WURZEL / ".env"
     if not datei.exists():
-        return None
+        return {}
     werte = {}
     for zeile in datei.read_text(encoding="utf-8").splitlines():
         zeile = zeile.strip()
         if zeile and not zeile.startswith("#") and "=" in zeile:
             k, v = zeile.split("=", 1)
             werte[k.strip()] = v.strip()
+    return werte
+
+
+def telegram_zugang():
+    """(api_id, api_hash) aus der .env, oder None."""
+    werte = _env_werte()
     kennung, geheim = werte.get("TELEGRAM_API_ID"), werte.get("TELEGRAM_API_HASH")
     if not (kennung and geheim):
         return None
@@ -479,6 +514,17 @@ WERKZEUG_STUFEN = {
 
     # Projekte: Auflisten ist harmlos. Anlegen und Oeffnen fragen nach,
     # weil beides etwas auf der Platte bzw. auf dem Bildschirm erzeugt.
+    # Finanzen: Abfragen sind harmlos und laufen still. Eine Buchung
+    # anzulegen fragt nach -- sie taucht spaeter im Kontoabgleich auf,
+    # und eine falsche findet man dann schwer wieder.
+    "finanzen_kontostand": "still",
+    "finanzen_ausgaben":   "still",
+    "finanzen_monate":     "still",
+    "finanzen_empfaenger": "still",
+    "finanzen_buchungen":  "still",
+    "finanzen_konten":     "still",
+    "finanzen_buchen":     "fragen",
+
     "projekt_liste":      "still",
     # Ansehen aendert nichts und ist die Alternative zum Terminal --
     # es muss still laufen, sonst nimmt das Modell wieder den Weg,
@@ -603,6 +649,7 @@ FREIGABE_NAMEN = {
     "programm_beenden": "Programme beenden",
     "projekt_anlegen": "Projekte anlegen",
     "projekt_oeffnen": "Projekte öffnen",
+    "finanzen_buchen": "Buchungen eintragen",
     "ort_ansehen": "Orte ansehen",
     "auftrag_geben": "Aufträge vergeben",
     "termin_anlegen": "Termine eintragen",
@@ -693,6 +740,7 @@ WERKZEUG_ICONS = {
     "Drive":      "E753",   # Wolke
     "Tabellen":   "E80A",   # Gitter
     "Entwicklung": "E943",  # spitze Klammern -- siehe unten
+    "Finanzen":    "E8C7",  # Geldschein
 }
 
 # Das Entwicklungs-Icon ist kein Werkzeug wie die anderen: Es leuchtet,
@@ -724,4 +772,5 @@ WERKZEUGE = [
     ("Drive",      "bereit"),
     ("Tabellen",   "bereit"),
     ("Entwicklung", "bereit"),
+    ("Finanzen",   "bereit"),
 ]

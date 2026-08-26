@@ -5,9 +5,9 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**41 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+**53 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
 Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
-Projekte und Hintergrundaufträge.
+Projekte und Hintergrundaufträge, das eigene Finanzdashboard.
 
 ## Starten
 
@@ -348,7 +348,7 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-**41 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**53 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
 **im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
 Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
 
