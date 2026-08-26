@@ -79,6 +79,8 @@ class Hirn:
         # Sie sind der Grund, warum Sarvis still wirken kann, waehrend
         # etwas gebaut wird -- also gehoeren sie in die Anzeige.
         self.subagenten: dict = {}
+        # Arbeiter, die mittendrin verloren gingen -- (Was, Wann).
+        self.abgebrochene: list = []
 
     async def start(self) -> None:
         # Der Kern des Gedaechtnisses gehoert in den Systemprompt, nicht an
@@ -256,6 +258,39 @@ class Hirn:
                     if isinstance(block, ToolResultBlock):
                         self.subagenten.pop(block.tool_use_id, None)
 
+    def _arbeiter_verloren(self) -> None:
+        """Uebriggebliebene Unter-Arbeiter als abgebrochen vermerken.
+
+        Wer normal fertig wird, ist beim Rueckgabeblock schon aus der
+        Liste geflogen. Was hier noch steht, ist mit dem Zug gestorben.
+        """
+        for was in self.subagenten.values():
+            self.abgebrochene.append((was, datetime.now()))
+        del self.abgebrochene[:-3]
+        self.subagenten.clear()
+
+    def abgebrochene_zeile(self) -> str:
+        """Was unfertig liegengeblieben ist -- fuer den Vorspann.
+
+        Ein Unter-Arbeiter stirbt mit dem Zug, in dem er laeuft. Ohne
+        diese Zeile weiss Sarvis im naechsten Zug nichts mehr davon und
+        fragt "was soll denn als Naechstes rein?", waehrend halbfertige
+        Arbeit herumliegt. Genau so passiert -- der Nutzer musste ihm
+        seine eigene abgebrochene Arbeit erklaeren.
+
+        Zwei Stunden lang, dann ist es keine Nachricht mehr.
+        """
+        jetzt = datetime.now()
+        self.abgebrochene = [(w, t) for w, t in self.abgebrochene
+                             if (jetzt - t).total_seconds() < 7200]
+        if not self.abgebrochene:
+            return ""
+        teile = [f'"{w}" um {t:%H:%M}' for w, t in self.abgebrochene]
+        return ("[Mittendrin abgebrochen und NICHT zu Ende gebracht: "
+                + "; ".join(teile)
+                + ". Frag nicht, was gemacht werden soll -- sieh nach, wie "
+                  "weit es ist, und knüpfe dort an.]")
+
     def subagenten_kurz(self) -> list:
         """Was die Unter-Arbeiter gerade tun -- fuer die Anzeige."""
         return [f"Arbeiter: {w}" for w in self.subagenten.values()]
@@ -281,6 +316,9 @@ class Hirn:
         # wirken weiter -- Sarvis muss davon im naechsten Zug wissen, sonst
         # legt er auf "doch auf 10:14" einen zweiten Wecker an, statt den
         # ersten zu aendern. Genau so passiert.
+        # Wer beim Abbruch noch lief, ist mit abgebrochen worden.
+        self._arbeiter_verloren()
+
         if self.protokoll is not None:
             self._nachtrag = self.protokoll.nachtrag()
 
@@ -322,6 +360,9 @@ class Hirn:
             laufendes = self.zustand_zeile()
             if laufendes:
                 vorspann += "\n" + laufendes
+        verloren = self.abgebrochene_zeile()
+        if verloren:
+            vorspann += "\n" + verloren
         # Was gerade ohne Rueckfrage durchgeht, gehoert genauso ins
         # Arbeitsgedaechtnis wie ein laufender Timer -- sonst kann
         # Sarvis auf "was darfst du gerade" nur raten.
@@ -373,4 +414,6 @@ class Hirn:
                 self._offen = False
                 # Ist die Runde vorbei, laeuft auch kein Arbeiter mehr --
                 # ein Rest hier waere eine Anzeige, die nie verschwindet.
-                self.subagenten.clear()
+                # Und er waere mittendrin gestorben, also gehoert er ins
+                # Arbeitsgedaechtnis.
+                self._arbeiter_verloren()

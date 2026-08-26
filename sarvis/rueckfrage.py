@@ -183,7 +183,25 @@ def _kuerzen(text: str, laenge: int = 90) -> str:
     # Satzzeichen am Ende weg: der eingesetzte Text steht mitten in einer
     # Frage, sonst wird daraus "...später.?"
     text = " ".join(str(text or "").split()).rstrip(".!?;:, ")
-    return text if len(text) <= laenge else text[: laenge - 1] + "…"
+    if len(text) <= laenge:
+        return text
+    # An der Wortgrenze schneiden. Vorher endete die Frage mitten im Wort
+    # ("...wurde aber mitt…?") -- gesprochen klingt das wie ein Fehler
+    # und nicht wie eine Frage.
+    schnitt = text[: laenge - 1]
+    luecke = schnitt.rfind(" ")
+    if luecke > laenge * 0.55:
+        schnitt = schnitt[:luecke]
+    return schnitt.rstrip(" ,;:.") + "…"
+
+
+def _erster_satz(text: str, laenge: int = 70) -> str:
+    """Der erste Satz -- fuer Texte, die als Prompt geschrieben wurden."""
+    roh = " ".join(str(text or "").split())
+    ende = re.search(r"[.!?](\s|$)", roh)
+    if ende:
+        roh = roh[: ende.start()]
+    return _kuerzen(roh, laenge)
 
 
 def formulieren(werkzeug: str, eingabe: dict) -> str:
@@ -273,8 +291,18 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         return f"Soll ich {_kuerzen(e.get('name'), 50)} im Terminal öffnen?"
 
     if werkzeug == "auftrag_geben":
-        return (f"Soll ich im Projekt {_kuerzen(e.get('projekt'), 40)} "
-                f"daran arbeiten: {_kuerzen(e.get('was'), 80)}?")
+        # Der Auftragstext ist ein Arbeitsauftrag fuer den Arbeiter, kein
+        # Satz zum Vorlesen: lang, mit Vorgeschichte, oft mehrere Absaetze.
+        # Vorgelesen wurde er bis "...wurde aber mitt…?" -- das beantwortet
+        # niemand. Der erste Satz sagt, worum es geht; alles Weitere
+        # steht im Auftrag, nicht in der Frage.
+        worum = _erster_satz(e.get("was"), 70)
+        # Endet es schon mit Auslassungspunkten, waere ein Punkt dahinter
+        # ein "….." -- vorgelesen ein Stolpern.
+        schluss = "" if worum.endswith("…") else "."
+        return (f"Soll ich einen Auftrag im Projekt "
+                f"{_kuerzen(e.get('projekt'), 40)} starten? "
+                f"Es geht um: {worum}{schluss}")
 
     if werkzeug == "termin_anlegen":
         # Die Feldnamen muessen zu denen im Werkzeug passen -- vorher stand

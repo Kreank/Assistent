@@ -4,6 +4,7 @@ Stufe eins. Noch ohne Werkzeuge -- es geht erst einmal nur darum, ob sich
 das Ganze wie ein Gespraech anfuehlt oder wie ein Formular.
 """
 import asyncio
+import json
 import os
 import random
 import subprocess
@@ -110,6 +111,8 @@ class Sarvis:
         self.antwort = None          # offene Rueckfrage (Future)
         self.horcher = Horcher(self.ohren, self._geweckt,
                                anzeige=self.anzeige)
+        # Was in DIESEM Zug schon abgelehnt wurde. Siehe nachfragen().
+        self._abgelehnt: dict = {}
         self.gruesse = []            # vorbereitete Weckantworten
         self.gruss_laeuft = False
 
@@ -257,6 +260,30 @@ class Sarvis:
         dagegen etwas Ganzes gesagt, das nur keine Antwort auf die Frage
         war, geht es als Zuruf weiter statt verloren.
         """
+        # Schon gefragt und schon beantwortet? Dann nicht noch einmal.
+        #
+        # Beobachtet: Auf "Soll ich finanzdashboard im Terminal oeffnen?"
+        # kam "wir wollen daran weiterarbeiten" -- also etwas anderes.
+        # Danach stand woertlich dieselbe Frage wieder da, und man musste
+        # ein zweites Mal nein sagen. Im Systemprompt steht zwar, dass er
+        # es nicht unveraendert wiederholen soll; darauf zu bauen reicht
+        # offensichtlich nicht.
+        #
+        # Der Schluessel ist Werkzeug samt Eingabe: Eine wirklich andere
+        # Anfrage fragt weiterhin. Und der Merker gilt nur fuer diesen
+        # einen Zug -- ein spaeteres "mach das doch" darf nicht an einer
+        # alten Ablehnung haengen bleiben.
+        schluessel = None
+        try:
+            schluessel = (werkzeug,
+                          json.dumps(eingabe or {}, sort_keys=True, default=str))
+        except (TypeError, ValueError):
+            pass
+        if schluessel is not None and schluessel in self._abgelehnt:
+            frueher, wortlaut = self._abgelehnt[schluessel]
+            print(f"  ? schon beantwortet ({frueher}) -- nicht nochmal gefragt")
+            return frueher, wortlaut
+
         frage = rueckfrage.formulieren(werkzeug, eingabe)
         print(f"\n  ? Sarvis fragt: {frage}")
 
@@ -312,6 +339,8 @@ class Sarvis:
                     return "ja", gehoert
 
                 if entschieden == "nein":
+                    if schluessel is not None:
+                        self._abgelehnt[schluessel] = ("nein", gehoert)
                     await self._sagen(rueckfrage.ABGELEHNT)
                     return "nein", gehoert
 
@@ -321,6 +350,8 @@ class Sarvis:
                     # gefragt. Sein Satz geht ans Hirn zurueck, und Sarvis
                     # antwortet gleich selbst darauf -- ein "Ich lasse es"
                     # dazwischen waere schlicht falsch.
+                    if schluessel is not None:
+                        self._abgelehnt[schluessel] = ("anders", gehoert)
                     self.anzeige.zustand(DENKT)
                     return "anders", gehoert
 
@@ -537,6 +568,10 @@ class Sarvis:
         # ans Hirn, kaeme ein Lagebericht zurueck statt eines Abbruchs --
         # woertlich passiert: "Das Angular-Frontend wird gerade gebaut,
         # der Auftrag laeuft noch."
+        # Neuer Zuruf, neue Lage: Was vorhin abgelehnt wurde, darf jetzt
+        # wieder gefragt werden.
+        self._abgelehnt = {}
+
         if rueckfrage.ist_stopp(gesagt):
             await self._alles_stoppen()
             return
