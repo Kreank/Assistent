@@ -59,8 +59,36 @@ def _worte(text: str) -> set:
 _HALLUZINATIONEN = (
     "bye-bye", "bye bye", "thank you for watching", "thanks for watching",
     "see you next time", "untertitel", "untertitelung", "amara.org",
-    "subtitles by", "subs by", "ondertiteling",
+    "subtitles by", "subs by", "ondertiteling", "good night", "goodbye",
+    "good bye",
 )
+
+# Woerter, die man WIRKLICH mehrfach hintereinander sagt. Ohne diese
+# Ausnahme wuerde ein nachdruecklich gemeintes "ja, ja, ja" als
+# Halluzination verworfen -- und ausgerechnet die Bestaetigung, die man
+# zweimal geben musste, verschwaende.
+_ECHTE_WIEDERHOLUNG = {
+    "ja", "nein", "ok", "okay", "stopp", "stop", "halt", "warte",
+    "genau", "danke", "hallo", "sarvis", "nee", "doch",
+}
+
+
+def _dreht_sich_im_kreis(text: str) -> bool:
+    """Dasselbe Wort dreimal hintereinander -- Whisper haengt fest.
+
+    Beobachtet: "Heissler, Heissler, Heissler" und "Baitchen, Baitchen
+    Baitchen", beide aus Stille. Das ist kein Verhoeren, sondern ein
+    bekanntes Verhalten des Modells: Es faengt an zu wiederholen und
+    kommt nicht mehr heraus. Eine Liste einzelner Saetze kann das nicht
+    abfangen -- das Muster schon.
+    """
+    worte = [w for w in re.split(r"[\s,.!?;:-]+", (text or "").lower()) if w]
+    if len(worte) < 3:
+        return False
+    for i in range(len(worte) - 2):
+        if worte[i] == worte[i + 1] == worte[i + 2]:
+            return worte[i] not in _ECHTE_WIEDERHOLUNG
+    return False
 
 
 def _halluziniert(text: str) -> bool:
@@ -309,7 +337,7 @@ class Horcher:
             return
         if not text:
             return
-        if _halluziniert(text):
+        if _halluziniert(text) or _dreht_sich_im_kreis(text):
             print(f"  (Whisper-Halluzination verworfen: {text!r})")
             return
         if self._eigen_echo(text):
