@@ -42,8 +42,18 @@ from .projekte import _pfad
 # Werkzeuge, die der Arbeiter benutzen darf. Alles Uebrige wird abgelehnt.
 ARBEITER_WERKZEUGE = [
     "Read", "Write", "Edit", "Glob", "Grep", "Bash",
-    "WebSearch", "WebFetch", "TodoWrite", "Task", "NotebookEdit",
+    "WebSearch", "WebFetch", "TodoWrite", "NotebookEdit",
+    # Unter-Arbeiter: Damit teilt ein Arbeiter grosse Aufgaben auf --
+    # "drei bauen, zwei pruefen". Beide Namen, siehe config.UNTERARBEITER.
+    *config.UNTERARBEITER,
 ]
+
+# Gemessen am 26.08.2026: Die Werkzeugaufrufe eines UNTER-Arbeiters
+# laufen durch dieselbe Rechtepruefung wie die des Arbeiters. Ein
+# Unter-Arbeiter, der ausserhalb des Projektordners lesen wollte, wurde
+# abgelehnt -- und die Ablehnung kam beim Arbeiter an, nicht still
+# verschluckt. Die Grenze "nichts ausserhalb des Ordners" traegt also
+# auch eine Ebene tiefer.
 
 # Shell-Befehle, die auch im eigenen Ordner nichts zu suchen haben.
 VERBOTEN = (

@@ -240,14 +240,18 @@ class Hirn:
     def _subagenten_verfolgen(self, nachricht) -> None:
         """Mitschreiben, welche Unter-Arbeiter gerade laufen.
 
-        Start ist ein Werkzeugaufruf "Task" in SEINER Nachricht (nicht in
-        der eines Arbeiters), Ende der zugehoerige Rueckgabeblock. Ohne
-        das Ende bliebe die Anzeige stehen und behauptete Arbeit, die
-        laengst fertig ist.
+        Start ist ein Werkzeugaufruf aus config.UNTERARBEITER in SEINER
+        Nachricht (nicht in der eines Arbeiters), Ende der zugehoerige
+        Rueckgabeblock. Ohne das Ende bliebe die Anzeige stehen und
+        behauptete Arbeit, die laengst fertig ist.
+
+        Der Name ist gemessen: In dieser Fassung heisst das Werkzeug
+        "Agent". Hier stand "Task" -- also sprang die Anzeige nie an.
         """
         if isinstance(nachricht, AssistantMessage):
             for block in nachricht.content:
-                if isinstance(block, ToolUseBlock) and block.name == "Task":
+                if (isinstance(block, ToolUseBlock)
+                        and block.name in config.UNTERARBEITER):
                     e = block.input or {}
                     was = (e.get("description") or e.get("subagent_type")
                            or "Arbeiter")

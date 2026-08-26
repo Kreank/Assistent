@@ -105,7 +105,18 @@ WECKWORT_MAX_SEK = 30.0
 # zusammen mit dem Ergebnis. Ein Wartesatz, der die Wartezeit nicht
 # ueberbrueckt, ist schlimmer als keiner: Er behauptet eine Pause, die
 # schon vorbei ist.
-LANGSAME_WERKZEUGE = {"WebSearch", "WebFetch", "Task", "Bash", "PowerShell"}
+LANGSAME_WERKZEUGE = {"WebSearch", "WebFetch", "Task", "Agent",
+                      "Bash", "PowerShell"}
+
+# Wie das Werkzeug heisst, mit dem ein Arbeiter Unter-Arbeiter losschickt.
+#
+# GEMESSEN, nicht angenommen: In der hier installierten Fassung heisst es
+# "Agent". Frueher hiess es "Task", und an drei Stellen im Code stand
+# genau das -- mit der Folge, dass die Hintergrundanzeige nie ansprang
+# und die Freiliste des Arbeiters am eigentlichen Namen vorbeiging.
+# Beide Namen gelten, damit ein Wechsel in die eine oder andere Richtung
+# nichts still kaputtmacht.
+UNTERARBEITER = ("Task", "Agent")
 
 # Kurz und austauschbar. Sie stehen allein da, bis die Antwort kommt --
 # deshalb keine Ansage, was genau gesucht wird: Das weiss der Satz noch
