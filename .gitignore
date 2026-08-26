@@ -21,11 +21,16 @@ timer.json
 # Telegram.txt enthaelt den api_hash, google.txt Client-ID und Secret.
 Telegram.txt
 google.txt
+# Enthaelt den FD_API_SCHLUESSEL im Klartext.
+finanz.tech-artist.de.txt
 *.token
 *.secret
 
 # Persoenliches Gedaechtnis. Der Aufbau gehoert ins Repository, der
 # Inhalt nicht -- dort steht, was Sarvis ueber dich weiss.
+# kern.md ist AUSGEFUELLT persoenlich -- die leere Struktur liegt
+# als kern.VORLAGE.md im Repository.
+gedaechtnis/kern.md
 gedaechtnis/gemerkt.md
 gedaechtnis/beobachtet.md
 gedaechtnis/personen/*.md

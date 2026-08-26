@@ -59,6 +59,16 @@ def kern_lesen() -> tuple[str, list[str]]:
     hinweise: list[str] = []
     datei: Path = config.GEDAECHTNIS / "kern.md"
     if not datei.exists():
+        # kern.md ist ausgefuellt persoenlich und steht deshalb NICHT im
+        # Repository -- nur die leere Struktur als kern.VORLAGE.md. Beim
+        # ersten Start (oder nach einem frischen Klon) wird daraus eine
+        # eigene Datei gemacht, sonst stuende hier nur eine Warnung und
+        # niemand wuesste, was zu tun ist.
+        vorlage = config.GEDAECHTNIS / "kern.VORLAGE.md"
+        if vorlage.exists():
+            datei.write_text(vorlage.read_text(encoding="utf-8"),
+                             encoding="utf-8")
+            return "", [f"kern.md aus der Vorlage angelegt -- bitte ausfuellen ({datei})"]
         return "", [f"kein Gedaechtnis gefunden ({datei})"]
 
     roh = datei.read_text(encoding="utf-8")
