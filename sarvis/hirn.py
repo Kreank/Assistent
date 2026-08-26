@@ -17,6 +17,9 @@ from claude_agent_sdk import (
     ResultMessage,
     StreamEvent,
     TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
 )
 
 from . import config, schutz
@@ -72,6 +75,10 @@ class Hirn:
         self._nachtrag = ""          # Hinweis fuer den naechsten Zuruf
         # Liefert eine Zeile mit dem, was gerade laeuft (Arbeitsgedaechtnis)
         self.zustand_zeile = zustand_zeile
+        # Laufende Unter-Arbeiter: Werkzeugkennung -> kurze Beschreibung.
+        # Sie sind der Grund, warum Sarvis still wirken kann, waehrend
+        # etwas gebaut wird -- also gehoeren sie in die Anzeige.
+        self.subagenten: dict = {}
 
     async def start(self) -> None:
         # Der Kern des Gedaechtnisses gehoert in den Systemprompt, nicht an
@@ -227,6 +234,32 @@ class Hirn:
             message=f"Das Werkzeug {kurz} ist für Sarvis nicht freigegeben."
         )
 
+    def _subagenten_verfolgen(self, nachricht) -> None:
+        """Mitschreiben, welche Unter-Arbeiter gerade laufen.
+
+        Start ist ein Werkzeugaufruf "Task" in SEINER Nachricht (nicht in
+        der eines Arbeiters), Ende der zugehoerige Rueckgabeblock. Ohne
+        das Ende bliebe die Anzeige stehen und behauptete Arbeit, die
+        laengst fertig ist.
+        """
+        if isinstance(nachricht, AssistantMessage):
+            for block in nachricht.content:
+                if isinstance(block, ToolUseBlock) and block.name == "Task":
+                    e = block.input or {}
+                    was = (e.get("description") or e.get("subagent_type")
+                           or "Arbeiter")
+                    self.subagenten[block.id] = str(was)[:40]
+        elif isinstance(nachricht, UserMessage):
+            inhalt = nachricht.content
+            if isinstance(inhalt, list):
+                for block in inhalt:
+                    if isinstance(block, ToolResultBlock):
+                        self.subagenten.pop(block.tool_use_id, None)
+
+    def subagenten_kurz(self) -> list:
+        """Was die Unter-Arbeiter gerade tun -- fuer die Anzeige."""
+        return [f"Arbeiter: {w}" for w in self.subagenten.values()]
+
     async def unterbrechen(self) -> None:
         """Claude mitten im Satz stoppen -- und den Puffer leerraeumen.
 
@@ -314,6 +347,8 @@ class Hirn:
             if getattr(nachricht, "parent_tool_use_id", None) is not None:
                 continue
 
+            self._subagenten_verfolgen(nachricht)
+
             if isinstance(nachricht, StreamEvent):
                 e = nachricht.event or {}
                 if e.get("type") == "content_block_delta":
@@ -336,3 +371,6 @@ class Hirn:
             elif isinstance(nachricht, ResultMessage):
                 self.letzte_kosten = nachricht.total_cost_usd
                 self._offen = False
+                # Ist die Runde vorbei, laeuft auch kein Arbeiter mehr --
+                # ein Rest hier waere eine Anzeige, die nie verschwindet.
+                self.subagenten.clear()

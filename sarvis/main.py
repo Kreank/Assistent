@@ -425,6 +425,47 @@ class Sarvis:
         self.arbeitet = False
         print("  (unterbrochen)")
 
+    async def _hintergrund_melden(self) -> None:
+        """Laufende Arbeit an die Anzeige melden, einmal je Sekunde.
+
+        Bewusst gepollt und nicht bei jeder Aenderung gemeldet: Die
+        Quellen liegen in zwei verschiedenen Welten (Werkstatt und Hirn),
+        und eine Anzeige, die einmal eine Meldung verpasst, behauptete
+        sonst dauerhaft das Falsche. Einmal je Sekunde neu zu sagen, was
+        Sache ist, kann nicht auseinanderlaufen.
+        """
+        letzte = None
+        letzter_stand = None
+        beginn = 0.0        # seit wann laeuft ueberhaupt etwas
+        fertig_um = 0.0     # wann wurde das Letzte fertig
+        while True:
+            zeilen = []
+            try:
+                if self.werkstatt is not None:
+                    zeilen += self.werkstatt.laufende_kurz()
+                zeilen += self.hirn.subagenten_kurz()
+            except Exception:
+                zeilen = []
+
+            jetzt = time.perf_counter()
+            if zeilen and not letzte:
+                beginn = jetzt          # aus dem Nichts wurde Arbeit
+                fertig_um = 0.0
+            elif not zeilen and letzte:
+                fertig_um = jetzt       # das Letzte ist durch
+
+            # "Fertig" bleibt kurz stehen: Verschwaende die Anzeige sofort,
+            # verpasste man genau den Moment, auf den man gewartet hat.
+            fertig = bool(fertig_um and
+                          jetzt - fertig_um < config.ENTWICKLUNG_GRUEN_SEK)
+            seit = (jetzt - beginn) if zeilen and beginn else 0.0
+            stand = (zeilen, fertig, int(seit) // 10)
+            if stand != letzter_stand:
+                self.anzeige.hintergrund(zeilen, seit=seit, fertig=fertig)
+                letzter_stand = stand
+            letzte = zeilen
+            await asyncio.sleep(1.0)
+
     async def _alles_stoppen(self) -> None:
         """Sofort still und alles Laufende anhalten.
 
@@ -678,6 +719,7 @@ class Sarvis:
         print("  Strg+C zum Beenden.")
         print("=" * 62)
 
+        melder = asyncio.create_task(self._hintergrund_melden())
         try:
             while True:
                 befehl = await self.schlange.get()
@@ -745,6 +787,7 @@ class Sarvis:
                             self._durchgang_sicher()
                         )
         finally:
+            melder.cancel()
             lauscher.stop()
             self.horcher.stopp()
             if schalter is not None:

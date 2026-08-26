@@ -50,6 +50,20 @@ class Anzeige:
         """Fenster offen: so lange ist kein Weckwort noetig."""
         self._senden(art="nachhoeren", sekunden=round(float(sekunden), 2))
 
+    def hintergrund(self, zeilen, seit: float = 0.0,
+                    fertig: bool = False) -> None:
+        """Was gerade im Hintergrund arbeitet -- leere Liste: nichts.
+
+        Sarvis kann still dastehen und trotzdem beschaeftigt sein: Ein
+        Auftrag laeuft weiter, ein Subagent baut ein Frontend, waehrend
+        das Gespraech schon woanders ist. Ohne Anzeige ist das von
+        Nichtstun nicht zu unterscheiden -- und man fragt nach, ob
+        ueberhaupt etwas passiert.
+        """
+        self._senden(art="hintergrund",
+                     zeilen=[str(z) for z in (zeilen or [])][:3],
+                     seit=round(float(seit), 1), fertig=bool(fertig))
+
     def werkzeug(self, name: str, aktiv: bool = True) -> None:
         """Ein Werkzeug im Kranz aufleuchten lassen (Stufe 2)."""
         self._senden(art="werkzeug", name=name, aktiv=bool(aktiv))

@@ -129,6 +129,10 @@ class Hud(QWidget):
         # keine Zusage mehr, sondern eine Gewohnheit.
         self.freigabe = ""
         self.freigabe_rest = 0.0
+        # Was im Hintergrund arbeitet, waehrend er still dasteht.
+        self.hintergrund: list = []
+        self.hg_seit = 0.0        # wie lange laeuft es schon (Sekunden)
+        self.hg_fertig = False    # gerade fertig geworden?
         self.verschiebbar = False  # Verschiebemodus?
         self._griff = None         # Mausversatz beim Ziehen
         # Name -> (Zustand, Aufleuchten 0..1)
@@ -270,6 +274,10 @@ class Hud(QWidget):
             elif art == "nachhoeren":
                 self.nachhoeren = float(m.get("sekunden") or 0.0)
                 self.nachhoeren_ganz = max(0.1, self.nachhoeren)
+            elif art == "hintergrund":
+                self.hintergrund = [str(z) for z in (m.get("zeilen") or [])]
+                self.hg_seit = float(m.get("seit") or 0.0)
+                self.hg_fertig = bool(m.get("fertig"))
             elif art == "freigabe":
                 self.freigabe = str(m.get("text") or "")
                 self.freigabe_rest = float(m.get("sekunden") or 0.0)
@@ -393,6 +401,22 @@ class Hud(QWidget):
         p.setBrush(g)
         p.drawEllipse(MITTE, r, r * 0.92)
 
+    def _entwicklungsfarbe(self):
+        """Welche Farbe das Entwicklungs-Icon gerade hat -- oder None.
+
+        Es gibt keinen echten Fortschritt zu messen; was ein Arbeiter
+        gerade tut, weiss nur er. Was man ehrlich sagen kann, ist WIE
+        LANGE er schon dabei ist -- und ob er fertig ist. Genau das
+        zeigen die drei Farben, nichts anderes wird behauptet.
+        """
+        if self.hg_fertig:
+            return QColor(120, 226, 140)          # fertig
+        if not self.hintergrund:
+            return None                            # laeuft nichts
+        if self.hg_seit < config.ENTWICKLUNG_ROT_SEK:
+            return QColor(255, 104, 104)          # gerade begonnen
+        return QColor(255, 176, 72)               # laeuft
+
     def _kranz(self, p, farbe):
         """Die Werkzeuge rundherum, oben beginnend im Uhrzeigersinn."""
         anzahl = len(self.reihenfolge)
@@ -417,6 +441,18 @@ class Hud(QWidget):
             f = QColor(farbe if (lage == "bereit" or glut > 0.02)
                        else QColor(150, 168, 196))
             f.setAlphaF(kraft)
+
+            # Die Entwicklung leuchtet in EIGENER Farbe weiter, solange
+            # gebaut wird -- unabhaengig davon, was Sarvis gerade macht.
+            # Sie atmet dabei, damit sie sich von einem Werkzeug
+            # unterscheidet, das nur eben kurz aufgeleuchtet ist.
+            if name == "Entwicklung":
+                eigen = self._entwicklungsfarbe()
+                if eigen is not None:
+                    puls = 0.5 + 0.5 * math.sin(self.tick * 2.4)
+                    f = QColor(eigen)
+                    f.setAlphaF(0.72 + 0.28 * puls)
+                    glut = max(glut, 0.30 + 0.40 * puls)
 
             # Speiche nach innen
             s = QColor(f)
@@ -558,6 +594,52 @@ class Hud(QWidget):
         p.setBrush(QColor(235, 245, 255, 230))
         p.drawEllipse(MITTE, r * 0.45, r * 0.45)
 
+    def _hintergrund_malen(self, p) -> None:
+        """Laufende Arbeit, die nicht im Gespraech steht -- oben links.
+
+        Die Ecke ist keine Geschmacksfrage. Mittig unter dem Ring lag die
+        Zeile ueber den Beschriftungen des Kranzes UND ueber der
+        Freigabe: drei Texte uebereinander, keiner davon lesbar. Oben
+        links ist der einzige Platz, der bei jedem Zustand frei bleibt.
+
+        Eigene Farbe, ebenfalls absichtlich: Das gehoert zu keinem der
+        Zustaende -- es laeuft weiter, egal ob er zuhoert, denkt oder
+        schweigt. Der Ring in der Mitte gehoert IHM, diese Ecke der
+        Arbeit im Hintergrund.
+        """
+        farbe = self._entwicklungsfarbe() or QColor(126, 224, 168)
+        x, y = 16.0, 12.0
+
+        # Drei wandernde Punkte: Eine stehende Zeile sieht aus wie eine,
+        # die haengengeblieben ist.
+        schritt = int(self.tick * 3.0) % 3
+        p.setPen(Qt.NoPen)
+        for i in range(3):
+            c = QColor(farbe)
+            c.setAlphaF(0.95 if i == schritt else 0.25)
+            p.setBrush(c)
+            p.drawEllipse(QPointF(x + 3 + i * 7.0, y + 8.0), 2.4, 2.4)
+
+        kopf = (f"im Hintergrund · {len(self.hintergrund)}"
+                if len(self.hintergrund) > 1 else "im Hintergrund")
+        f = QFont("Segoe UI", 7)
+        f.setLetterSpacing(QFont.PercentageSpacing, 160)
+        f.setCapitalization(QFont.AllUppercase)
+        p.setFont(f)
+        kopffarbe = QColor(farbe)
+        kopffarbe.setAlphaF(0.95)
+        self._beschriften(p, QRectF(x + 26, y, 240, 15), Qt.AlignLeft,
+                          kopf, kopffarbe)
+        y += 15
+
+        p.setFont(QFont("Segoe UI", 7))
+        for zeile in self.hintergrund[:3]:
+            c = QColor(farbe)
+            c.setAlphaF(0.78)
+            self._beschriften(p, QRectF(x + 4, y, 260, 14), Qt.AlignLeft,
+                              zeile, c)
+            y += 13
+
     def _text(self, p, farbe):
         wort = BESCHRIFTUNG.get(self.zustand, "")
         if self.zustand == RUHIG and self.nachhoeren > 0.0:
@@ -573,6 +655,9 @@ class Hud(QWidget):
                 p, QRectF(0, MITTE.y() + RADIUS + 74, BREITE, 18),
                 Qt.AlignHCenter, wort, c,
             )
+
+        if self.hintergrund or self.hg_fertig:
+            self._hintergrund_malen(p)
 
         if self.freigabe:
             f = QFont("Segoe UI", 7)

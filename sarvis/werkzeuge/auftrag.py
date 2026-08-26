@@ -344,6 +344,12 @@ class Werkstatt:
         except OSError:
             pass
 
+    def laufende_kurz(self) -> list:
+        """Was gerade arbeitet -- kurz genug fuer die Anzeige."""
+        return [f"Auftrag {a.nummer}: {a.projekt}"
+                for a in sorted(self.auftraege.values(), key=lambda x: x.nummer)
+                if a.status == "läuft"]
+
     def uebersicht(self) -> list[str]:
         if not self.auftraege:
             return []

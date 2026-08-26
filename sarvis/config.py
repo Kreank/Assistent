@@ -586,7 +586,20 @@ WERKZEUG_ICONS = {
     "Kontakte":   "E716",   # zwei Personen
     "Drive":      "E753",   # Wolke
     "Tabellen":   "E80A",   # Gitter
+    "Entwicklung": "E943",  # spitze Klammern -- siehe unten
 }
+
+# Das Entwicklungs-Icon ist kein Werkzeug wie die anderen: Es leuchtet,
+# solange im Hintergrund gebaut wird, und wechselt dabei die Farbe. So
+# sieht man auf einen Blick, dass da noch etwas laeuft -- ohne lesen zu
+# muessen, und auch dann, wenn Sarvis selbst gerade still ist.
+#
+#   rot     gerade erst begonnen
+#   orange  laeuft
+#   gruen   fertig -- und bleibt danach noch kurz stehen, sonst verpasst
+#           man genau den Moment, auf den man gewartet hat
+ENTWICKLUNG_ROT_SEK = 90
+ENTWICKLUNG_GRUEN_SEK = 25
 
 WERKZEUGE = [
     ("Timer",      "bereit"),
@@ -604,4 +617,5 @@ WERKZEUGE = [
     ("Kontakte",   "bereit"),
     ("Drive",      "bereit"),
     ("Tabellen",   "bereit"),
+    ("Entwicklung", "bereit"),
 ]
