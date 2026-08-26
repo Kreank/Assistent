@@ -39,6 +39,24 @@ from . import config
 _PFAD_WERKZEUGE = ("datei_lesen", "datei_schreiben", "ordner_ansehen")
 
 
+def _pfad_im_befehl(befehl: str) -> str:
+    """Der erste Pfad in einem Befehl -- auch in Git-Bash-Schreibweise.
+
+    "D:\\Projekte\\x" wurde erkannt, "/d/Projekte/x" nicht -- und genau so
+    schreibt die Git-Bash Laufwerke. Die Folge war nicht harmlos: ort()
+    lieferte "", und eine ortlose Freigabe gilt laut _unter() UEBERALL.
+    Eine Zusage, die sich wie "hier im Projekt" anhoert, haette damit
+    still fuer die ganze Platte gegolten.
+    """
+    treffer = re.search(r"[a-zA-Z]:[\\/][^\s\"';|]*", befehl)
+    if treffer:
+        return treffer.group(0)
+    bash = re.search(r"(?<![\w/])/([a-zA-Z])/([^\s\"';|]*)", befehl)
+    if bash:
+        return f"{bash.group(1).upper()}:/{bash.group(2)}"
+    return ""
+
+
 def ort(werkzeug: str, eingabe: dict) -> str:
     """Der Ordner, um den es geht -- oder "" fuer ortlose Werkzeuge.
 
@@ -51,8 +69,7 @@ def ort(werkzeug: str, eingabe: dict) -> str:
     if werkzeug in _PFAD_WERKZEUGE:
         pfad = str(e.get("pfad") or "")
     elif werkzeug == "befehl_ausfuehren":
-        treffer = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", str(e.get("befehl") or ""))
-        pfad = treffer[0] if treffer else ""
+        pfad = _pfad_im_befehl(str(e.get("befehl") or ""))
     if not pfad:
         return ""
     try:
@@ -177,6 +194,18 @@ class Freigaben:
         if not wo:
             return name
         return f"{name} in {schutz.sprechbar(wo, 'dativ')}"
+
+    # Dieselben Wortformen braucht auch die Rueckfrage, wenn sie die
+    # Freigabe anbietet -- sonst kuendigt sie etwas anderes an, als
+    # hinterher gilt.
+    @staticmethod
+    def wo_lang(wo: str) -> str:
+        from . import schutz
+        return schutz.sprechbar(wo, "dativ") if wo else "das"
+
+    @staticmethod
+    def dauer_lang(minuten: float) -> str:
+        return Freigaben._dauer(minuten)
 
     @staticmethod
     def _dauer(minuten: float) -> str:

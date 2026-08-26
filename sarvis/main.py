@@ -24,14 +24,15 @@ from pynput import keyboard  # noqa: E402
 from . import config, rueckfrage  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .audio import Aufnehmer, Lautsprecher, gong  # noqa: E402
-from .freigabe import Freigaben  # noqa: E402
+from .freigabe import Freigaben, ort as freigabe_ort  # noqa: E402
 from .hinweis import zeigen  # noqa: E402
 from .hirn import Hirn  # noqa: E402
 from .mund import Mund, Satzsammler, taste_aussprechen, tageszeit  # noqa: E402
 from .ohren import Ohren  # noqa: E402
 from .weckwort import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
-from .werkzeuge import bauen, kurzer_name, zustand_zeile  # noqa: E402
+from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
+                        zustand_zeile)
 
 
 def _taste_aufloesen(name: str):
@@ -99,7 +100,10 @@ class Sarvis:
                          leuchten=self.anzeige.werkzeug,
                          nachfragen=self.nachfragen,
                          protokoll=self.protokoll,
-                         zustand_zeile=lambda: zustand_zeile(self.wecker),
+                         zustand_zeile=lambda: " ".join(
+                             z for z in (zustand_zeile(self.wecker),
+                                         unterbrochen_zeile(self.werkstatt))
+                             if z),
                          freigaben=self.freigaben)
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         self.schleife: asyncio.AbstractEventLoop | None = None
@@ -113,6 +117,8 @@ class Sarvis:
                                anzeige=self.anzeige)
         # Was in DIESEM Zug schon abgelehnt wurde. Siehe nachfragen().
         self._abgelehnt: dict = {}
+        # Wie oft am selben Ort hintereinander ja gesagt wurde.
+        self._ja_folge: dict = {}
         self.gruesse = []            # vorbereitete Weckantworten
         self.gruss_laeuft = False
 
@@ -196,6 +202,11 @@ class Sarvis:
             await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
         self.horcher.spricht(None)
+        # Wer von sich aus etwas meldet, stellt oft eine Frage dazu ("ist
+        # fertig -- soll ich es dir zeigen?"). Ohne offenes Fenster muesste
+        # man darauf mit "Hey Sarvis, ja" antworten, und das sagt niemand.
+        self.horcher.nachhoeren()
+        self.anzeige.nachhoeren(config.NACHHOEREN_SEK)
 
     # --- Begruessung auf Vorrat --------------------------------------------
 
@@ -284,7 +295,30 @@ class Sarvis:
             print(f"  ? schon beantwortet ({frueher}) -- nicht nochmal gefragt")
             return frueher, wortlaut
 
+        # Zehnmal dasselbe fragen ist keine Sorgfalt mehr, sondern
+        # Zermuerbung -- wer zum zehnten Mal ja sagt, hoert nicht mehr hin,
+        # was er da bestaetigt. Nach dem dritten Ja am selben Ort bietet
+        # die Frage deshalb die Freigabe auf Zeit gleich mit an. Ein Ja
+        # gilt dann fuer beides, und der Nutzer hoert genau, wofuer.
+        #
+        # Nur MIT Ort: Ohne Ort waere die Freigabe ortlos, und ortlos
+        # heisst ueberall (freigabe._unter). Das waere das Gegenteil von
+        # dem, was hier gemeint ist.
+        wo = freigabe_ort(werkzeug, eingabe)
+        folge = f"{werkzeug}|{wo}"
+        anbieten = bool(
+            wo
+            and self._ja_folge.get(folge, 0) >= 2
+            and self.freigaben.erteilbar(werkzeug)
+            and not self.freigaben.erlaubt(werkzeug, eingabe)
+        )
+
         frage = rueckfrage.formulieren(werkzeug, eingabe)
+        if anbieten:
+            frage += (" Sag ja, dann frage ich dafür "
+                      f"{Freigaben.wo_lang(wo)} die nächsten "
+                      f"{Freigaben.dauer_lang(config.FREIGABE_MINUTEN)} "
+                      "nicht mehr.")
         print(f"\n  ? Sarvis fragt: {frage}")
 
         letztes = ""
@@ -334,11 +368,19 @@ class Sarvis:
                 print(f"  ? Antwort: {gehoert!r} -> {entschieden}")
 
                 if entschieden == "ja":
-                    await self._freigabe_erteilen(werkzeug, eingabe, gehoert)
+                    self._ja_folge[folge] = self._ja_folge.get(folge, 0) + 1
+                    if anbieten:
+                        self._ja_folge[folge] = 0
+                    await self._freigabe_erteilen(
+                        werkzeug, eingabe, gehoert,
+                        minuten=config.FREIGABE_MINUTEN if anbieten else None)
                     self.anzeige.zustand(RUHIG)
                     return "ja", gehoert
 
                 if entschieden == "nein":
+                    # Ein Nein setzt die Kette zurueck: Was gerade abgelehnt
+                    # wurde, ist kein Fall fuer eine Pauschalfreigabe.
+                    self._ja_folge[folge] = 0
                     if schluessel is not None:
                         self._abgelehnt[schluessel] = ("nein", gehoert)
                     await self._sagen(rueckfrage.ABGELEHNT)
@@ -376,14 +418,15 @@ class Sarvis:
         return "nein", ""
 
     async def _freigabe_erteilen(self, werkzeug: str, eingabe: dict,
-                                 gehoert: str) -> None:
+                                 gehoert: str, minuten: float = None) -> None:
         """Aus "ja, und frag nicht nochmal" eine Freigabe auf Zeit machen.
 
-        Nur auf ausdruecklichen Wunsch. Ein blosses "ja" gilt weiter fuer
-        genau diesen einen Aufruf -- Bequemlichkeit allein darf keine
-        Dauererlaubnis erzeugen.
+        Auf ausdruecklichen Wunsch -- oder wenn die Frage die Freigabe
+        selbst angeboten hat (minuten gesetzt). Ein blosses "ja" auf eine
+        gewoehnliche Frage erzeugt weiterhin keine Dauererlaubnis.
         """
-        minuten = rueckfrage.freigabe_erkennen(gehoert)
+        if minuten is None:
+            minuten = rueckfrage.freigabe_erkennen(gehoert)
         if minuten is None:
             return
 
