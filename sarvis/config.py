@@ -133,16 +133,34 @@ STIMME = WURZEL / "stimmen" / "de_DE-thorsten-medium.onnx"
 # None = die Stimme hat nur einen Sprecher.
 STIMME_SPRECHER = None
 
-# Sprechtempo. Kleiner = schneller. Der wirksamste Hebel gegen
-# "klingt einschlaefernd" -- oft mehr als ein Stimmwechsel.
-TEMPO = 0.88
+# Sprechtempo (Pipers length_scale). Kleiner = schneller. Der wirksamste
+# Hebel gegen "klingt einschlaefernd" -- oft mehr als ein Stimmwechsel.
+#
+# Stand auf 0.88 und verschluckte damit Laute. Das Modell selbst gibt in
+# seiner JSON length_scale=1 an: 0.88 ist zwoelf Prozent schneller, als
+# die Stimme trainiert wurde, und die kurzen Konsonanten am Wortende
+# fallen dabei als Erstes weg.
+#
+# 0.96 statt 1.0, weil die Lebendigkeit ausdruecklich gewollt ist -- nur
+# eben nicht auf Kosten der Verstaendlichkeit. Wird noch etwas
+# verschluckt: weiter Richtung 1.0 drehen.
+TEMPO = 0.96
 
 # Gegen das Einschlaefernde. Piper spricht in der Vorgabe sehr gleichmaessig;
 # mehr Schwankung in Betonung und Timing klingt wacher.
 #   BETONUNG (noise_scale)   0.33 = monoton  ·  0.9 = lebhaft
 #   RHYTHMUS (noise_w_scale) 0.4  = gleichmaessig  ·  1.3 = beweglich
 BETONUNG = 0.78
-RHYTHMUS = 1.05
+# Von 1.05 zurueck. noise_w streut die Laenge der einzelnen Laute; steht
+# es hoch, geraten manche sehr kurz -- zusammen mit einem schnellen Tempo
+# ist das genau der verschluckte Buchstabe. Das Modell sieht 0.8 vor;
+# 0.95 behaelt die Beweglichkeit und nimmt die Ausreisser raus.
+#
+# Nicht gemessen, sondern hergeleitet: Ein Rueckhoeren durch Whisper
+# konnte die Varianten nicht trennen (alle zwischen 97,6 und 98,9
+# Prozent) -- es rekonstruiert aus dem Zusammenhang genau das, was ein
+# Ohr vermisst. Hier zaehlt dein Urteil, nicht meins.
+RHYTHMUS = 0.95
 
 # Klangbearbeitung hinter Piper. Sci-Fi-Stimmen sind fast nie eigene
 # Modelle, sondern normale Stimmen mit Effektkette -- HAL, GLaDOS und
