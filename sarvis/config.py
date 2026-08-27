@@ -524,6 +524,9 @@ WERKZEUG_STUFEN = {
     "finanzen_buchungen":  "still",
     "finanzen_konten":     "still",
     "finanzen_buchen":     "fragen",
+    # Umbuchen legt zwei verbundene Buchungen an -- derselbe Rang wie
+    # eine einzelne, und auf dem falschen Konto genauso laestig.
+    "finanzen_umbuchen":   "fragen",
 
     "projekt_liste":      "still",
     # Ansehen aendert nichts und ist die Alternative zum Terminal --
@@ -650,6 +653,7 @@ FREIGABE_NAMEN = {
     "projekt_anlegen": "Projekte anlegen",
     "projekt_oeffnen": "Projekte öffnen",
     "finanzen_buchen": "Buchungen eintragen",
+    "finanzen_umbuchen": "Geld umbuchen",
     "ort_ansehen": "Orte ansehen",
     "auftrag_geben": "Aufträge vergeben",
     "termin_anlegen": "Termine eintragen",

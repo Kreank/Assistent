@@ -72,7 +72,7 @@ def bauen(sagen, leuchten=None, melden=None):
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)
     if config.finanz_schluessel():
-        # Ohne Schluessel gaebe es sieben Werkzeuge, die nur "kein
+        # Ohne Schluessel gaebe es acht Werkzeuge, die nur "kein
         # Zugang" sagen koennen -- das verwirrt mehr, als es nuetzt.
         alle += finanzen.werkzeuge(protokoll, leuchten)
     alle += auftrag.werkzeuge(werkstatt, protokoll, leuchten)

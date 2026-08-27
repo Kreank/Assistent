@@ -14,7 +14,7 @@ sprechbar, {"summe": "1098.00"} nicht -- und ein Modell, das aus rohen
 Zahlen erst formulieren muss, verplappert sich dabei.
 
 **Lesen ist harmlos, Schreiben nicht.** Alle Abfragen laufen still durch;
-eine Buchung anzulegen fragt nach. Geloescht wird ueber Sarvis gar
+eine Buchung oder Umbuchung anzulegen fragt nach. Geloescht wird ueber Sarvis gar
 nicht: Eine verlorene Buchung faellt erst beim Kontoabgleich auf, und
 dann weiss niemand mehr, was da stand. Das gehoert an den Bildschirm.
 
@@ -94,6 +94,31 @@ async def _holen(weg: str, **parameter):
         return antwort.json(), ""
     except ValueError:
         return None, "Das Dashboard hat etwas Unlesbares geschickt."
+
+
+async def _schicken(weg: str, koerper: dict, was: str):
+    """Ein Schreibvorgang. Gibt (Daten, Fehlertext) zurueck -- wie _holen.
+
+    `was` steht im Ablehnungssatz ("lehnt die Buchung ab"), damit der
+    Vorgelesene benennt, was nicht geklappt hat.
+    """
+    schluessel = config.finanz_schluessel()
+    if not schluessel:
+        return None, "Für das Finanzdashboard ist kein Schlüssel hinterlegt."
+    try:
+        async with httpx.AsyncClient(
+                timeout=config.FINANZ_ZEITGRENZE,
+                headers={"X-Api-Key": schluessel}) as klient:
+            antwort = await klient.post(config.FINANZ_BASIS + weg, json=koerper)
+    except httpx.HTTPError as e:
+        return None, f"Ich erreiche das Dashboard nicht: {type(e).__name__}."
+    if antwort.status_code >= 400:
+        return None, f"Das Dashboard lehnt {was} ab (Fehler {antwort.status_code})."
+    try:
+        return antwort.json(), ""
+    except ValueError:
+        # Angelegt ist angelegt -- nur die Antwort war nicht lesbar.
+        return {}, ""
 
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:
@@ -246,8 +271,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return _antwort("Dazu finde ich keine Buchung.")
         teile = []
         for b in daten:
-            richtung = ("Ausgabe" if Decimal(str(b.get("betrag", "0"))) < 0
-                        else "Einnahme")
+            # Eine Umbuchung als "Ausgabe" vorzulesen waere falsch: das Geld
+            # ist nicht weg, es liegt auf dem anderen eigenen Konto.
+            if b.get("umbuchung_id"):
+                richtung = "Umbuchung"
+            else:
+                richtung = ("Ausgabe" if Decimal(str(b.get("betrag", "0"))) < 0
+                            else "Einnahme")
             teile.append(f"{_datum(b.get('datum'))}: {richtung} "
                          f"{_betrag(b.get('betrag'))}, "
                          f"{b.get('verwendungszweck') or 'ohne Zweck'}")
@@ -266,9 +296,17 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return _antwort("", fehler)
         if not daten:
             return _antwort("Es ist noch kein Konto angelegt.")
-        teile = [f"{k.get('id')}: {k.get('name')}"
-                 + (f" bei der {k.get('bank')}" if k.get("bank") else "")
-                 for k in daten]
+        namen = {k.get("id"): k.get("name") for k in daten}
+        teile = []
+        for k in daten:
+            satz = f"{k.get('id')}: {k.get('name')}"
+            if k.get("bank"):
+                satz += f" bei der {k.get('bank')}"
+            # Konten koennen unter einem anderen haengen. Ohne diesen Zusatz
+            # klaenge ein Sparkonto wie ein zweites Girokonto.
+            if k.get("eltern_id") in namen:
+                satz += f", Unterkonto von {namen[k['eltern_id']]}"
+            teile.append(satz)
         return _antwort("; ".join(teile) + ".")
 
     @tool(
@@ -300,10 +338,6 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def finanzen_buchen(args):
-        schluessel = config.finanz_schluessel()
-        if not schluessel:
-            return _antwort("", "Für das Finanzdashboard ist kein Schlüssel "
-                                "hinterlegt.")
         koerper = {
             "datum": args.get("datum") or f"{date.today():%Y-%m-%d}",
             "betrag": str(args.get("betrag")),
@@ -314,18 +348,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if args.get("gegenpartei"):
             koerper["gegenpartei"] = " ".join(str(args["gegenpartei"]).split())
 
-        try:
-            async with httpx.AsyncClient(
-                    timeout=config.FINANZ_ZEITGRENZE,
-                    headers={"X-Api-Key": schluessel}) as klient:
-                antwort = await klient.post(
-                    config.FINANZ_BASIS + "/transaktionen", json=koerper)
-        except httpx.HTTPError as e:
-            return _antwort("", f"Ich erreiche das Dashboard nicht: "
-                                f"{type(e).__name__}.")
-        if antwort.status_code >= 400:
-            return _antwort("", f"Das Dashboard lehnt die Buchung ab "
-                                f"(Fehler {antwort.status_code}).")
+        _, fehler = await _schicken("/transaktionen", koerper, "die Buchung")
+        if fehler:
+            return _antwort("", fehler)
 
         blinken()
         vermerken(f"finanzen_buchen: {koerper['betrag']} für "
@@ -335,6 +360,76 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                         f"{_betrag(koerper['betrag'])} für "
                         f"{koerper['verwendungszweck']}.")
 
+    @tool(
+        "finanzen_umbuchen",
+        "Schiebt Geld von einem eigenen Konto auf ein anderes — Sparen, "
+        "Rücklage, Ausgleich. Für 'leg zweihundert Euro aufs Sparkonto'. "
+        "Der Betrag ist hier POSITIV ('200.00'); die Richtung sagen "
+        "von_konto_id und nach_konto_id. Das Dashboard legt zwei verbundene "
+        "Buchungen an, die weder als Einnahme noch als Ausgabe zählen — es "
+        "hat ja niemand etwas verdient oder ausgegeben. Für eine "
+        "gewöhnliche Ausgabe nimm finanzen_buchen.",
+        {
+            "type": "object",
+            "properties": {
+                "betrag": {"type": "string",
+                           "description": "Positiv, Punkt als Trenner: "
+                                          "'200.00'.",
+                           "pattern": r"^\d+(\.\d{1,2})?$"},
+                "von_konto_id": {"type": "integer",
+                                 "description": "Von welchem Konto das Geld "
+                                                "abgeht."},
+                "nach_konto_id": {"type": "integer",
+                                  "description": "Auf welches Konto es geht."},
+                "verwendungszweck": {"type": "string",
+                                     "description": "Optional, wofür."},
+                "datum": {"type": "string",
+                          "description": "ISO. Weglassen = heute.",
+                          "pattern": r"^\d{4}-\d{2}-\d{2}$"},
+            },
+            "required": ["betrag", "von_konto_id", "nach_konto_id"],
+        },
+    )
+    async def finanzen_umbuchen(args):
+        von, nach = int(args.get("von_konto_id")), int(args.get("nach_konto_id"))
+        if von == nach:
+            return _antwort("", "Von und nach demselben Konto — das wäre "
+                                "keine Umbuchung.")
+        # Das Dashboard verlangt einen Betrag ueber null. Hier abgefangen
+        # ergibt das einen Satz statt einer Fehlernummer.
+        try:
+            if Decimal(str(args.get("betrag"))) <= 0:
+                raise InvalidOperation
+        except (InvalidOperation, TypeError, ValueError):
+            return _antwort("", "Für eine Umbuchung brauche ich einen Betrag "
+                                "über null, positiv angegeben.")
+        koerper = {
+            "datum": args.get("datum") or f"{date.today():%Y-%m-%d}",
+            "betrag": str(args.get("betrag")),
+            "von_konto_id": von,
+            "nach_konto_id": nach,
+            "verwendungszweck": " ".join(
+                str(args.get("verwendungszweck") or "").split()),
+        }
+        _, fehler = await _schicken("/transaktionen/umbuchung", koerper,
+                                    "die Umbuchung")
+        if fehler:
+            return _antwort("", fehler)
+
+        blinken()
+        vermerken(f"finanzen_umbuchen: {koerper['betrag']} von Konto {von} "
+                  f"auf Konto {nach}")
+        # Fuer den Satz zaehlen Namen, nicht Nummern. Scheitert der Abruf,
+        # bleibt es bei "Konto 3" -- die Umbuchung steht davon unberuehrt.
+        konten, _fehler = await _holen("/konten")
+        namen = {k.get("id"): k.get("name") for k in (konten or [])}
+        satz = (f"Umgebucht: {_betrag(koerper['betrag'])} von "
+                f"{namen.get(von) or f'Konto {von}'} auf "
+                f"{namen.get(nach) or f'Konto {nach}'}")
+        if koerper["verwendungszweck"]:
+            satz += f", {koerper['verwendungszweck']}"
+        return _antwort(satz + ".")
+
     return [finanzen_kontostand, finanzen_ausgaben, finanzen_monate,
             finanzen_empfaenger, finanzen_buchungen, finanzen_konten,
-            finanzen_buchen]
+            finanzen_buchen, finanzen_umbuchen]
