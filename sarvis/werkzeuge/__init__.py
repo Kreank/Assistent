@@ -14,7 +14,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 from .. import config
 
 from . import (auftrag, erinnern, finanzen, google, medien, programme,
-               projekte, telegram, zeit)
+               projekte, telegram, verlauf, zeit)
 
 SERVER = "sarvis"
 
@@ -67,7 +67,8 @@ def bauen(sagen, leuchten=None, melden=None):
     wecker = zeit.Wecker(sagen=sagen, leuchten=leuchten, melden=melden)
     werkstatt = auftrag.Werkstatt(sagen=sagen, melden=melden, leuchten=leuchten)
     alle = (zeit.werkzeuge(wecker, protokoll)
-            + erinnern.werkzeuge(protokoll, leuchten))
+            + erinnern.werkzeuge(protokoll, leuchten)
+            + verlauf.werkzeuge(protokoll, leuchten))
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)

@@ -192,6 +192,22 @@ class Hirn:
         kurz = kurzer_name(name)
         stufe = config.WERKZEUG_STUFEN.get(kurz)
 
+        def erlauben():
+            """Ja sagen -- und einen Ordnerwechsel darin nachvollziehen.
+
+            Der Arbeitsordner wird ausschliesslich hier fortgeschrieben,
+            also erst NACH der Entscheidung. Andersherum stellte ein
+            Befehl sich seinen eigenen Freifahrtschein aus: 'cd
+            D:/Mitra/MCN; <irgendwas>' haette den Ort gesetzt, an dem
+            derselbe Befehl gemessen wird.
+            """
+            if kurz in ("Bash", "PowerShell", "befehl_ausfuehren"):
+                schutz.arbeitsordner_merken(
+                    str((eingabe or {}).get("command")
+                        or (eingabe or {}).get("befehl") or "")
+                )
+            return PermissionResultAllow()
+
         # Bei den eingebauten Werkzeugen haengt die Stufe nicht am Werkzeug,
         # sondern daran, WAS angefasst wird. Lesen im Projektordner ist
         # etwas anderes als Schreiben in D:\Mitra.
@@ -202,7 +218,7 @@ class Hirn:
         # dasselbe Ergebnis, zwei Herkuenfte. Beide muessen hier stehen,
         # sonst faellt alles Freigegebene ans Ende durch und wird abgelehnt.
         if stufe in ("still", "frei"):
-            return PermissionResultAllow()
+            return erlauben()
 
         if stufe == "nie":
             return PermissionResultDeny(
@@ -218,7 +234,7 @@ class Hirn:
             # Nachfrage durchgeht, das sonst fragen wuerde.
             if self.freigaben is not None and self.freigaben.erlaubt(kurz, eingabe):
                 print(f"  ~ {kurz}: läuft unter einer Freigabe durch")
-                return PermissionResultAllow()
+                return erlauben()
 
             if self.nachfragen is None:
                 return PermissionResultDeny(
@@ -227,7 +243,7 @@ class Hirn:
 
             entscheidung, wortlaut = await self.nachfragen(kurz, eingabe)
             if entscheidung == "ja":
-                return PermissionResultAllow()
+                return erlauben()
 
             # Der Wortlaut geht mit. Ohne ihn erfaehrt das Modell nur
             # "abgelehnt" und nie, WAS gesagt wurde -- eine Einschraenkung
@@ -377,6 +393,58 @@ class Hirn:
             await klient.disconnect()
         except Exception:
             pass
+
+    # --- Kontext ----------------------------------------------------------
+
+    async def kontext_anteil(self) -> float | None:
+        """Wie voll der Kontext ist, 0.0 bis 1.0 -- oder None.
+
+        Kostet nichts: Die Zahl rechnet der CLI-Prozess selbst aus und
+        liefert sie ueber den Steuerkanal; es geht keine Anfrage ans
+        Modell. Gemessen -- zwischen zwei Abrufen wuchs der Kontext um
+        keinen einzigen Token.
+
+        Faellt sie aus, kommt None zurueck und nicht etwa eine Null: Eine
+        Wache, die bei einem Fehler "alles frei" meldet, ist schlimmer
+        als keine.
+        """
+        if self.klient is None:
+            return None
+        try:
+            stand = await self.klient.get_context_usage()
+            return float(stand.get("percentage") or 0.0) / 100.0
+        except Exception as e:
+            print(f"  Kontextstand nicht lesbar: {type(e).__name__}: {e}")
+            return None
+
+    async def verdichten(self, anweisung: str = "") -> bool:
+        """Das Gespraech zusammenfassen -- "/compact" mit eigener Anweisung.
+
+        Ohne Anweisung fasst der Befehl fuer einen Programmierer zusammen
+        ("welche Dateien wurden geaendert"). Was ein Sprachassistent
+        behalten muss, ist etwas anderes; das steht in
+        config.KONTEXT_VERDICHTEN_ANWEISUNG.
+
+        Der Verlauf geht dabei NICHT verloren. Das SDK schreibt ihn
+        weiter vollstaendig in die Sitzungsdatei -- geprueft: Nach einem
+        "/compact" standen die drei Zurufe von davor unveraendert darin.
+        Verdichtet wird nur, was bei jedem Zuruf mitgeschickt wird;
+        nachgeschlagen wird mit verlauf_nachschlagen.
+        """
+        if self.klient is None or self._offen:
+            return False
+        befehl = f"/compact {anweisung}".strip() if anweisung else "/compact"
+        try:
+            await self.klient.query(befehl)
+            async for nachricht in self.klient.receive_response():
+                if isinstance(nachricht, ResultMessage):
+                    break
+            return True
+        except Exception as e:
+            print(f"  Verdichten ging nicht: {type(e).__name__}: {e}")
+            # Wie beim Abbruch: In der Leitung koennen Reste liegen.
+            self._leitung_unsauber = True
+            return False
 
     async def fragen(self, text: str) -> AsyncIterator[str]:
         """Schickt den Zuruf hin und liefert die Antwort in Schnipseln."""

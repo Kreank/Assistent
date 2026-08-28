@@ -21,7 +21,7 @@ for strom in (sys.stdout, sys.stderr):
 
 from pynput import keyboard  # noqa: E402
 
-from . import config, rueckfrage  # noqa: E402
+from . import config, rueckfrage, schutz  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .audio import Aufnehmer, Lautsprecher, gong  # noqa: E402
 from .freigabe import Freigaben, ort as freigabe_ort  # noqa: E402
@@ -102,11 +102,14 @@ class Sarvis:
                          protokoll=self.protokoll,
                          zustand_zeile=lambda: " ".join(
                              z for z in (zustand_zeile(self.wecker),
-                                         unterbrochen_zeile(self.werkstatt))
+                                         unterbrochen_zeile(self.werkstatt),
+                                         schutz.arbeitsordner_zeile())
                              if z),
                          freigaben=self.freigaben)
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         self.schleife: asyncio.AbstractEventLoop | None = None
+        # Bis wann die Kontextwache stillhaelt (time.monotonic).
+        self._verdichtet_bis = 0.0
         self.haelt = False           # Taste gerade gedrueckt?
         self.arbeitet = False        # Antwort laeuft gerade?
         self.aufgabe = None          # der laufende Durchgang, abbrechbar
@@ -735,6 +738,53 @@ class Sarvis:
             f"erster Ton {(erster_ton or jetzt) - t_los:.2f}s | "
             f"fertig {jetzt - t_los:.2f}s"
         )
+        await self._kontext_wache()
+
+    async def _kontext_wache(self) -> None:
+        """Nach der Antwort nachsehen, ob der Kopf zu voll wird.
+
+        Hier und nicht vor dem naechsten Zuruf: Verdichten kostet einen
+        Modellaufruf und ein paar Sekunden. Davor waere das eine Pause
+        mitten im Gespraech -- danach merkt es niemand.
+
+        Das SDK verdichtet zwar von selbst, aber erst bei 96,7 % des
+        Fensters. Das ist aus zwei Gruenden zu spaet: Es passiert dann
+        mitten in einer Antwort, und WAS zusammengefasst wird, entscheidet
+        niemand.
+        """
+        if not config.KONTEXT_WACHE:
+            return
+        # Nach einer Verdichtung eine Weile Ruhe. Ohne diese Sperre
+        # versuchte die Wache es nach jedem Zuruf erneut -- und wenn die
+        # Zusammenfassung nichts mehr wegnimmt, waere das eine Schleife,
+        # die bei jedem Wort Geld kostet.
+        if time.monotonic() < self._verdichtet_bis:
+            return
+        anteil = await self.hirn.kontext_anteil()
+        if anteil is None:
+            return
+        print(f"  ---- Kontext {anteil * 100:.0f} %")
+        if anteil < config.KONTEXT_VERDICHTEN_AB:
+            return
+
+        print("  ---- verdichte den Verlauf")
+        self.anzeige.zustand(DENKT)
+        geschafft = await self.hirn.verdichten(
+            config.KONTEXT_VERDICHTEN_ANWEISUNG)
+        self.anzeige.zustand(RUHIG)
+        # Die Sperre gilt auch, wenn es NICHT geklappt hat: Ein Fehler,
+        # der sich nach jedem Zuruf wiederholt, ist keine Wache mehr.
+        self._verdichtet_bis = (time.monotonic()
+                                + config.KONTEXT_VERDICHTEN_PAUSE_SEK)
+        if not geschafft:
+            return
+        nachher = await self.hirn.kontext_anteil()
+        if nachher is not None:
+            print(f"  ---- Kontext jetzt {nachher * 100:.0f} %")
+        # Gesagt wird es, weil Sarvis hinterher Feinheiten von vorhin
+        # nicht mehr weiss. Stumm verdichten hiesse: Er wird ploetzlich
+        # vergesslich, und niemand erfaehrt warum.
+        await self._sagen(config.KONTEXT_VERDICHTET_SATZ)
 
     async def _gruss_oder_neu(self) -> None:
         """Vorbereitete Begruessung, sonst eben doch frisch erfinden."""

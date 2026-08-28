@@ -87,7 +87,17 @@ def ort(werkzeug: str, eingabe: dict) -> str:
     if werkzeug in _PFAD_WERKZEUGE:
         pfad = str(e.get("pfad") or "")
     elif werkzeug == "befehl_ausfuehren":
-        pfad = _pfad_im_befehl(str(e.get("befehl") or ""))
+        befehl = str(e.get("befehl") or "")
+        pfad = _pfad_im_befehl(befehl)
+        if not pfad:
+            # "docker compose up" nennt keinen Pfad -- ortlos ist er
+            # deshalb aber nicht: Er laeuft im Arbeitsordner der Shell.
+            # Ohne diese Zeile war eine Freigabe fuer ein Projekt eine
+            # leere Zusage. Gemessen an einem Docker-Projekt: erteilt,
+            # angesagt, und trotzdem bei jedem der vier folgenden
+            # Befehle wieder gefragt.
+            from . import schutz
+            return schutz.arbeitsordner()
     return _ordner(pfad)
 
 
@@ -99,12 +109,17 @@ def _befehl_ganz_unter(befehl: str, freigegeben: str) -> bool:
     Get-Content "D:\\Strato Server\\pw.txt"' bekam den Ort des ersten
     zugewiesen und lief unter einer Freigabe fuer den Projektordner ohne
     eine einzige Rueckfrage durch -- gemessen, samt Passwortdatei.
-    Ein Befehl ganz ohne Pfad faellt ebenfalls durch: Wofuer eine
-    Freigabe an einem ORT gilt, muss man an diesem Ort erkennen koennen.
+    Ein Befehl ganz ohne Pfad wird am Arbeitsordner der Shell gemessen
+    -- dort landet er ja. Frueher fiel er hier durch, mit der
+    Begruendung, ein Ort muesse erkennbar sein. Erkennbar ist er, nur
+    steht er nicht im Befehl: Gemessen liefen genau die Startbefehle
+    ("docker compose up", "npm run start", "ng serve") in diese Luecke
+    und fragten trotz laufender Freigabe jedes Mal erneut.
     """
     pfade = _pfade_im_befehl(befehl)
     if not pfade:
-        return False
+        from . import schutz
+        return _unter(schutz.arbeitsordner(), freigegeben)
     return all(_unter(_ordner(p), freigegeben) for p in pfade)
 
 

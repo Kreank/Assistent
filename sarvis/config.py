@@ -452,6 +452,73 @@ PROJEKT_ORT_NAMEN = {
     "arbeit":     "den Arbeitsprojekten unter Mitra",
     "sandkasten": "dem Sandkasten unter D Doppelpunkt Projekte",
 }
+# --- Kontext: wie viel Gespraech Sarvis mit sich herumtraegt -------------
+# Jeder Zuruf schickt den GANZEN bisherigen Verlauf mit. Das ist kein
+# Fehler, sondern der Grund, warum Sarvis auf "was hatte ich vorhin
+# gesagt" antworten kann -- aber es waechst.
+#
+# Gemessen am 28.08.2026 mit get_context_usage():
+#
+#   Fenster (Opus 5)            1.000.000 Token
+#   belegt, bevor ein Wort faellt   21.727   (Systemprompt, Werkzeuge,
+#                                             Gedaechtniskern)
+#   je kurzem Zuruf                   ~590   (12 Zurufe: +7.077)
+#
+# Fuers blosse Reden reicht das fuer ueber tausend Zurufe. Beim ARBEITEN
+# nicht: eine lange Mail, ein "docker compose logs", ein Auftragsbericht
+# kosten je ein Vielfaches davon.
+#
+# Das SDK verdichtet von selbst -- aber erst bei 967.000, also kurz vor
+# knapp. Zu spaet aus zwei Gruenden: Es passiert mitten in einer Antwort,
+# und WAS zusammengefasst wird, entscheidet dann niemand. Deshalb
+# verdichtet Sarvis vorher, im Leerlauf, mit eigener Anweisung.
+KONTEXT_WACHE = True
+
+# Ab welchem Anteil des Fensters verdichtet wird.
+KONTEXT_VERDICHTEN_AB = 0.65
+
+# Wie oft hoechstens -- eine Verdichtung, die sofort wieder ausloest,
+# waere eine Schleife. Frisst sie nichts weg, wird eine Weile Ruhe
+# gegeben.
+KONTEXT_VERDICHTEN_PAUSE_SEK = 600
+
+# Womit verdichtet wird. "/compact" nimmt eigene Anweisungen entgegen --
+# ohne sie fasst es fuer einen Programmierer zusammen ("welche Dateien
+# wurden geaendert"), nicht fuer ein Gespraech.
+KONTEXT_VERDICHTEN_ANWEISUNG = (
+    "Fasse als Gespraechsgedaechtnis eines Sprachassistenten zusammen, "
+    "nicht als Arbeitsbericht. Behalte: offene Fragen und Zusagen, "
+    "worum der Nutzer gerade gebeten hat, laufende Auftraege und Timer, "
+    "getroffene Entscheidungen und ihre Begruendung, sowie alles, was er "
+    "ueber sich selbst gesagt hat. Wirf weg: Werkzeugausgaben im "
+    "Wortlaut, Dateiinhalte, Listen und Suchergebnisse -- die stehen "
+    "noch im Verlauf auf der Platte und lassen sich mit "
+    "verlauf_nachschlagen wiederholen. Schreibe auf Deutsch."
+)
+
+# Was Sarvis dabei sagt. Stumm verdichten waere das Schlimmste: Er
+# wuesste hinterher Feinheiten von vorhin nicht mehr, und niemand
+# wuesste, warum.
+KONTEXT_VERDICHTET_SATZ = (
+    "Kurz zur Info: Ich habe unser bisheriges Gespräch zusammengefasst, "
+    "damit der Kopf frei bleibt. Einzelheiten von vorhin schlage ich bei "
+    "Bedarf im Verlauf nach."
+)
+
+# Wo die Sitzungsdateien liegen, in denen genau das nachgeschlagen wird.
+# Sie schreibt das SDK, nicht Sarvis -- eine Zeile je Nachricht, und
+# zwar VOLLSTAENDIG: Auch was verdichtet wurde, steht dort weiter.
+# Geprueft an einer Sitzung nach "/compact" -- die drei Zurufe von vor
+# der Verdichtung standen unveraendert in der Datei.
+VERLAUF_ORDNER = (Path.home() / ".claude" / "projects"
+                  / "D--Privat-Sarvis")
+
+# Woran Sarvis' eigene Sitzungen zu erkennen sind. Im selben Ordner
+# liegen auch die Sitzungen von Claude Code am Projekt -- die gehen ihn
+# nichts an. Geprueft: Sarvis' Sitzungen tragen "sdk-py", die von Claude
+# Code "cli".
+VERLAUF_MARKE = "sdk-py"
+
 AUFTRAG_DATEI = WURZEL / "auftraege.json"
 
 # Das Fortschritts-Journal. Nur ANHAENGEN, nie ueberschreiben: Ein
@@ -522,6 +589,89 @@ FRAGEN_TROTZ_FREI = [
     Path("D:/Strato Server"),
 ]
 
+# --- Arbeit am eigenen Projekt --------------------------------------------
+# Ein Assistent, der beim Starten des eigenen Projekts siebenmal fragt,
+# wird beim achten Mal nicht mehr gefragt -- dann tippt man selbst.
+#
+# Gemessen an einem Docker-Projekt: fuenf Befehle, fuenf Rueckfragen. Eine
+# erteilte Freigabe half NICHT, und das war kein Zufall: Sie haengt an
+# einem Ort, und "docker compose up" nennt keinen. Dieselbe Messung fuer
+# Angular und Django, dasselbe Bild -- kein einziger Startbefehl traegt
+# einen Pfad.
+#
+# Deshalb hier zwei Listen und ein Ort. Frei laeuft nur, was ALLE drei
+# Bedingungen erfuellt:
+#
+#   1. Der Arbeitsordner der Shell liegt unter einem ENTWICKLUNG_ORT.
+#   2. JEDER Schritt der Kette steht in ENTWICKLUNG_BEFEHLE.
+#   3. KEIN Schritt steht in ENTWICKLUNG_FRAGT_TROTZDEM.
+#
+# Der Arbeitsordner wird in schutz.py mitgefuehrt -- nachvollzogen aus
+# den "cd"-Befehlen, die tatsaechlich erlaubt wurden. Ohne ihn waere
+# nicht pruefbar, WO ein pfadloser Befehl laeuft, und eine Freigabe fuer
+# ein Projekt wuerde Befehle decken, die woanders laufen.
+
+ENTWICKLUNG_ORTE = [
+    Path("D:/Mitra"),      # Arbeitsprojekte
+    Path("D:/Privat"),     # private Projekte, Sarvis selbst
+    PROJEKTE,              # der Sandkasten
+]
+
+# Was als Arbeit am eigenen Projekt gilt.
+#
+# Ein Muster steht hier nur, wenn es die EIGENEN Einstiegspunkte des
+# Projekts anspricht -- die package.json, die manage.py, die
+# docker-compose.yml. Alles, was einen beliebigen Befehl als Argument
+# entgegennimmt, steht bewusst NICHT hier: "docker compose exec" ist
+# keine Startzeile, sondern eine Luke, durch die alles passt. Aus
+# demselben Grund fehlen Where-Object und ForEach-Object in NUR_SCHAUEN.
+ENTWICKLUNG_BEFEHLE = (
+    # In den Projektordner wechseln gehoert dazu -- sonst faellt genau
+    # der Befehl heraus, der den Arbeitsordner ueberhaupt erst setzt.
+    # Wohin gewechselt wird, prueft die Pfadbedingung weiter unten.
+    r"^(cd|chdir|Set-Location|sl)\b",
+
+    # Docker: hochfahren, ansehen, anhalten. "down" fehlt absichtlich --
+    # mit -v nimmt es die Volumes mit, und was in einer Datenbank stand,
+    # kommt davon nicht zurueck.
+    r"^docker\s+compose\s+(up|ps|logs|start|stop|restart|top|config|events)\b",
+    r"^docker\s+(ps|logs|images|stats|version|info)\b",
+
+    # Node, Angular, Vite und Verwandte. "run" fuehrt ein Skript aus der
+    # package.json aus, also unseren eigenen Eintrag.
+    r"^(npm|pnpm|yarn|bun)\s+(run|start|test|dev|build|serve)\b",
+    r"^(ng|vite|next|nuxt|astro|svelte-kit)\s+"
+    r"(serve|dev|start|build|test|preview)\b",
+
+    # Python: Django, ASGI/WSGI, Tests, Linter.
+    r"^(python|python3|py)\s+manage\.py\s+"
+    r"(runserver|migrate|makemigrations|showmigrations|check|collectstatic)\b",
+    r"^(python|python3|py)\s+-m\s+"
+    r"(pytest|unittest|uvicorn|gunicorn|http\.server|django)\b",
+    r"^(uvicorn|gunicorn|hypercorn|daphne|flask)\s",
+    r"^(pytest|tox|nox|ruff|flake8|mypy|black|isort)\b",
+
+    # Bauen und Testen anderswo.
+    r"^(make|cargo|go|dotnet|mvn|gradle|\./gradlew|\.\\gradlew)\s+"
+    r"(run|build|test|dev|start|serve|watch|check|fmt|vet|clippy)\b",
+)
+
+# Was trotzdem fragt, auch wenn es oben passt.
+#
+# Zwei Sorten, und beide sind keine Arbeit am eigenen Code:
+#
+#   Fremder Code. "npm install" laedt Pakete aus dem Netz und fuehrt
+#   deren Install-Skripte aus. Das ist eine Lieferung von aussen, und die
+#   wird angesagt -- so steht es auch in den globalen Regeln.
+#
+#   Weg ist weg. Volumes, Bilder, veroeffentlichte Staende. Eine
+#   Rueckfrage kostet drei Sekunden, ein geloeschtes Volume einen Abend.
+ENTWICKLUNG_FRAGT_TROTZDEM = (
+    r"\b(install|ci|add|update|upgrade|dlx)\b", r"^npx\b",
+    r"\b(prune|rmi|down)\b", r"--renew-anon-volumes\b", r"\s-V\b",
+    r"\b(deploy|publish|release|push)\b",
+)
+
 # --- Werkzeuge ------------------------------------------------------------
 # "still"  = laeuft ohne Nachfrage durch
 # "fragen" = Sarvis fragt laut nach und wartet auf ja oder nein
@@ -543,6 +693,10 @@ WERKZEUG_STUFEN = {
     "notiz_schreiben":         "still",
     "gedaechtnis_nachschlagen": "still",
     "gedaechtnis_zeigen": "still",
+    # Der Gespraechsverlauf ist kein Gedaechtnis, sondern das Protokoll
+    # der eigenen Sitzung -- Nachschlagen darin ist Nachlesen dessen, was
+    # ohnehin gesagt wurde.
+    "verlauf_nachschlagen":    "still",
     "vergessen":          "fragen",
 
     # Telegram: Lesen und Suchen laufen still -- sie aendern nichts.

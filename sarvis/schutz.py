@@ -204,8 +204,14 @@ NUR_SCHAUEN = (
     r"^(Select-Object|Sort-Object|Format-(Table|List|Wide)"
     r"|Measure-Object|Out-String|Select-String)\b",
     r"^(python|py|node|npm|pip|git)\s+(--version|-V|version)\b",
-    r"^(python|py)\s+-m\s+(pytest|unittest)\b",
-    r"^(pytest|npm\s+test|npm\s+run\s+test)\b",
+    # Tests standen frueher hier, mit der Begruendung "schauen tun sie ja
+    # auch". Tun sie nicht: pytest sammelt Testdateien ein und FUEHRT sie
+    # aus, in dem Ordner, in dem es gerade steht. Gemessen: mit dem
+    # Arbeitsordner C:\Users\sasch lief "pytest" ohne eine Rueckfrage
+    # durch. Sie sind nicht verloren, sondern umgezogen -- in den eigenen
+    # Projektordnern deckt ENTWICKLUNG_BEFEHLE sie ab, ueberall sonst
+    # wird gefragt. Innerhalb der Projekte kostet das keine einzige
+    # Rueckfrage mehr als vorher.
     # "where" braucht ein Leerzeichen dahinter. Sonst trifft das Muster
     # auch "Where-Object" -- der Bindestrich ist eine Wortgrenze, \b
     # allein reicht hier nicht. Und in einem Where-Object-Skriptblock
@@ -320,6 +326,136 @@ def _umleitungsziele(befehl: str) -> list[str]:
     return [z.strip("\"'") for z in roh]
 
 
+def _zerlegen(befehl: str) -> list[str]:
+    """Eine Kette in ihre Schritte -- an &&, ||, ; und der Pipe.
+
+    Dieselbe Zerlegung wie bisher in befehl_stufe, nur an einer Stelle:
+    "git status && rm -rf x" ist nicht harmlos, nur weil es harmlos
+    anfaengt, und jede Pruefung muss dieselben Schritte sehen.
+    """
+    return [t.strip() for t in re.split(r"&&|\|\||;|\|", str(befehl or ""))
+            if t.strip()]
+
+
+# --- Wo Sarvis gerade arbeitet -------------------------------------------
+# Ein pfadloser Befehl -- "docker compose up" -- laeuft irgendwo, und ohne
+# dieses Irgendwo ist nicht pruefbar, ob er laufen darf. Die Shell behaelt
+# ihren Ordner zwischen den Aufrufen; hier wird derselbe Stand mitgefuehrt.
+#
+# Startwert ist Sarvis' eigener Ordner: Von dort wird er gestartet
+# (starten.bat), und genau dort landet ein Befehl, vor dem kein "cd"
+# stand. Das ist keine Annahme, sondern der Ort, an dem der Prozess laeuft.
+_arbeitsordner = str(config.WURZEL)
+
+_CD = re.compile(r"^(?:cd|chdir|Set-Location|sl)\s+(?:-Path\s+)?(.+)$",
+                 re.IGNORECASE)
+
+
+def _laufwerksform(pfad: str) -> str:
+    """Git-Bash-Schreibweise in Laufwerksform -- "/d/x" wird "D:/x"."""
+    treffer = re.match(r"^/([a-zA-Z])/(.*)$", str(pfad or ""))
+    return f"{treffer.group(1).upper()}:/{treffer.group(2)}" if treffer else pfad
+
+
+def arbeitsordner() -> str:
+    """Der Ordner, in dem ein pfadloser Befehl landet."""
+    return _arbeitsordner
+
+
+def arbeitsordner_merken(befehl: str) -> str:
+    """Den Ordnerwechsel eines Befehls nachvollziehen.
+
+    Wird erst gerufen, wenn der Befehl erlaubt WURDE -- nie vorher. Sonst
+    koennte ein Befehl den Ort setzen, an dem er selbst geprueft wird:
+    'cd D:/Mitra/MCN; <irgendwas>' waere dann ein Freifahrtschein, den
+    der Befehl sich selbst ausstellt.
+
+    Relative Ziele ("cd frontend", "cd ..") werden am bisherigen Stand
+    aufgeloest, genau wie die Shell es tut.
+    """
+    global _arbeitsordner
+    for teil in _zerlegen(befehl):
+        treffer = _CD.match(teil)
+        if not treffer:
+            continue
+        ziel = _laufwerksform(treffer.group(1).strip().strip('"\''))
+        if not ziel:
+            continue
+        try:
+            neu = Path(_arbeitsordner, ziel).resolve()
+        except (OSError, ValueError):
+            continue
+        # Nur was es wirklich gibt. Ein "cd" ins Leere aendert auch in
+        # der Shell nichts -- und ein erfundener Ordner darf hier keinen
+        # Ort setzen, an dem spaeter gemessen wird.
+        if neu.is_dir():
+            _arbeitsordner = str(neu)
+    return _arbeitsordner
+
+
+def arbeitsordner_zeile() -> str:
+    """Wo ein Befehl ohne "cd" landet -- damit Sarvis es nicht raten muss.
+
+    Die Shell behaelt ihren Ordner zwischen den Aufrufen, das Modell
+    nicht. Ohne diese Zeile bleiben Sarvis zwei schlechte Wege: jedes Mal
+    vorsichtshalber ein "cd" davorschreiben, oder im falschen Projekt
+    starten. Arbeitsgedaechtnis statt Erinnerung, wie bei den Timern.
+    """
+    ordner = arbeitsordner()
+    if _im_entwicklungsbereich(ordner):
+        return (f"[Shell-Ordner: {ordner} — eigenes Projekt, Starten und "
+                "Testen laufen dort ohne Rückfrage]")
+    return f"[Shell-Ordner: {ordner}]"
+
+
+def _im_entwicklungsbereich(pfad: str) -> bool:
+    """Liegt ein Pfad unter einem Entwicklungsort -- und nicht im Heiklen?
+
+    Relative Angaben werden am Arbeitsordner aufgeloest, nicht am Ordner
+    des Prozesses. Der Unterschied faellt bei Umleitungen an: "npm run
+    start > out.txt" schreibt dorthin, wo die SHELL steht, und genau dort
+    muss die Pruefung hinsehen.
+    """
+    if not pfad:
+        return False
+    try:
+        p = str(Path(_arbeitsordner, _laufwerksform(pfad)))
+    except (OSError, ValueError):
+        return False
+    if _unter(p, config.FRAGEN_TROTZ_FREI):
+        return False
+    return _unter(p, config.ENTWICKLUNG_ORTE)
+
+
+def entwicklung_frei(befehl: str) -> bool:
+    """Ist das Arbeit am eigenen Projekt -- und darf deshalb durchlaufen?
+
+    Vier Bedingungen, und alle vier muessen halten. Die Begruendung
+    steht bei den Listen in config.py; hier nur, was geprueft wird:
+
+      1. Der Arbeitsordner liegt unter einem ENTWICKLUNG_ORT.
+      2. Jeder Schritt der Kette steht in ENTWICKLUNG_BEFEHLE.
+      3. Kein Schritt steht in ENTWICKLUNG_FRAGT_TROTZDEM.
+      4. Jeder Pfad, den der Befehl NENNT, liegt ebenfalls dort --
+         sonst waere 'docker compose -f C:/fremd/x.yml up' frei, bloss
+         weil der Arbeitsordner stimmt.
+    """
+    teile = _zerlegen(befehl)
+    if not teile or not _im_entwicklungsbereich(_arbeitsordner):
+        return False
+    for teil in teile:
+        if any(re.search(m, teil, re.IGNORECASE)
+               for m in config.ENTWICKLUNG_FRAGT_TROTZDEM):
+            return False
+        if not any(re.match(m, teil, re.IGNORECASE)
+                   for m in config.ENTWICKLUNG_BEFEHLE):
+            return False
+    for pfad in pfade_im_befehl(befehl) + _umleitungsziele(befehl):
+        if not _im_entwicklungsbereich(pfad):
+            return False
+    return True
+
+
 def befehl_stufe(befehl: str) -> str:
     befehl = (befehl or "").strip()
     if any(re.search(m, befehl, re.IGNORECASE) for m in NIE_BEFEHL):
@@ -327,7 +463,7 @@ def befehl_stufe(befehl: str) -> str:
 
     # Verkettungen aufteilen: "git status && rm -rf x" ist nicht harmlos,
     # nur weil es harmlos anfaengt.
-    teile = [t.strip() for t in re.split(r"&&|\|\||;|\|", befehl) if t.strip()]
+    teile = _zerlegen(befehl)
 
     # Die harte Sperre galt bisher nur fuer die Datei-Werkzeuge, nicht
     # fuer die Shell: schreiben_stufe("...sarvis/schutz.py") war "nie",
@@ -348,6 +484,13 @@ def befehl_stufe(befehl: str) -> str:
 
     if _heikler_ort_erwaehnt(befehl):
         return "fragen"
+
+    # Arbeit am eigenen Projekt laeuft durch. Steht bewusst NACH den
+    # harten Sperren und nach dem heiklen Ort: Was nie darf, darf auch
+    # im eigenen Projektordner nicht.
+    if entwicklung_frei(befehl):
+        return "frei"
+
     if teile and all(
         any(re.search(m, t, re.IGNORECASE) for m in NUR_SCHAUEN) for t in teile
     ):

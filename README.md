@@ -5,7 +5,7 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**56 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+**57 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
 Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
 Projekte und Hintergrundaufträge, das eigene Finanzdashboard.
 
@@ -348,7 +348,7 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-**56 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**57 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
 **im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
 Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
 
@@ -366,7 +366,7 @@ heißt nein.** Eine Sperrliste kann nur verbieten, woran man gedacht hat.
 | Bereich | still | fragt nach |
 |---|---|---|
 | Zeit | `timer_stellen`, `timer_liste`, `timer_abbrechen` | — |
-| Gedächtnis | `merken`, `gedaechtnis_zeigen` | `vergessen` |
+| Gedächtnis | `merken`, `gedaechtnis_zeigen`, `verlauf_nachschlagen` | `vergessen` |
 | Telegram | `telegram_kontakte`, `telegram_lesen`, `telegram_suchen` | `telegram_senden` |
 | Kalender | `termine_ansehen` | `termin_anlegen`, `termin_absagen` |
 | Mail | `mails_ansehen`, `mail_lesen`, `labels_ansehen` | `mail_senden`, `mail_verschieben`, `mail_einsortieren` |
@@ -494,6 +494,101 @@ durchgeht, statt es raten zu müssen.
 Mail, Telegram, Dateifreigabe, Löschen im Gedächtnis, Termine absagen —
 steht in `FREIGABE_NIE` und fragt jedes Mal. Dort ist die Rückfrage
 nicht das Lästige am Vorgang, sondern der Zweck.
+
+### Am eigenen Projekt arbeiten
+
+Gemessen an einem Docker-Projekt, bevor daran etwas geändert wurde:
+
+```
+fragen  cd D:/Mitra/MCN
+fragen  docker compose up -d
+fragen  docker compose ps
+fragen  docker compose logs --tail 50 backend
+fragen  docker compose restart backend
+=> 5 Rückfragen
+```
+
+Und mit einer erteilten Freigabe für genau diesen Ordner **dasselbe
+Bild** — vier von fünf fragten weiter. Der Grund stand in `freigabe.py`:
+
+```
+['D:/Mitra/MCN']   <- cd D:/Mitra/MCN
+[]                 <- docker compose up -d
+[]                 <- npm run start
+[]                 <- ng serve --port 4200
+```
+
+Eine Freigabe hängt an einem **Ort**, und kein einziger Startbefehl nennt
+einen. Ein Befehl ohne Pfad fiel deshalb grundsätzlich durch. Die
+Freigabe war eine leere Zusage: angesagt, angezeigt, wirkungslos — und
+das ist schlimmer als gar keine, weil man sich das Ja abgewöhnt zu lesen.
+
+**Der Arbeitsordner.** Ein pfadloser Befehl ist nicht ortlos, er läuft
+nur woanders: im Ordner, in dem die Shell gerade steht. Den führt
+`schutz.py` jetzt mit — nachvollzogen aus den `cd`-Befehlen, die
+tatsächlich **erlaubt** wurden. Die Reihenfolge ist der Punkt: Würde der
+Ordner schon beim Prüfen gesetzt, stellte sich `cd D:/Mitra/MCN;
+<irgendwas>` seinen Freifahrtschein selbst aus.
+
+Er steht außerdem im Vorspann jedes Zurufs, damit Sarvis nicht raten
+muss, wo er gerade steht:
+
+```
+[Shell-Ordner: D:\Projekte\Finanzdashboard — eigenes Projekt,
+ Starten und Testen laufen dort ohne Rückfrage]
+```
+
+**Was frei läuft.** Nur was alle vier Bedingungen erfüllt:
+
+1. Der Arbeitsordner liegt unter einem `ENTWICKLUNG_ORT`
+   (`D:\Mitra`, `D:\Privat`, `D:\Projekte`).
+2. Jeder Schritt der Kette steht in `ENTWICKLUNG_BEFEHLE`.
+3. Kein Schritt steht in `ENTWICKLUNG_FRAGT_TROTZDEM`.
+4. Jeder Pfad, den der Befehl **nennt**, liegt ebenfalls dort — sonst
+   wäre `docker compose -f C:/fremd/x.yml up` frei, bloß weil der
+   Arbeitsordner stimmt.
+
+| | |
+|---|---|
+| frei | `docker compose up/ps/logs/restart`, `npm run …`, `ng serve`, `uvicorn`, `python manage.py runserver`, `pytest`, `make build`, `cargo run` |
+| fragt weiter | `npm install`, `pip install`, `docker compose down -v`, `prune`, `git push`, `npm run deploy`, `rm -rf`, `docker compose exec` |
+
+Die Trennlinie ist nicht „gefährlich / ungefährlich", sondern **eigener
+Code / fremder Code**:
+
+- `npm run start` führt ein Skript aus **unserer** `package.json` aus.
+- `npm install` lädt Pakete aus dem Netz und führt **deren**
+  Install-Skripte aus. Das ist eine Lieferung von außen, und die wird
+  angesagt.
+- `docker compose exec` fehlt aus einem dritten Grund: Es nimmt einen
+  **beliebigen** Befehl als Argument entgegen. Eine Freiliste, die eine
+  solche Luke enthält, ist keine Freiliste mehr. Aus demselben Grund
+  fehlen `Where-Object` und `ForEach-Object` in `NUR_SCHAUEN`.
+
+Nach der Änderung, dieselbe Messung:
+
+```
+frei  cd D:/Mitra/MCN
+frei  docker compose up -d
+frei  docker compose ps
+frei  docker compose logs --tail 50 backend
+frei  docker compose restart backend
+=> 0 Rückfragen
+```
+
+**Tests sind dabei umgezogen.** `pytest`, `npm test` und
+`python -m pytest` standen in `NUR_SCHAUEN` — „schauen tun sie ja auch".
+Tun sie nicht: pytest sammelt Testdateien ein und *führt sie aus*.
+Gemessen lief `pytest` mit dem Arbeitsordner `C:\Users\sasch` ohne eine
+Rückfrage durch. Jetzt deckt sie in den eigenen Projektordnern
+`ENTWICKLUNG_BEFEHLE` ab, überall sonst wird gefragt — innerhalb der
+Projekte kostet das keine einzige Rückfrage mehr als vorher.
+
+Gegengeprüft wurde das gegen die vorherige Fassung an 50 Befehlen an
+zwei Orten: 15 Lockerungen, alle im eigenen Projektordner und alle
+gewollt; 4 Verschärfungen (die Tests); **keine einzige Lockerung
+außerhalb der Entwicklungsorte**. Die harten Sperren, `D:\Strato Server`
+in allen vier Schreibweisen und die Umleitungsprüfung sind unverändert.
 
 ### Timer und Wecker
 
@@ -726,6 +821,91 @@ Laden herausgefiltert, sonst würde Sarvis früher oder später über
 
 **Der Inhalt ist aus dem Repository ausgeschlossen** — der Aufbau ist
 drin, was er über dich weiß, nicht.
+
+## Der Kontext läuft voll
+
+Jeder Zuruf schickt den **ganzen** bisherigen Verlauf mit. Das ist kein
+Fehler, sondern der Grund, warum Sarvis auf „was hatte ich vorhin
+gesagt" antworten kann. Aber es wächst.
+
+Gemessen am 28.08.2026 mit `get_context_usage()`:
+
+```
+Fenster (Opus 5)                 1.000.000 Token
+belegt, bevor ein Wort fällt        21.727   Systemprompt, Werkzeuge, Kern
+je kurzem Zuruf                       ~590   (12 Zurufe: +7.077)
+```
+
+Fürs bloße Reden reicht das für über tausend Zurufe. Beim **Arbeiten**
+nicht: eine lange Mail, ein `docker compose logs`, ein Auftragsbericht
+kosten je ein Vielfaches davon.
+
+### Warum nicht einfach das SDK machen lassen
+
+Es verdichtet von selbst — aber erst bei **967.000**, also kurz vor
+knapp. Zu spät aus zwei Gründen: Es passiert dann mitten in einer
+Antwort, und *was* zusammengefasst wird, entscheidet niemand. Die
+Vorgabe fasst für einen Programmierer zusammen („welche Dateien wurden
+geändert"), nicht für ein Gespräch.
+
+### Zwei Gegenmaßnahmen, die zusammengehören
+
+**Verdichten.** Ab `KONTEXT_VERDICHTEN_AB` (65 %) fasst Sarvis im
+Leerlauf nach der Antwort zusammen — nicht vor dem nächsten Zuruf, das
+wäre eine Pause mitten im Gespräch. `/compact` nimmt eigene Anweisungen
+entgegen, und die stehen in `KONTEXT_VERDICHTEN_ANWEISUNG`: behalte
+offene Fragen, Zusagen, laufende Aufträge, Entscheidungen und ihre
+Begründung; wirf Werkzeugausgaben, Dateiinhalte und Suchergebnisse weg.
+
+Und er **sagt es**. Stumm verdichten wäre das Schlimmste: Er wüsste
+hinterher Feinheiten von vorhin nicht mehr, und niemand wüsste, warum.
+
+**Nachschlagen.** Was verdichtet wurde, ist nur im Kopf weg. Auf der
+Platte steht es weiter — das SDK schreibt jede Nachricht in eine
+Sitzungsdatei, und das gilt auch für alles vor einer Verdichtung.
+Geprüft: Nach einem `/compact` standen die drei Zurufe von davor
+unverändert in der `.jsonl`.
+
+`verlauf_nachschlagen` durchsucht genau die. Damit ist das Verdichten
+kein Vergessen mehr, sondern ein Auslagern.
+
+```
+Kontext frisch          2,00 %
+nach 2 Zurufen          3,00 %
+nach dem Verdichten     2,00 %
+
+„Wie heißt die Wandfarbe im Flur und wie der Nachbar?"
+  -> Taubenblau, und der Nachbar heißt Herr Kettner.        (überlebt)
+
+„Schlag nach, was ich genau über Taubenblau gesagt habe."
+  -> Du hast gesagt: „Die Wandfarbe im Flur heißt Taubenblau."
+```
+
+### Verlauf ist kein Gedächtnis
+
+Der Unterschied ist der ganze Punkt und wird nirgends vermischt:
+
+| | `gedaechtnis/` | Verlauf |
+|---|---|---|
+| Inhalt | was Sarvis über dich **weiß** | was gesagt **wurde** |
+| Entsteht | durch eine Entscheidung („merk dir") | fällt an |
+| Überlebt | Neustarts | nur als Datei, nie im Kopf |
+| Wird | gelesen, bearbeitet, korrigiert | nachgeschlagen, sonst nichts |
+
+Deshalb schreibt `verlauf_nachschlagen` nichts. Es liest.
+
+### Fremde Sitzungen bleiben draußen
+
+Im selben Ordner liegen auch die Sitzungen von Claude Code am Projekt
+Sarvis — teils mehrere Megabyte, und ihn gehen sie nichts an. Sarvis'
+eigene tragen die Marke `sdk-py`, die von Claude Code `cli`; danach wird
+gefiltert (geprüft an acht Dateien).
+
+Ebenso gefiltert wird alles, was zwar die Rolle „user" trägt, aber nicht
+vom Nutzer stammt: eingespielte Skill-Anleitungen, Kommandoprotokolle,
+Aufgaben-Meldungen. Gemessen — eine Suche nach „Drive" lieferte sonst
+als ersten Treffer ein `Du: **Running means launching the actual app**`,
+einen Satz, den nie jemand gesagt hat.
 
 ## Projekte und Aufträge
 
