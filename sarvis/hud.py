@@ -151,6 +151,10 @@ class Hud(QWidget):
         # Kachel mit neuem Inhalt, nicht zwei uebereinander.
         self.kacheln: dict = {}
         self._letzter_anker = None
+        # Der eingebettete Browser. Erst beim ersten Zuruf gebaut: Ein
+        # Chromium im Voraus zu starten kostet Hunderte Megabyte fuer
+        # etwas, das an vielen Tagen niemand braucht.
+        self._browser = None
         self._griff = None         # Mausversatz beim Ziehen
         # Name -> (Zustand, Aufleuchten 0..1)
         self.werkzeuge = {n: [z, 0.0] for n, z in config.WERKZEUGE}
@@ -310,6 +314,11 @@ class Hud(QWidget):
                 eintrag = self.werkzeuge.get(m.get("name", ""))
                 if eintrag and m.get("aktiv"):
                     eintrag[1] = 1.0
+            elif art == "browser":
+                self._browser_zeigen(str(m.get("adresse") or ""))
+            elif art == "browser_zu":
+                if self._browser is not None:
+                    self._browser.hide()
             elif art == "kachel":
                 self._kachel_zeigen(m)
             elif art == "kachel_weg":
@@ -330,6 +339,24 @@ class Hud(QWidget):
         ey = round(SICHTBAR_EINZUG_Y * SKALA)
         return QRect(self.x() + ex, self.y() + ey,
                      self.width() - 2 * ex, self.height() - 2 * ey)
+
+    def _browser_zeigen(self, adresse: str) -> None:
+        """Seite im eingebauten Browser zeigen, ihn notfalls erst bauen.
+
+        Scheitert das Bauen -- etwa weil PySide6-Addons fehlt --, wird das
+        gemeldet und nicht verschwiegen: Ein Browser, der stumm nicht
+        aufgeht, sieht aus wie ein Assistent, der die Bitte ueberhoert hat.
+        """
+        if not adresse:
+            return
+        if self._browser is None:
+            try:
+                from .browser import bauen
+                self._browser = bauen()
+            except Exception as e:
+                print(f"Browser nicht verfuegbar: {type(e).__name__}: {e}")
+                return
+        self._browser.zeigen(adresse, self._sichtbar())
 
     def _kachel_zeigen(self, m: dict) -> None:
         name = str(m.get("name") or "")

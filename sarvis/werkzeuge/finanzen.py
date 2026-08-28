@@ -121,6 +121,54 @@ async def _schicken(weg: str, koerper: dict, was: str):
         return {}, ""
 
 
+def _vergleichsform(text) -> str:
+    """Kategorienamen vergleichbar machen: klein, ohne Umlaute, ohne Rand.
+
+    Gesprochenes kommt durch die Erkennung mal als "Lebensmittel", mal als
+    "lebensmittel"; ein Modell schreibt "Buero" statt "Büro". Verglichen
+    wird deshalb nicht der Name, sondern diese Form davon.
+    """
+    kleines = str(text or "").strip().lower()
+    for um, ersatz in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        kleines = kleines.replace(um, ersatz)
+    return kleines
+
+
+async def _kategorie_treffen(gesucht: str):
+    """Gesprochener Kategoriename -> (id, Name, Fehlertext).
+
+    Der Fehlertext ist ein fertiger Satz und nennt bei Fehlschlag, was es
+    stattdessen gibt -- sonst raet das Modell die naechste ID.
+    """
+    daten, fehler = await _holen("/kategorien")
+    if fehler:
+        return None, "", fehler
+    if not daten:
+        return None, "", "Es ist noch keine Kategorie angelegt."
+
+    wort = _vergleichsform(gesucht)
+    genau = [k for k in daten if _vergleichsform(k.get("name")) == wort]
+    # Erst genau, dann ungefaehr: "Lebensmittel" darf nicht an
+    # "Lebensmittel und Drogerie" scheitern, aber wo es exakt passt,
+    # gewinnt das Exakte.
+    treffer = genau or [k for k in daten
+                        if wort and (wort in _vergleichsform(k.get("name"))
+                                     or _vergleichsform(k.get("name")) in wort)]
+    if len(treffer) == 1:
+        return treffer[0].get("id"), treffer[0].get("name"), ""
+    if len(treffer) > 1:
+        namen = ", ".join(str(k.get("name")) for k in treffer)
+        return None, "", (f"Auf {gesucht} passen mehrere Kategorien: "
+                          f"{namen}. Welche davon?")
+    oben = [str(k.get("name")) for k in daten[:config.FINANZ_HOECHSTENS]]
+    satz = f"Eine Kategorie {gesucht} kenne ich nicht. Es gibt " + \
+           ", ".join(oben)
+    rest = len(daten) - len(oben)
+    if rest > 0:
+        satz += f" und {rest} weitere"
+    return None, "", satz + "."
+
+
 def werkzeuge(protokoll=None, leuchten=None) -> list:
     def vermerken(text: str):
         if protokoll is not None:
@@ -165,25 +213,50 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                      "description": "Nur dieses Konto. Weglassen = alle."},
     }
 
+    # Beim Kontostand ist "von" die gefaehrliche Angabe: der Endpunkt
+    # summiert nur, was im Zeitraum liegt. Wer nach dem Stand Ende Juli
+    # fragt, will alles bis dahin -- also nur "bis". Mit "von" bekaeme er
+    # den Zuwachs des Zeitraums vorgelesen und hielte ihn fuer den Saldo.
+    STICHTAG = dict(
+        ZEITRAUM,
+        von={**ZEITRAUM["von"],
+             "description": "Nur wenn ausdrücklich AB einem Tag gerechnet "
+                            "werden soll. Für einen Stichtag weglassen."},
+        bis={**ZEITRAUM["bis"],
+             "description": "Stichtag, ISO wie 2026-07-31. Weglassen = heute."},
+    )
+
     @tool(
         "finanzen_kontostand",
-        "Sagt den aktuellen Kontostand. Für 'wie viel habe ich noch', 'wie "
-        "steht mein Konto'. Ohne konto_id über alle Konten zusammen.",
-        {"type": "object",
-         "properties": {"konto_id": ZEITRAUM["konto_id"]}},
+        "Sagt den Kontostand — heute oder zu einem Stichtag. Für 'wie viel "
+        "habe ich noch', 'wie stand mein Konto Ende Juli'. Ohne konto_id über "
+        "alle Konten zusammen. Für einen Stichtag NUR bis setzen, von "
+        "weglassen. Rechne das Datum selbst aus — heute steht in deinem "
+        "Vorspann.",
+        {"type": "object", "properties": dict(STICHTAG)},
     )
     async def finanzen_kontostand(args):
         blinken()
         daten, fehler = await _holen("/auswertungen/kontostand",
-                                     konto_id=args.get("konto_id"))
+                                     **_zeitraum(args))
         if fehler:
             return _antwort("", fehler)
         if not daten:
-            return _antwort("Zu dem Konto sind noch keine Buchungen da.")
+            # Ohne konto_id waere "zu dem Konto" gelogen, mit Stichtag heisst
+            # leer ausserdem "bis dahin nichts" und nicht "gar nichts".
+            return _antwort("Dazu finde ich keinen Kontostand — bis dahin ist "
+                            "keine Buchung verbucht.")
+        # Der letzte Punkt traegt den Saldo am Ende des abgefragten
+        # Zeitraums. Sein Datum aber nicht: gemessen am 28.08.2026 gibt der
+        # Endpunkt auch mit bis=2026-01-31 einen Punkt von heute zurueck.
+        # Vorgelesen wird darum der erfragte Stichtag -- sonst behauptet der
+        # Satz einen Stand von heute, den er gar nicht gerechnet hat.
         letzter = daten[-1]
+        stand = (_datum(args["bis"]) if args.get("bis")
+                 else _datum(letzter.get("datum")))
         return _antwort(
             f"Der Kontostand liegt bei {_betrag(letzter.get('saldo'))}, "
-            f"Stand {_datum(letzter.get('datum'))}.")
+            f"Stand {stand}.")
 
     @tool(
         "finanzen_ausgaben",
@@ -265,20 +338,44 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     @tool(
         "finanzen_buchungen",
         "Sucht einzelne Buchungen — nach Stichwort, Zeitraum oder Konto. Für "
-        "'was habe ich bei REWE ausgegeben', 'zeig mir die letzten Buchungen'. "
+        "'was habe ich bei REWE ausgegeben', 'zeig mir die letzten Buchungen', "
+        "'Buchungen aus Lebensmittel'. Die Kategorie wird als NAME angegeben, "
+        "so wie gesprochen — die id musst du nicht kennen. "
         "Für Summen und Übersichten nimm lieber finanzen_ausgaben.",
         {"type": "object",
          "properties": dict(ZEITRAUM,
                             suche={"type": "string",
                                    "description": "Stichwort im "
                                                   "Verwendungszweck."},
+                            kategorie={"type": "string",
+                                       "description": "Name der Kategorie, so "
+                                                      "wie gesagt: "
+                                                      "'Lebensmittel'."},
+                            kategorie_id={"type": "integer",
+                                          "description": "Nur falls die id "
+                                                         "schon bekannt ist. "
+                                                         "Sonst kategorie "
+                                                         "nehmen."},
                             limit=GEDECKELT)},
     )
     async def finanzen_buchungen(args):
         blinken()
         gewuenscht = int(args.get("limit") or 5)
         wie_viele = min(gewuenscht, config.FINANZ_HOECHSTENS)
+        # Die Auflösung des Namens gehoert HIERHER und nicht in ein eigenes
+        # Werkzeug, das man vorher aufrufen muesste: gesagt wird ein Satz
+        # ("Buchungen aus Lebensmittel"), also soll auch ein Werkzeug
+        # genuegen. Zwei Aufrufe hintereinander waeren zwei Gelegenheiten,
+        # die falsche Nummer zu waehlen -- und im Zweifel erfindet ein
+        # Modell die id lieber, als noch einmal nachzuschlagen.
+        kategorie_id = args.get("kategorie_id")
+        if args.get("kategorie"):
+            kategorie_id, _name, fehler = await _kategorie_treffen(
+                args["kategorie"])
+            if fehler:
+                return _antwort("", fehler)
         daten, fehler = await _holen("/transaktionen", suche=args.get("suche"),
+                                     kategorie_id=kategorie_id,
                                      limit=wie_viele, **_zeitraum(args))
         if fehler:
             return _antwort("", fehler)
@@ -323,6 +420,139 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 satz += f", Unterkonto von {namen[k['eltern_id']]}"
             teile.append(satz)
         return _antwort("; ".join(teile) + ".")
+
+    @tool(
+        "finanzen_kategorien",
+        "Zählt die Kategorien auf oder sagt, welche Nummer eine bestimmte hat. "
+        "Für 'welche Kategorien gibt es'. Um Buchungen einer Kategorie zu "
+        "sehen, brauchst du das hier NICHT — finanzen_buchungen nimmt den "
+        "Namen selbst entgegen.",
+        {"type": "object",
+         "properties": {"name": {"type": "string",
+                                 "description": "Optional: nur zu dieser "
+                                                "Kategorie, so wie gesagt."}}},
+    )
+    async def finanzen_kategorien(args):
+        blinken()
+        if args.get("name"):
+            kennung, name, fehler = await _kategorie_treffen(args["name"])
+            if fehler:
+                return _antwort("", fehler)
+            return _antwort(f"{name} hat die Nummer {kennung}.")
+        daten, fehler = await _holen("/kategorien")
+        if fehler:
+            return _antwort("", fehler)
+        if not daten:
+            return _antwort("Es ist noch keine Kategorie angelegt.")
+        # Derselbe Deckel wie ueberall: zwanzig Namen am Stueck sind
+        # gesprochen nicht zu behalten.
+        oben = daten[:config.FINANZ_HOECHSTENS]
+        satz = ", ".join(f"{k.get('id')}: {k.get('name')}" for k in oben)
+        rest = len(daten) - len(oben)
+        if rest > 0:
+            satz += f", dazu {rest} weitere"
+        return _antwort(satz + ".")
+
+    @tool(
+        "finanzen_vergleich",
+        "Vergleicht die Ausgaben zweier Zeiträume und sagt, wo der "
+        "Unterschied herkommt. Für 'vergleiche Januar mit Dezember', 'gebe "
+        "ich mehr aus als im letzten Monat'. von und bis sind der Zeitraum, "
+        "über den geredet wird; vergleich_von und vergleich_bis der, mit dem "
+        "verglichen wird. Rechne die vier Daten selbst aus — heute steht in "
+        "deinem Vorspann.",
+        {"type": "object",
+         "properties": dict(
+             ZEITRAUM,
+             # Hier sind von und bis Pflicht -- die geerbte Beschreibung
+             # "Weglassen = alles" waere an dieser Stelle eine Einladung
+             # zum offenen Zeitraum, und verglichen wird dann nichts.
+             von={**ZEITRAUM["von"],
+                  "description": "Anfang des ersten Zeitraums, ISO wie "
+                                 "2026-01-01."},
+             bis={**ZEITRAUM["bis"],
+                  "description": "Ende des ersten Zeitraums, ISO wie "
+                                 "2026-01-31."},
+             vergleich_von={"type": "string",
+                            "description": "Anfang des Vergleichszeitraums, "
+                                           "ISO wie 2025-12-01.",
+                            "pattern": r"^\d{4}-\d{2}-\d{2}$"},
+             vergleich_bis={"type": "string",
+                            "description": "Ende des Vergleichszeitraums, "
+                                           "ISO wie 2025-12-31.",
+                            "pattern": r"^\d{4}-\d{2}-\d{2}$"}),
+         "required": ["von", "bis", "vergleich_von", "vergleich_bis"]},
+    )
+    async def finanzen_vergleich(args):
+        blinken()
+        erster, fehler = await _holen("/auswertungen/kategorien",
+                                      nur_ausgaben=True, **_zeitraum(args))
+        if fehler:
+            return _antwort("", fehler)
+        zweiter, fehler = await _holen("/auswertungen/kategorien",
+                                       nur_ausgaben=True,
+                                       von=args.get("vergleich_von"),
+                                       bis=args.get("vergleich_bis"),
+                                       konto_id=args.get("konto_id"))
+        if fehler:
+            return _antwort("", fehler)
+
+        def summen(daten) -> dict:
+            """Kategoriename -> Hoehe der Ausgaben, als Decimal.
+
+            abs(): mit nur_ausgaben ist ohnehin alles eine Ausgabe, und ob
+            die Schnittstelle sie negativ oder positiv fuehrt, darf die
+            Richtung der Differenz nicht drehen. So heisst plus immer "mehr
+            ausgegeben".
+            """
+            werte = {}
+            for e in daten or []:
+                name = e.get("kategorie") or "ohne Kategorie"
+                try:
+                    hoehe = abs(Decimal(str(e.get("summe", "0"))))
+                except (InvalidOperation, ValueError):
+                    continue
+                werte[name] = werte.get(name, Decimal("0")) + hoehe
+            return werte
+
+        # Gerechnet wird hier, nicht im Sprachmodell: eine subtrahierte Zahl
+        # kann nicht halluziniert sein, eine vorgelesene schon.
+        jetzt, vorher = summen(erster), summen(zweiter)
+        if not jetzt and not vorher:
+            return _antwort("In beiden Zeiträumen sind keine Ausgaben "
+                            "verbucht.")
+        gesamt_jetzt = sum(jetzt.values(), Decimal("0"))
+        gesamt_vorher = sum(vorher.values(), Decimal("0"))
+        unterschied = gesamt_jetzt - gesamt_vorher
+
+        satz = (f"{_datum(args.get('von'))} bis {_datum(args.get('bis'))}: "
+                f"{_betrag(gesamt_jetzt)}. "
+                f"{_datum(args.get('vergleich_von'))} bis "
+                f"{_datum(args.get('vergleich_bis'))}: "
+                f"{_betrag(gesamt_vorher)}. ")
+        if unterschied == 0:
+            satz += "Genau gleich viel."
+        else:
+            satz += (f"Das sind {_betrag(unterschied)} "
+                     f"{'mehr' if unterschied > 0 else 'weniger'}.")
+
+        abweichungen = [
+            (name, jetzt.get(name, Decimal("0")) - vorher.get(name, Decimal("0")))
+            for name in set(jetzt) | set(vorher)]
+        # Unveraenderte Kategorien sagen nichts aus und kosten nur Zeit im
+        # Vorlesen; sortiert wird nach Betrag, egal in welche Richtung.
+        abweichungen = sorted((p for p in abweichungen if p[1] != 0),
+                              key=lambda p: abs(p[1]), reverse=True)
+        if abweichungen:
+            oben = abweichungen[:config.FINANZ_HOECHSTENS]
+            teile = [f"{name} {_betrag(d)} {'mehr' if d > 0 else 'weniger'}"
+                     for name, d in oben]
+            satz += " Die größten Abweichungen: " + ", ".join(teile)
+            rest = len(abweichungen) - len(oben)
+            if rest > 0:
+                satz += f", dazu {rest} kleinere"
+            satz += "."
+        return _antwort(satz)
 
     @tool(
         "finanzen_buchen",
@@ -447,4 +677,5 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     return [finanzen_kontostand, finanzen_ausgaben, finanzen_monate,
             finanzen_empfaenger, finanzen_buchungen, finanzen_konten,
+            finanzen_kategorien, finanzen_vergleich,
             finanzen_buchen, finanzen_umbuchen]

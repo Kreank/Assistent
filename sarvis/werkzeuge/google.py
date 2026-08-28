@@ -208,6 +208,275 @@ def _text_aus(nutzlast: dict) -> str:
     return ""
 
 
+# --- Anhaenge -------------------------------------------------------------
+# Bis hierher kannte die Datei nur den Fliesstext einer Mail. Wer eine
+# Rechnung als PDF bekam, erfuhr davon gar nichts -- mail_lesen las den
+# Begleitsatz vor und schwieg ueber den Anhang.
+
+# Wie viele Anhaenge hoechstens aufgezaehlt werden. Mehr haelt beim
+# Vorlesen niemand aus; dass der Rest existiert, sagt die Antwort trotzdem.
+ANHAENGE_GRENZE = 10
+
+# Wie gross ein Anhang hoechstens sein darf, den wir herunterladen. Der
+# Inhalt geht als base64 durch den Arbeitsspeicher -- ein Video mit 300 MB
+# waere ein stiller Speicherberg fuer eine Datei, die niemand vorlesen kann.
+ANHANG_MAX_BYTES = 25 * 1024 * 1024
+
+# Wohin heruntergeladene Anhaenge kommen. Ein eigener Ordner, damit man
+# an einer Stelle nachsehen (und aufraeumen) kann, was aus fremden Mails
+# auf der Platte gelandet ist.
+ANHANG_ORDNER = config.WURZEL / "anhaenge"
+
+# Windows haelt diese Namen fuer Geraete und nicht fuer Dateien -- eine
+# Datei "CON.txt" laesst sich nicht anlegen, das Schreiben schlaegt mit
+# einer nichtssagenden Meldung fehl.
+GERAETENAMEN = ({"CON", "PRN", "AUX", "NUL"}
+                | {f"COM{i}" for i in range(1, 10)}
+                | {f"LPT{i}" for i in range(1, 10)})
+
+# Wie lang der Namensstamm hoechstens werden darf. Windows deckelt den
+# ganzen Pfad bei 260 Zeichen, und ein Absender kann den Namen beliebig
+# lang machen.
+NAME_MAX = 80
+
+# Endungen, die wir auch dann als Text behandeln, wenn der Absender einen
+# unbrauchbaren Typ mitgeschickt hat -- "application/octet-stream" steht
+# bei Mailprogrammen erschreckend oft an einer schlichten .csv.
+TEXT_ENDUNGEN = (".txt", ".md", ".csv", ".json", ".log",
+                 ".yaml", ".yml", ".ini", ".xml")
+
+
+def _dateiname_saeubern(roh: str) -> str:
+    """Einen Dateinamen aus fremder Hand in einen harmlosen verwandeln.
+
+    Der Name eines Anhangs stammt von dem, der die Mail geschickt hat. Er
+    ist Text, keine Zusage -- und er wird hier mit einem Ordnerpfad
+    zusammengesetzt. "..\\..\\Autostart\\start.bat" wuerde dabei aus dem
+    Anhangordner herausfuehren, "C:datei" zeigt unter Windows auf das
+    Arbeitsverzeichnis von Laufwerk C. Deshalb wird der Name nicht
+    repariert, sondern auf das reduziert, was ein Dateiname sein darf:
+    letzter Abschnitt, harmlose Zeichen, begrenzte Laenge.
+    """
+    name = str(roh or "").strip()
+    # Beide Trennerarten: Eine Mail von einem Linux-Absender bringt "/",
+    # eine von Windows "\" -- und Python nimmt unter Windows beides.
+    name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    name = re.sub(r'[<>:"|?*]', "_", name)
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name)
+    # Punkte und Leerzeichen am Ende schluckt Windows beim Anlegen still.
+    # Geprueft haetten wir dann einen anderen Namen als den geschriebenen.
+    name = name.strip(" .")
+    if not name:
+        return "anhang"
+    stamm, punkt, endung = name.rpartition(".")
+    if not punkt:
+        stamm, endung = name, ""
+    if stamm.upper() in GERAETENAMEN:
+        stamm = "_" + stamm
+    stamm = stamm[:NAME_MAX] or "anhang"
+    endung = endung[:16]
+    return stamm + ("." + endung if endung else "")
+
+
+def _anhang_ziel(name: str):
+    """Freien Pfad im Anhangordner suchen; legt den Ordner an, wenn er fehlt.
+
+    Gibt None zurueck, wenn der Pfad wider Erwarten aus dem Ordner
+    herausfuehrt. Das ist der zweite Riegel hinter _dateiname_saeubern --
+    zwei Riegel, weil ein Fehler hier eine fremde Datei an einen Ort
+    schreibt, den sich der Absender ausgesucht hat.
+    """
+    ANHANG_ORDNER.mkdir(parents=True, exist_ok=True)
+    stamm, punkt, endung = name.rpartition(".")
+    if not punkt:
+        stamm, endung = name, ""
+    ziel = ANHANG_ORDNER / name
+    zaehler = 2
+    # Zwei Anhaenge gleichen Namens ueberschreiben einander nicht -- sonst
+    # waere die Rechnung von gestern nach dem naechsten Abruf weg.
+    while ziel.exists():
+        ziel = ANHANG_ORDNER / (
+            f"{stamm}-{zaehler}" + ("." + endung if endung else ""))
+        zaehler += 1
+    ordner = ANHANG_ORDNER.resolve()
+    if ordner != ziel.resolve().parent:
+        return None
+    return ziel
+
+
+def _ist_textdatei(mime: str, name: str) -> bool:
+    """Ob sich der Anhang vorlesen laesst."""
+    mime = (mime or "").lower()
+    if mime.startswith("text/"):
+        return True
+    if mime in ("application/json", "application/xml", "application/csv"):
+        return True
+    return name.lower().endswith(TEXT_ENDUNGEN)
+
+
+def _groesse(zahl) -> str:
+    """Bytezahl als sprechbare Groesse."""
+    try:
+        n = int(zahl or 0)
+    except (TypeError, ValueError):
+        return "unbekannte Größe"
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f}".replace(".", ",") + " MB"
+    if n >= 1024:
+        return f"{round(n / 1024)} kB"
+    return f"{n} Byte"
+
+
+def _anhaenge_aus(nutzlast: dict) -> list:
+    """Alle Anhaenge einer Mail einsammeln.
+
+    Gmail legt Anhaenge irgendwo in den Teilebaum: Bei einer Mail mit Text,
+    HTML-Fassung und zwei Dateien liegen sie eine Ebene tiefer als der
+    Text. Deshalb wird der ganze Baum durchlaufen, nicht nur die erste
+    Ebene -- wie in _text_aus auch.
+    """
+    gefunden = []
+
+    def gehen(teil: dict):
+        name = (teil.get("filename") or "").strip()
+        koerper = teil.get("body") or {}
+        # Ohne attachmentId gibt es nichts nachzuladen. Eingebettete
+        # Bilder, die ihre Daten direkt im Teil tragen, sind Zierrat der
+        # HTML-Fassung und kein Anhang, den jemand meint.
+        if name and koerper.get("attachmentId"):
+            gefunden.append({
+                "nummer": len(gefunden) + 1,
+                "name": name,
+                "mime": teil.get("mimeType") or "",
+                "groesse": koerper.get("size", 0),
+                "kennung": koerper["attachmentId"],
+            })
+        for unter in teil.get("parts") or []:
+            gehen(unter)
+
+    gehen(nutzlast or {})
+    return gefunden
+
+
+def _anhang_zeile(anhang: dict) -> str:
+    """Ein Anhang zum Vorlesen -- mit Nummer, Art und Groesse.
+
+    Die Nummer steht dabei, weil zwei Anhaenge derselben Mail denselben
+    Namen tragen duerfen (Google Play verschickt seine Nutzungsbedingungen
+    zweimal). Ohne Nummer waere keiner von beiden erreichbar, denn nach
+    dem Namen sind sie nicht zu unterscheiden.
+    """
+    return (f"{anhang['nummer']}. {anhang['name']} — {_art(anhang['mime'])}, "
+            f"{_groesse(anhang['groesse'])}")
+
+
+def _anhaenge_satz(anhaenge: list) -> str:
+    """Die Anhangzeile unter einer vorgelesenen Mail."""
+    if not anhaenge:
+        return ""
+    teile = [_anhang_zeile(a) for a in anhaenge[:ANHAENGE_GRENZE]]
+    rest = len(anhaenge) - len(teile)
+    satz = f"\n\nAnhänge ({len(anhaenge)}): " + "; ".join(teile)
+    if rest > 0:
+        satz += f"; [… {rest} weitere nicht aufgezählt]"
+    return satz + ". Herunterladen mit mail_anhang_holen."
+
+
+def _anhang_waehlen(anhaenge: list, name, nummer=None):
+    """Aus mehreren Anhaengen den gemeinten aussuchen.
+
+    Gibt (Anhang, None) oder (None, Fehlerantwort). Bei mehreren und ohne
+    Angabe wird nicht der erste genommen: Welche der drei Dateien gemeint
+    ist, weiss nur der Nutzer.
+    """
+    def unklar(text: str, auswahl: list):
+        return None, {"content": [{"type": "text", "text":
+                      text + " " + "; ".join(_anhang_zeile(a)
+                                             for a in auswahl[:ANHAENGE_GRENZE])
+                      + ". Frag nach, welcher gemeint ist — die Nummer "
+                        "genügt."}], "is_error": True}
+
+    if nummer is not None:
+        try:
+            gewaehlt = int(nummer)
+        except (TypeError, ValueError):
+            gewaehlt = 0
+        for a in anhaenge:
+            if a["nummer"] == gewaehlt:
+                return a, None
+        return None, {"content": [{"type": "text", "text":
+                      f"Einen Anhang Nummer {nummer} hat die Mail nicht — "
+                      f"es sind {len(anhaenge)}."}], "is_error": True}
+
+    gesucht = str(name or "").strip().casefold()
+    if not gesucht:
+        if len(anhaenge) == 1:
+            return anhaenge[0], None
+        return unklar("Die Mail hat mehrere Anhänge:", anhaenge)
+    for passt in (lambda n: n == gesucht, lambda n: gesucht in n):
+        treffer = [a for a in anhaenge if passt(a["name"].casefold())]
+        if len(treffer) == 1:
+            return treffer[0], None
+        if len(treffer) > 1:
+            return unklar("Mehrere Anhänge passen:", treffer)
+    return None, {"content": [{"type": "text", "text":
+                  f"Einen Anhang {name!r} hat die Mail nicht. Vorhanden: "
+                  + "; ".join(_anhang_zeile(a)
+                              for a in anhaenge[:ANHAENGE_GRENZE]) + "."}],
+                  "is_error": True}
+
+
+# --- Kalender aussuchen ---------------------------------------------------
+# calendarId="primary" stand frueher an vier Stellen fest im Code. Wer
+# neben dem Hauptkalender einen zweiten fuehrt, kam nicht heran -- und
+# bekam keinen Hinweis darauf, sondern eine Antwort ueber den falschen
+# Kalender, die wie eine Antwort ueber alle klang.
+
+async def _kalender_holen(dienst) -> list:
+    antwort = await asyncio.to_thread(
+        lambda: dienst.calendarList().list(maxResults=100).execute())
+    return antwort.get("items", [])
+
+
+async def _kalender_id(dienst, name):
+    """Gesprochenen Kalendernamen auf eine ID aufloesen.
+
+    Gibt (ID, Anzeigename, None) oder (None, "", Fehlerantwort). Ohne
+    Angabe bleibt es beim Hauptkalender. Ist der Name mehrdeutig, wird
+    nichts geraten -- ein Termin im falschen Kalender ist genauso weg wie
+    eine Mail an den falschen Menschen.
+    """
+    gesucht = str(name or "").strip().casefold()
+    if not gesucht:
+        return "primary", "", None
+    eintraege = await _kalender_holen(dienst)
+    for passt in (lambda s: s == gesucht, lambda s: gesucht in s):
+        treffer = [e for e in eintraege
+                   if passt((e.get("summary") or "").casefold())]
+        if len(treffer) == 1:
+            return treffer[0]["id"], treffer[0].get("summary", ""), None
+        if len(treffer) > 1:
+            return None, "", {"content": [{"type": "text", "text":
+                              "Mehrere Kalender passen: "
+                              + "; ".join(e.get("summary", "?")
+                                          for e in treffer[:4])
+                              + ". Frag nach, welcher gemeint ist."}],
+                              "is_error": True}
+    vorhanden = ", ".join(e.get("summary", "?") for e in eintraege[:10])
+    return None, "", {"content": [{"type": "text", "text":
+                      f"Einen Kalender {name!r} gibt es nicht. Vorhanden: "
+                      + (vorhanden or "keiner") + "."}], "is_error": True}
+
+
+def _im_kalender(anzeige: str) -> str:
+    """Zusatz fuer die Antwort, damit klar ist, welcher Kalender gemeint war.
+
+    Beim Hauptkalender bleibt er leer -- sonst stuende bei jedem "was steht
+    heute an" ein "im Kalender ..." davor, das niemand hoeren will.
+    """
+    return f" im Kalender {anzeige}" if anzeige else ""
+
+
 # --- Labels ---------------------------------------------------------------
 # Gmail hat keine Ordner, sondern Labels -- und die eingebauten sind
 # technisch dieselbe Sorte Ding wie die selbstgemachten. "TRASH" hier zu
@@ -467,6 +736,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                          "description": "Zeitraum ab heute. Vorgabe 1."},
                 "ab": {"type": "string",
                        "description": "Optional TT.MM.JJJJ, sonst ab jetzt."},
+                "kalender": {"type": "string",
+                             "description": "Optional der Name eines anderen "
+                                            "Kalenders. Ohne Angabe der "
+                                            "Hauptkalender. Welche es gibt, "
+                                            "sagt kalender_liste."},
             },
         },
     )
@@ -474,6 +748,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("calendar", "v3")
         if dienst is None:
             return _fehlt()
+        kennung, welcher, fehler = await _kalender_id(dienst,
+                                                      args.get("kalender"))
+        if fehler:
+            return fehler
         tage = int(args.get("tage") or 1)
         von = datetime.now().astimezone()
         if args.get("ab"):
@@ -491,7 +769,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
         antwort = await asyncio.to_thread(
             lambda: dienst.events().list(
-                calendarId="primary", timeMin=von.isoformat(),
+                calendarId=kennung, timeMin=von.isoformat(),
                 timeMax=bis.isoformat(), singleEvents=True,
                 orderBy="startTime", maxResults=TERMINE_GRENZE,
             ).execute()
@@ -500,7 +778,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         eintraege = antwort.get("items", [])
         if not eintraege:
             return {"content": [{"type": "text", "text":
-                    f"Vom {zeitraum} steht nichts an."}]}
+                    f"Vom {zeitraum} steht{_im_kalender(welcher)} nichts "
+                    "an."}]}
         zeilen = [
             f"{_wann(e.get('start', {}))}: {e.get('summary', '(ohne Titel)')}"
             + (f" — {e['location']}" if e.get("location") else "")
@@ -513,7 +792,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             zeilen.append(f"[… mehr als {TERMINE_GRENZE} Termine — weitere "
                           "nicht aufgezählt]")
         return {"content": [{"type": "text", "text":
-                f"Termine {zeitraum}:\n" + "\n".join(zeilen)}]}
+                f"Termine {zeitraum}{_im_kalender(welcher)}:\n"
+                + "\n".join(zeilen)}]}
 
     @tool(
         "termin_anlegen",
@@ -529,6 +809,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                   "description": "Vorgabe 60."},
                 "ort": {"type": "string", "description": "Optional."},
                 "notiz": {"type": "string", "description": "Optional."},
+                "kalender": {"type": "string",
+                             "description": "Optional der Name eines anderen "
+                                            "Kalenders. Ohne Angabe der "
+                                            "Hauptkalender."},
             },
             "required": ["titel", "beginn"],
         },
@@ -537,6 +821,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("calendar", "v3")
         if dienst is None:
             return _fehlt()
+        kennung, welcher, fehler = await _kalender_id(dienst,
+                                                      args.get("kalender"))
+        if fehler:
+            return fehler
         try:
             beginn = datetime.strptime(str(args["beginn"]).strip(),
                                        "%d.%m.%Y %H:%M").astimezone()
@@ -557,15 +845,16 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             koerper["description"] = args["notiz"]
 
         await asyncio.to_thread(
-            lambda: dienst.events().insert(calendarId="primary",
+            lambda: dienst.events().insert(calendarId=kennung,
                                            body=koerper).execute()
         )
         blinken("Kalender")
         vermerken(f"termin_anlegen: {args['titel']} am "
-                  f"{beginn:%d.%m.%Y %H:%M} ist eingetragen.")
+                  f"{beginn:%d.%m.%Y %H:%M} ist eingetragen"
+                  f"{_im_kalender(welcher)}.")
         return {"content": [{"type": "text", "text":
-                f"Eingetragen: {args['titel']} am {beginn:%d.%m.} um "
-                f"{beginn:%H:%M} Uhr."}]}
+                f"Eingetragen{_im_kalender(welcher)}: {args['titel']} am "
+                f"{beginn:%d.%m.} um {beginn:%H:%M} Uhr."}]}
 
     @tool(
         "termin_absagen",
@@ -580,6 +869,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "tage": {"type": "integer", "minimum": 1, "maximum": 60,
                          "description": "In welchem Zeitraum suchen. "
                                         "Vorgabe 14."},
+                "kalender": {"type": "string",
+                             "description": "Optional der Name eines anderen "
+                                            "Kalenders. Ohne Angabe der "
+                                            "Hauptkalender."},
             },
             "required": ["titel"],
         },
@@ -588,11 +881,15 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("calendar", "v3")
         if dienst is None:
             return _fehlt()
+        kennung, welcher, fehler = await _kalender_id(dienst,
+                                                      args.get("kalender"))
+        if fehler:
+            return fehler
         von = datetime.now().astimezone()
         bis = von + timedelta(days=int(args.get("tage") or 14))
         antwort = await asyncio.to_thread(
             lambda: dienst.events().list(
-                calendarId="primary", timeMin=von.isoformat(),
+                calendarId=kennung, timeMin=von.isoformat(),
                 timeMax=bis.isoformat(), singleEvents=True,
                 orderBy="startTime", maxResults=50, q=args["titel"],
             ).execute()
@@ -600,7 +897,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         treffer = antwort.get("items", [])
         if not treffer:
             return {"content": [{"type": "text", "text":
-                    f"Keinen Termin {args['titel']!r} gefunden."}],
+                    f"Keinen Termin {args['titel']!r}"
+                    f"{_im_kalender(welcher)} gefunden."}],
                     "is_error": True}
         if len(treffer) > 1:
             namen = "; ".join(
@@ -612,13 +910,46 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     "ist."}], "is_error": True}
         ziel = treffer[0]
         await asyncio.to_thread(
-            lambda: dienst.events().delete(calendarId="primary",
+            lambda: dienst.events().delete(calendarId=kennung,
                                            eventId=ziel["id"]).execute()
         )
         blinken("Kalender")
-        vermerken(f"termin_absagen: {ziel.get('summary')} wurde gelöscht.")
+        vermerken(f"termin_absagen: {ziel.get('summary')} wurde"
+                  f"{_im_kalender(welcher)} gelöscht.")
         return {"content": [{"type": "text", "text":
                 f"{ziel.get('summary')} ist abgesagt."}]}
+
+    @tool(
+        "kalender_liste",
+        "Nennt die Kalender des Kontos. Vorher benutzen, wenn ein anderer "
+        "als der Hauptkalender gemeint sein könnte — die anderen Werkzeuge "
+        "brauchen den Namen so, wie er hier steht.",
+        {"type": "object", "properties": {}},
+    )
+    async def kalender_liste(args):
+        dienst = await _hole("calendar", "v3")
+        if dienst is None:
+            return _fehlt()
+        eintraege = await _kalender_holen(dienst)
+        blinken("Kalender")
+        if not eintraege:
+            return {"content": [{"type": "text", "text":
+                    "Es gibt keinen Kalender."}]}
+        zeilen = []
+        for e in eintraege:
+            name = e.get("summary", "(ohne Namen)")
+            merkmale = []
+            if e.get("primary"):
+                merkmale.append("Hauptkalender")
+            # Fremde Kalender kann man abonniert haben, ohne hineinschreiben
+            # zu duerfen. Steht das nicht dabei, sieht es nach einem Fehler
+            # von Sarvis aus, wenn termin_anlegen dort scheitert.
+            if e.get("accessRole") in ("reader", "freeBusyReader"):
+                merkmale.append("nur lesbar")
+            zeilen.append(name + (f" ({', '.join(merkmale)})"
+                                  if merkmale else ""))
+        return {"content": [{"type": "text", "text":
+                f"{len(zeilen)} Kalender: " + "; ".join(zeilen)}]}
 
     # --- Mail -------------------------------------------------------------
 
@@ -709,9 +1040,145 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         gekuerzt = ""
         if len(text) > LESE_GRENZE:
             text, gekuerzt = text[:LESE_GRENZE], "\n[… gekürzt]"
+        # Anhaenge kamen vorher gar nicht vor: Eine Mail mit "Rechnung im
+        # Anhang" wurde vollstaendig vorgelesen, und dass die Rechnung
+        # daran haengt, erfuhr niemand. Genannt wird sie auch dann, wenn
+        # wir sie nicht oeffnen koennen -- wissen soll er es trotzdem.
         return {"content": [{"type": "text", "text":
                 f"Von {_kopf(n, 'From')}\nBetreff: {_kopf(n, 'Subject')}\n\n"
-                + (text or "(kein lesbarer Text)") + gekuerzt}]}
+                + (text or "(kein lesbarer Text)") + gekuerzt
+                + _anhaenge_satz(_anhaenge_aus(n.get("payload", {})))}]}
+
+    @tool(
+        "mail_anhang_holen",
+        "Lädt einen Anhang aus einer Mail herunter und legt ihn im Ordner "
+        "'anhaenge' ab; der Antwortsatz nennt den Pfad. Gesucht wird die "
+        "Mail wie bei mails_ansehen, die neueste passende wird genommen. "
+        "Textdateien (txt, md, csv, json) kann das Werkzeug auf Wunsch "
+        "gleich vorlesen.",
+        {
+            "type": "object",
+            "properties": {
+                "suche": {"type": "string",
+                          "description": "Welche Mail, in Gmail-Schreibweise. "
+                                         "'has:attachment' findet nur solche "
+                                         "mit Anhang."},
+                "datei": {"type": "string",
+                          "description": "Name des Anhangs oder ein Teil "
+                                         "davon. Nötig, wenn die Mail "
+                                         "mehrere hat."},
+                "nummer": {"type": "integer", "minimum": 1,
+                           "description": "Der wievielte Anhang, gezählt wie "
+                                          "in der Anhangzeile von mail_lesen. "
+                                          "Sticht den Namen — nötig, wenn "
+                                          "zwei Anhänge gleich heißen."},
+                "vorlesen": {"type": "boolean",
+                             "description": "Inhalt zusätzlich ausgeben. "
+                                            "Geht nur bei Textdateien. "
+                                            "Vorgabe: nein."},
+            },
+            "required": ["suche"],
+        },
+    )
+    async def mail_anhang_holen(args):
+        dienst = await _hole("gmail", "v1")
+        if dienst is None:
+            return _fehlt()
+        liste = await asyncio.to_thread(
+            lambda: dienst.users().messages().list(
+                userId="me", q=args["suche"], maxResults=1).execute()
+        )
+        treffer = liste.get("messages", [])
+        if not treffer:
+            return {"content": [{"type": "text", "text":
+                    "Dazu finde ich keine Mail."}]}
+        kennung = treffer[0]["id"]
+        n = await asyncio.to_thread(
+            lambda: dienst.users().messages().get(
+                userId="me", id=kennung, format="full").execute()
+        )
+        anhaenge = _anhaenge_aus(n.get("payload", {}))
+        if not anhaenge:
+            return {"content": [{"type": "text", "text":
+                    f"Die Mail {_kopf(n, 'Subject') or '(kein Betreff)'!r} "
+                    "hat keinen Anhang."}]}
+        anhang, fehler = _anhang_waehlen(anhaenge, args.get("datei"),
+                                         args.get("nummer"))
+        if fehler:
+            return fehler
+
+        # Vor dem Laden pruefen, nicht danach: Die Groesse steht schon in
+        # der Nachricht, und ein 300-MB-Video will man nicht erst durch den
+        # Speicher schieben, um es dann abzulehnen.
+        try:
+            gemeldet = int(anhang.get("groesse") or 0)
+        except (TypeError, ValueError):
+            gemeldet = 0
+        if gemeldet > ANHANG_MAX_BYTES:
+            return {"content": [{"type": "text", "text":
+                    f"{anhang['name']} ist {_groesse(gemeldet)} groß — mehr "
+                    f"als die Grenze von {_groesse(ANHANG_MAX_BYTES)}. Nicht "
+                    "heruntergeladen."}], "is_error": True}
+
+        try:
+            roh = await asyncio.to_thread(
+                lambda: dienst.users().messages().attachments().get(
+                    userId="me", messageId=kennung,
+                    id=anhang["kennung"]).execute())
+            inhalt = base64.urlsafe_b64decode(roh.get("data") or "")
+        except Exception as e:
+            return {"content": [{"type": "text", "text":
+                    f"Konnte {anhang['name']} nicht laden: {e}"}],
+                    "is_error": True}
+        if len(inhalt) > ANHANG_MAX_BYTES:
+            # Die gemeldete Groesse ist eine Angabe des Absenders wie der
+            # Dateiname auch -- also wird sie nach dem Laden nachgeprueft.
+            return {"content": [{"type": "text", "text":
+                    f"{anhang['name']} ist tatsächlich "
+                    f"{_groesse(len(inhalt))} groß und damit zu groß. Nicht "
+                    "gespeichert."}], "is_error": True}
+
+        sauber = _dateiname_saeubern(anhang["name"])
+        ziel = _anhang_ziel(sauber)
+        if ziel is None:
+            return {"content": [{"type": "text", "text":
+                    f"Der Dateiname {anhang['name']!r} führt aus dem "
+                    "Anhangordner heraus. Nicht gespeichert."}],
+                    "is_error": True}
+        try:
+            await asyncio.to_thread(ziel.write_bytes, inhalt)
+        except OSError as e:
+            return {"content": [{"type": "text", "text":
+                    f"Konnte {sauber} nicht speichern: {e}"}],
+                    "is_error": True}
+        blinken("E-Mail")
+
+        satz = (f"{anhang['name']} ({_groesse(len(inhalt))}) liegt jetzt "
+                f"unter {ziel}.")
+        # Der Name kann unterwegs ein anderer geworden sein -- entweder weil
+        # er entschaerft wurde oder weil schon eine Datei so hiess. Das
+        # gehoert in die Antwort, sonst sucht der Nutzer den alten Namen.
+        if ziel.name != anhang["name"]:
+            satz += f" Gespeichert als {ziel.name}."
+
+        if args.get("vorlesen"):
+            if not _ist_textdatei(anhang["mime"], sauber):
+                satz += (f" Vorlesen geht nicht: Das ist "
+                         f"{_art(anhang['mime'])}, kein Text.")
+            else:
+                text = inhalt.decode("utf-8", "replace").strip()
+                if not text:
+                    satz += " Die Datei ist leer."
+                else:
+                    gekuerzt = ""
+                    if len(text) > LESE_GRENZE:
+                        text = text[:LESE_GRENZE]
+                        gekuerzt = "\n[… gekürzt]"
+                    satz += f"\n\n{text}{gekuerzt}"
+
+        vermerken(f"mail_anhang_holen: {ziel.name} aus einer Mail von "
+                  f"{_kopf(n, 'From') or '?'} liegt jetzt in {ANHANG_ORDNER}.")
+        return {"content": [{"type": "text", "text": satz}]}
 
     @tool(
         "mail_senden",
@@ -963,6 +1430,36 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             lambda: dienst.tasklists().list().execute())
         return listen.get("items", [])
 
+    def _liste_waehlen(listen: list, name):
+        """Aus den Aufgabenlisten die gemeinte aussuchen.
+
+        Gibt (Liste, None) oder (None, Fehlerantwort). Ohne Angabe bleibt
+        es bei der ersten -- das ist "Meine Aufgaben" und war schon immer
+        die Vorgabe. Mit Angabe wird nicht geraten: Eine Aufgabe in der
+        falschen Liste findet niemand wieder, weil er sie in der richtigen
+        sucht.
+        """
+        gesucht = str(name or "").strip().casefold()
+        if not gesucht:
+            return listen[0], None
+        for passt in (lambda t: t == gesucht, lambda t: gesucht in t):
+            treffer = [e for e in listen
+                       if passt((e.get("title") or "").casefold())]
+            if len(treffer) == 1:
+                return treffer[0], None
+            if len(treffer) > 1:
+                return None, {"content": [{"type": "text", "text":
+                              "Mehrere Listen passen: "
+                              + "; ".join(e.get("title", "?")
+                                          for e in treffer[:4])
+                              + ". Frag nach, welche gemeint ist."}],
+                              "is_error": True}
+        vorhanden = ", ".join(e.get("title", "?") for e in listen[:10])
+        return None, {"content": [{"type": "text", "text":
+                      f"Eine Aufgabenliste {name!r} gibt es nicht. "
+                      f"Vorhanden: {vorhanden}. Nichts angelegt."}],
+                      "is_error": True}
+
     async def _aufgaben_holen(dienst, kennung, **weitere):
         antwort = await asyncio.to_thread(
             lambda: dienst.tasks().list(tasklist=kennung, **weitere).execute())
@@ -1027,6 +1524,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "faellig": {"type": "string",
                             "description": "Optional TT.MM.JJJJ."},
                 "notiz": {"type": "string", "description": "Optional."},
+                "liste": {"type": "string",
+                          "description": "Optional der Name einer anderen "
+                                         "Aufgabenliste. Ohne Angabe die "
+                                         "erste. Welche es gibt, zeigt "
+                                         "aufgaben_ansehen."},
             },
             "required": ["titel"],
         },
@@ -1035,13 +1537,21 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("tasks", "v1")
         if dienst is None:
             return _fehlt()
-        # Beim Anlegen bleibt die erste Liste die Vorgabe: Wohin eine neue
-        # Aufgabe soll, sagt der Nutzer nicht -- geraten wird nichts.
+        # Ohne Angabe bleibt die erste Liste die Vorgabe -- wer nichts sagt,
+        # meint "Meine Aufgaben". Wer eine zweite Liste fuehrt, kann sie
+        # jetzt aber nennen; vorher landete alles in der ersten, ohne dass
+        # die Antwort das verriet.
         listen = await _listen(dienst)
         if not listen:
             return {"content": [{"type": "text", "text":
                     "Es gibt keine Aufgabenliste."}], "is_error": True}
-        liste = listen[0]["id"]
+        ziel, fehler = _liste_waehlen(listen, args.get("liste"))
+        if fehler:
+            return fehler
+        liste = ziel["id"]
+        # Der Listenname nur, wenn es ueberhaupt mehrere gibt -- sonst
+        # steht bei jeder Aufgabe ein "in Meine Aufgaben" dahinter.
+        wohin = (f" in {ziel.get('title', '')}" if len(listen) > 1 else "")
         koerper = {"title": args["titel"]}
         if args.get("notiz"):
             koerper["notes"] = args["notiz"]
@@ -1063,10 +1573,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             lambda: dienst.tasks().insert(tasklist=liste,
                                           body=koerper).execute())
         blinken("Aufgaben")
-        vermerken(f"aufgabe_anlegen: Aufgabe {args['titel']!r} wurde "
-                  f"angelegt{frist}.")
+        vermerken(f"aufgabe_anlegen: Aufgabe {args['titel']!r} wurde"
+                  f"{wohin} angelegt{frist}.")
         return {"content": [{"type": "text", "text":
-                f"Aufgabe angelegt: {args['titel']}{frist}."}]}
+                f"Aufgabe angelegt{wohin}: {args['titel']}{frist}."}]}
 
     @tool(
         "aufgabe_abhaken",
@@ -1511,9 +2021,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"Tabelle {args['name']} ist angelegt."}]}
 
-    return [termine_ansehen, termin_anlegen, termin_absagen,
-            mails_ansehen, mail_lesen, mail_senden, mail_verschieben,
-            labels_ansehen, mail_einsortieren,
+    return [termine_ansehen, termin_anlegen, termin_absagen, kalender_liste,
+            mails_ansehen, mail_lesen, mail_anhang_holen, mail_senden,
+            mail_verschieben, labels_ansehen, mail_einsortieren,
             aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken,
             kontakt_suchen, kontakt_anlegen,
             drive_suchen, drive_lesen, drive_teilen,

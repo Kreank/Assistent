@@ -117,6 +117,23 @@ Führe Buch, und zwar WÄHREND der Arbeit, nicht am Ende:
   `fortschritt.md`. Fang nicht von vorn an."""
 
 
+def _glatt(text: str, grenze: int = 600) -> str:
+    """Formatierung wegnehmen, bis nur noch sprechbarer Fliesstext bleibt.
+
+    Stand frueher fest in vorlesbar(). Jetzt steht es hier, weil
+    bericht_kurz() dieselbe Behandlung braucht: Ein Bericht wird mit
+    genau denselben Sternchen und Backticks geschrieben wie die
+    Schlussnachricht, und Piper spricht beides gleich falsch aus.
+    """
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"[`*_#>]+", "", text)
+    text = re.sub(r"^\s*[-•]\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)   # Links
+    text = re.sub(r"\b([\w-]+)\.(py|md|txt|json|js|ts|html|css)\b",
+                  r"\1", text)                              # Dateiendungen
+    return " ".join(text.split())[:grenze]
+
+
 def vorlesbar(text: str) -> str:
     """Aus der Schlussnachricht des Arbeiters einen sprechbaren Satz machen.
 
@@ -139,14 +156,35 @@ def vorlesbar(text: str) -> str:
         absaetze = [a.strip() for a in text.split("\n\n") if a.strip()]
         text = absaetze[-1] if absaetze else text
 
-    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
-    text = re.sub(r"[`*_#>]+", "", text)
-    text = re.sub(r"^\s*[-•]\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)   # Links
-    text = re.sub(r"\b([\w-]+)\.(py|md|txt|json|js|ts|html|css)\b",
-                  r"\1", text)                              # Dateiendungen
-    text = " ".join(text.split())
-    return text[:600] or "Fertig, aber ohne Zusammenfassung."
+    return _glatt(text) or "Fertig, aber ohne Zusammenfassung."
+
+
+def bericht_kurz(text: str) -> str:
+    """Aus einem bericht.md ein paar vorlesbare Saetze machen.
+
+    Der Bericht ist zum Lesen geschrieben, nicht zum Hoeren:
+    Ueberschriften, Trennlinien, Codebloecke. Vorgelesen taugt davon nur
+    der Fliesstext -- eine Ueberschrift klingt gesprochen wie ein
+    abgerissener Halbsatz mitten im Vortrag. Deshalb fliegen
+    Ueberschriften und Trennlinien vorher raus; Aufzaehlungspunkte
+    bleiben, denn sie sind meist ganze Saetze.
+
+    Gekuerzt wird hart bei 500 Zeichen. Das ist kein Bericht mehr,
+    sondern ein Anfang -- und genau als solcher wird er auch angesagt.
+    """
+    behalten = []
+    im_block = False
+    for zeile in (text or "").splitlines():
+        blank = zeile.strip()
+        if blank.startswith("```"):
+            im_block = not im_block
+            continue
+        if im_block or blank.startswith("#"):
+            continue
+        if blank and set(blank) <= set("-=_| "):   # Trenn- und Tabellenlinien
+            continue
+        behalten.append(zeile)
+    return _glatt("\n".join(behalten), 500)
 
 
 @dataclass
@@ -308,6 +346,12 @@ class Werkstatt:
             a.sitzung = str(e.get("sitzung") or "")
             a.zuletzt_gesehen = str(e.get("zuletzt_gesehen") or "")
             a.basis = str(e.get("basis") or "")
+            # Das Ergebnis lebte bisher nur im Arbeitsspeicher: Wer die
+            # gesprochene Ansage verpasst hat, bekam sie nie wieder. Es
+            # wird hier wie alle Zusatzfelder mit .get() geholt -- eine
+            # auftraege.json von vor dieser Aenderung kennt das Feld nicht
+            # und laedt trotzdem, sie hat dann eben ein leeres Ergebnis.
+            a.ergebnis = str(e.get("ergebnis") or "")
             if a.status == "läuft":
                 a.status = "unterbrochen"
                 a.beendet = a.beendet or datetime.now()
@@ -341,7 +385,7 @@ class Werkstatt:
             e = stand.setdefault(nummer, {"nummer": nummer, "status": "läuft"})
             for feld in ("projekt", "was", "zweig", "ordner", "sitzung",
                          "begonnen", "beendet", "status", "zuletzt_gesehen",
-                         "basis"):
+                         "basis", "ergebnis"):
                 if z.get(feld):
                     e[feld] = z[feld]
             if z.get("ereignis") == "beendet":
@@ -530,7 +574,11 @@ class Werkstatt:
         if protokoll is None:
             teile.append("wie weit er kam, konnte ich nicht ermitteln")
         elif commits:
-            teile.append(f"{len(commits)} Commits, zuletzt: {commits[0][:60]}")
+            # Einzahl mitfuehren: "1 Commits" faellt beim Lesen nicht
+            # auf, beim VORLESEN sofort.
+            wort = "Commit" if len(commits) == 1 else "Commits"
+            teile.append(
+                f"{len(commits)} {wort}, zuletzt: {commits[0][:60]}")
         else:
             teile.append("noch kein Commit")
         if offen:
@@ -545,6 +593,127 @@ class Werkstatt:
             except OSError:
                 pass
         return "; ".join(teile)
+
+    def einzelstand(self, nummer) -> tuple[str, bool]:
+        """Ein Auftrag, mit dem inhaltlichen Stand aus dem Projekt.
+
+        Warum der teure Teil NUR hier laeuft und nicht in uebersicht():
+        stand() startet bis zu vier Git-Prozesse mit je zehn Sekunden
+        Zeitlimit und liest fortschritt.md dazu. Die Uebersicht
+        beantwortet "was laeuft gerade?" -- eine Frage, die oft kommt und
+        sofort beantwortet sein will; bei zehn Auftraegen waeren das
+        vierzig Git-Aufrufe fuer eine Antwort, die in der Liste ohnehin
+        schon steht. "Wie weit ist Auftrag drei?" ist die andere Frage:
+        Sie nennt eine Nummer, sie meint den Inhalt, und fuer die eine
+        Antwort ist ein Git-Aufruf sein Geld wert.
+
+        Nachgesehen wird nur bei laufenden und unterbrochenen Auftraegen.
+        Bei einem fertigen ist der Zweig endgueltig, aber uninteressant --
+        da zaehlt das Ergebnis, und das holt auftrag_ergebnis.
+        """
+        try:
+            a = self.auftraege.get(int(nummer or 0))
+        except (TypeError, ValueError):
+            a = None
+        if a is None:
+            return "Diesen Auftrag kenne ich nicht.", True
+
+        minuten = max(1, a.dauer() // 60)
+        if a.status == "läuft":
+            satz = (f"Auftrag {a.nummer} im Projekt {a.projekt} läuft seit "
+                    f"{minuten} Minuten, auf dem Zweig {a.zweig}.")
+        else:
+            satz = (f"Auftrag {a.nummer} im Projekt {a.projekt} ist "
+                    f"{a.status}, nach {minuten} Minuten, auf dem Zweig "
+                    f"{a.zweig}.")
+
+        if a.status in ("läuft", "unterbrochen"):
+            try:
+                a.stand_text = self.stand(a)
+            except Exception:
+                a.stand_text = ""
+            # rstrip: Die letzte Notiz aus fortschritt.md bringt ihren
+            # eigenen Punkt mit -- ohne das endet der Satz auf "..".
+            satz += (f" Stand im Projekt: {a.stand_text.rstrip('. ')}."
+                     if a.stand_text
+                     else " Wie weit er inhaltlich ist, konnte ich nicht "
+                          "ermitteln.")
+        elif a.ergebnis:
+            satz += " Das Ergebnis kann ich noch einmal vorlesen."
+        return satz, False
+
+    def bericht(self, auftrag) -> str:
+        """Den bericht.md dieses Auftrags holen. Leerer String, wenn keiner da ist.
+
+        Zwei Wege, und die Reihenfolge hat einen Grund. Zuerst `git show
+        zweig:bericht.md`: Das liest aus dem Zweig und funktioniert auch
+        dann noch, wenn im Ordner laengst wieder master ausgecheckt ist.
+
+        Dann erst die Platte -- denn der Arbeiter schreibt den Bericht als
+        LETZTES, oft ohne ihn noch zu committen; dann kennt der Zweig ihn
+        gar nicht. Gelesen wird von der Platte aber nur, wenn dort auch
+        wirklich dieser Zweig steht. Sonst laese man den Bericht eines
+        fremden Standes vor und gaebe ihn als den eigenen aus.
+        """
+        ordner = Path(auftrag.ordner)
+        if not auftrag.zweig or not ordner.exists():
+            return ""
+
+        def git(*args):
+            try:
+                e = subprocess.run(["git", *args], cwd=ordner,
+                                   capture_output=True, text=True, timeout=10,
+                                   encoding="utf-8", errors="replace")
+                return e.stdout if e.returncode == 0 else None
+            except (OSError, subprocess.SubprocessError):
+                return None
+
+        aus_zweig = git("show", f"{auftrag.zweig}:bericht.md")
+        if aus_zweig and aus_zweig.strip():
+            return aus_zweig
+
+        kopf = git("rev-parse", "--abbrev-ref", "HEAD")
+        if kopf is None or kopf.strip() != auftrag.zweig:
+            return ""
+        try:
+            return (ordner / "bericht.md").read_text(encoding="utf-8",
+                                                     errors="replace")
+        except OSError:
+            return ""
+
+    def ergebnis_von(self, nummer) -> tuple[str, bool]:
+        """Die Schlussansage eines abgeschlossenen Auftrags -- noch einmal."""
+        try:
+            a = self.auftraege.get(int(nummer or 0))
+        except (TypeError, ValueError):
+            a = None
+        if a is None:
+            return "Diesen Auftrag kenne ich nicht.", True
+        if a.status == "läuft":
+            return (f"Auftrag {a.nummer} läuft noch. Ein Ergebnis gibt es "
+                    "erst, wenn er fertig ist -- wie weit er ist, kann ich "
+                    "dir aber sagen."), False
+
+        minuten = max(1, a.dauer() // 60)
+        if a.ergebnis:
+            return (f"Auftrag {a.nummer} im Projekt {a.projekt}, {a.status} "
+                    f"nach {minuten} Minuten. {a.ergebnis}"), False
+
+        # Kein gespeichertes Ergebnis. Zwei Faelle: ein Auftrag von vor
+        # dieser Aenderung, oder einer, der abgebrochen wurde, bevor er
+        # etwas sagen konnte. In beiden Faellen ist der bericht.md auf dem
+        # Zweig das Einzige, was von der Arbeit uebrig ist -- ihn nicht zu
+        # lesen und stattdessen "weiss ich nicht mehr" zu antworten waere
+        # bequem und falsch. Vorgelesen wird er als das, was er ist: ein
+        # Anfang, kein Ergebnis.
+        kurz = bericht_kurz(self.bericht(a))
+        if kurz:
+            return (f"Von Auftrag {a.nummer} habe ich keine gesprochene "
+                    f"Zusammenfassung mehr, aber den Bericht auf dem Zweig "
+                    f"{a.zweig}. Er beginnt so: {kurz}"), False
+        return (f"Von Auftrag {a.nummer} habe ich weder eine Zusammenfassung "
+                f"noch einen Bericht. Nachsehen kannst du auf dem Zweig "
+                f"{a.zweig}."), False
 
     async def _arbeiten(self, auftrag: Auftrag, fortsetzen: bool = False) -> None:
         klient = None
@@ -622,7 +791,12 @@ class Werkstatt:
             auftrag.ergebnis = f"{type(e).__name__}: {e}"
         finally:
             auftrag.beendet = datetime.now()
+            # Das Ergebnis kommt mit ins Journal, nicht nur in die
+            # auftraege.json: Geht die kaputt, baut _aus_journal() den
+            # Stand daraus neu -- und ohne diese Zeile waere dabei
+            # ausgerechnet das verloren, was der Mensch hoeren will.
             journal(auftrag.nummer, "beendet", status=auftrag.status,
+                    ergebnis=auftrag.ergebnis[:600],
                     beendet=auftrag.beendet.isoformat(timespec="seconds"))
             if klient is not None:
                 try:
@@ -708,6 +882,11 @@ class Werkstatt:
                  "basis": a.basis,
                  "sitzung": a.sitzung,
                  "zuletzt_gesehen": a.zuletzt_gesehen,
+                 # Ohne dieses Feld ueberlebte die Ansage keinen Neustart.
+                 # Es ist bereits durch vorlesbar() gegangen und damit
+                 # kurz -- nur der Fehlerfall schreibt hier eine rohe
+                 # Ausnahme hinein, deshalb die Grenze.
+                 "ergebnis": a.ergebnis[:600],
                  "begonnen": a.begonnen.isoformat(),
                  "beendet": a.beendet.isoformat() if a.beendet else None}
                 for a in self.auftraege.values()
@@ -777,16 +956,56 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
 
     @tool(
         "auftrag_status",
-        "Sagt, welche Aufträge laufen oder gelaufen sind — mit Zweig, Dauer "
-        "und Stand.",
-        {"type": "object", "properties": {}},
+        "Sagt, welche Aufträge laufen oder gelaufen sind — mit Zweig und "
+        "Dauer. Mit einer Nummer sieht Sarvis zusätzlich im Projekt nach, wie "
+        "weit dieser eine Auftrag INHALTLICH ist: Commits, geänderte Dateien, "
+        "letzte eigene Notiz. Für 'wie weit ist Auftrag drei?' also immer mit "
+        "Nummer fragen.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer",
+                           "description": "Auftragsnummer. Weglassen für die "
+                                          "Übersicht über alle."}
+            },
+        },
     )
     async def auftrag_status(args):
+        nummer = args.get("nummer")
+        if nummer not in (None, ""):
+            text, fehler = werkstatt.einzelstand(nummer)
+            antwort = {"content": [{"type": "text", "text": text}]}
+            if fehler:
+                antwort["is_error"] = True
+            return antwort
         zeilen = werkstatt.uebersicht()
         if not zeilen:
             return {"content": [{"type": "text", "text":
                     "Es läuft kein Auftrag und es lief auch keiner."}]}
         return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
+
+    @tool(
+        "auftrag_ergebnis",
+        "Liest das Ergebnis eines abgeschlossenen Auftrags noch einmal vor — "
+        "die Zusammenfassung, die der Arbeiter am Ende gemeldet hat. Für 'was "
+        "kam bei Auftrag zwei heraus?' oder wenn die Ansage verpasst wurde. "
+        "Fehlt die gespeicherte Zusammenfassung, wird der Bericht vom Zweig "
+        "gelesen.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer", "description": "Auftragsnummer."}
+            },
+            "required": ["nummer"],
+        },
+    )
+    async def auftrag_ergebnis(args):
+        text, fehler = werkstatt.ergebnis_von(args.get("nummer"))
+        if fehler:
+            return {"content": [{"type": "text", "text": text}],
+                    "is_error": True}
+        vermerken(f"auftrag_ergebnis: {text[:200]}")
+        return {"content": [{"type": "text", "text": text}]}
 
     @tool(
         "auftrag_abbrechen",
@@ -840,5 +1059,5 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
                 f"Auftrag {a.nummer} läuft weiter, auf Zweig {a.zweig}. "
                 "Er sieht sich erst an, wie weit er war."}]}
 
-    return [auftrag_geben, auftrag_status, auftrag_abbrechen,
-            auftrag_fortsetzen]
+    return [auftrag_geben, auftrag_status, auftrag_ergebnis,
+            auftrag_abbrechen, auftrag_fortsetzen]

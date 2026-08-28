@@ -297,7 +297,10 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
 
     if werkzeug == "telegram_senden":
         an = e.get("an") or "den Kontakt"
-        return f"Soll ich {an} schreiben: {_kuerzen(e.get('text'))}?"
+        bezug = (" als Antwort auf eine frühere Nachricht"
+                 if e.get("antwort_auf") else "")
+        return (f"Soll ich {an}{bezug} schreiben: "
+                f"{_kuerzen(e.get('text'))}?")
 
     if werkzeug == "mail_senden":
         an = e.get("an") or "den Empfänger"
@@ -376,6 +379,22 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         if e.get("anlegen"):
             frage += " Das Label lege ich dabei neu an."
         return frage
+
+    if werkzeug == "telegram_medium_holen":
+        return (f"Soll ich das Medium aus Nachricht "
+                f"{e.get('nachricht_id')} im Chat mit "
+                f"{_kuerzen(e.get('chat'), 30)} herunterladen?")
+
+    if werkzeug == "mail_anhang_holen":
+        # Der Dateiname gehoert in die Frage, nicht der Suchausdruck: Was
+        # auf der Platte landet, ist die Datei -- und ihr Name ist das
+        # Einzige daran, was der Nutzer vorher beurteilen kann.
+        datei = _kuerzen(e.get("datei") or "", 45)
+        was = f"den Anhang {datei}" if datei else "den Anhang"
+        if e.get("nummer"):
+            was = f"Anhang Nummer {e.get('nummer')}"
+        return (f"Soll ich {was} aus der Mail zu "
+                f"{_kuerzen(e.get('suche'), 40)} herunterladen?")
 
     if werkzeug == "drive_teilen":
         # Der Satz muss die Tragweite tragen, nicht den Werkzeugnamen:

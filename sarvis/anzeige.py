@@ -64,6 +64,13 @@ class Anzeige:
                      zeilen=[str(z) for z in (zeilen or [])][:3],
                      seit=round(float(seit), 1), fertig=bool(fertig))
 
+    def browser(self, adresse: str) -> None:
+        """Eine Seite im eingebauten Browser zeigen."""
+        self._senden(art="browser", adresse=str(adresse or ""))
+
+    def browser_zu(self) -> None:
+        self._senden(art="browser_zu")
+
     def kachel(self, name: str, kopf: str, punkte, sorte: str = "antwort",
                gross: str = "", stand: str = "", sekunden: float = 0.0) -> None:
         """Eine Kachel neben der Engine zeigen -- oder ihren Inhalt ersetzen.

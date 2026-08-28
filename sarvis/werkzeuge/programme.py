@@ -15,6 +15,9 @@ from difflib import SequenceMatcher
 
 from claude_agent_sdk import tool
 
+from .. import config
+from ..anzeige import Anzeige
+
 _liste: list[dict] | None = None
 _schloss = asyncio.Lock()
 
@@ -186,6 +189,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     def blinken():
         if leuchten:
             leuchten("Programme")
+
+    # Ein eigener Draht zur Anzeige. Die Werkzeuge bekommen von aussen nur
+    # leuchten() gereicht, und dafuer eine zweite Leitung durch drei
+    # Ebenen zu faedeln waere mehr Umbau als Nutzen: Anzeige ist ein
+    # zustandsloser UDP-Sender, der nie blockiert und ins Nichts sendet,
+    # wenn die Anzeige gar nicht laeuft.
+    sicht = Anzeige(config.ANZEIGE)
 
     @tool(
         "programm_starten",
@@ -433,6 +443,65 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text": name + schluss}]}
 
     @tool(
+        "web_zeigen",
+        "Zeigt eine Seite IN der Anzeige, statt den Browser daneben "
+        "aufzumachen. Für 'zeig mir meinen Kalender als Monatsansicht', "
+        "'zeig mir die Seite', 'mach das hier auf'. Nimm dieses Werkzeug, "
+        "wenn der Nutzer etwas SEHEN will; web_oeffnen, wenn er in seinem "
+        "gewohnten Browser weiterarbeiten will. Das Fenster lässt sich "
+        "größer ziehen und schließt mit Escape.",
+        {
+            "type": "object",
+            "properties": {
+                "ziel": {
+                    "type": "string",
+                    "description": "Name einer bekannten Seite oder eine "
+                                   "vollständige Adresse.",
+                },
+                "suche": {
+                    "type": "string",
+                    "description": "Optional: wonach dort gesucht werden "
+                                   "soll. Nur bei den bekannten Seiten.",
+                },
+            },
+            "required": ["ziel"],
+        },
+    )
+    async def web_zeigen(args):
+        ziel = (args.get("ziel") or "").strip()
+        suche = (args.get("suche") or "").strip()
+        if not ziel:
+            return {"content": [{"type": "text", "text":
+                    "Welche Seite denn?"}], "is_error": True}
+
+        adresse, name, gesucht = _adresse(ziel, suche)
+        sicht.browser(adresse)
+        if leuchten:
+            leuchten("Websuche")
+        vermerken(f"web_zeigen: {adresse}")
+
+        # Dieselbe Ehrlichkeit wie bei web_oeffnen: Eine Suche, die nicht
+        # lief, wird nicht behauptet.
+        if suche and not gesucht:
+            schluss = (f" steht in der Anzeige. Nach {suche} habe ich nicht "
+                       "gesucht -- in eine fertige Adresse passt kein "
+                       "Suchbegriff.")
+        elif gesucht and suche:
+            schluss = f" steht in der Anzeige, Suche nach {suche}."
+        else:
+            schluss = " steht in der Anzeige."
+
+        # Der Hinweis auf die eigene Anmeldung faellt genau einmal: beim
+        # ersten Mal, wenn es das Profil noch nicht gibt. Danach waere er
+        # Geschwaetz -- und beim ersten Mal ist er der Unterschied
+        # zwischen "kaputt" und "einmal anmelden".
+        if not config.BROWSER_PROFIL.exists():
+            schluss += (" Das ist ein eigener Browser, nicht dein Chrome -- "
+                        "bei angemeldeten Seiten musst du dich dort einmal "
+                        "anmelden.")
+        return {"content": [{"type": "text", "text": name + schluss}]}
+
+    @tool(
         "route_zeigen",
         "Öffnet eine Route in Google Maps — von wo nach wo, mit Verkehrs"
         "mittel. Für 'wie komme ich von Hamburg nach Berlin' oder 'zeig mir "
@@ -491,4 +560,4 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 + f"nach {nach} ist offen."}]}
 
     return [programm_starten, programm_suchen, programm_beenden,
-            web_oeffnen, route_zeigen]
+            web_oeffnen, web_zeigen, route_zeigen]

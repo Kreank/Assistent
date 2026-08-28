@@ -712,6 +712,13 @@ WERKZEUG_STUFEN = {
     # Finanzen: Abfragen sind harmlos und laufen still. Eine Buchung
     # anzulegen fragt nach -- sie taucht spaeter im Kontoabgleich auf,
     # und eine falsche findet man dann schwer wieder.
+    # Kategorien auflisten und einen gesprochenen Namen auf eine Nummer
+    # aufloesen. Reines Lesen -- und finanzen_buchungen loest ohnehin
+    # intern mit auf, damit ein Satz ein Aufruf bleibt.
+    "finanzen_kategorien": "still",
+    # Zwei Abfragen und eine Subtraktion. Gerechnet wird in Python, nicht
+    # im Modell: Eine subtrahierte Zahl kann nicht halluziniert sein.
+    "finanzen_vergleich":  "still",
     "finanzen_kontostand": "still",
     "finanzen_ausgaben":   "still",
     "finanzen_monate":     "still",
@@ -735,6 +742,9 @@ WERKZEUG_STUFEN = {
     # selbstaendig Dateien. Status und Abbrechen sind harmlos.
     "auftrag_geben":      "fragen",
     "auftrag_status":     "still",
+    # Nachlesen, was schon einmal gesagt wurde -- aus der eigenen
+    # Sicherung und dem bericht.md des Zweigs. Aendert nichts.
+    "auftrag_ergebnis":   "still",
     "auftrag_abbrechen":  "still",
     # Fortsetzen startet wieder einen Arbeiter, der selbstaendig Dateien
     # schreibt -- also dieselbe Stufe wie auftrag_geben.
@@ -755,6 +765,10 @@ WERKZEUG_STUFEN = {
     # schneller zu als jede Rueckfrage.
     "web_oeffnen":        "still",
     "route_zeigen":       "still",
+    # Dasselbe im eingebauten Browser. Eine Seite ANZUZEIGEN ist keine
+    # Handlung an der Aussenwelt -- gehandelt wird darin von Hand, nicht
+    # von Sarvis. Deshalb dieselbe Stufe wie web_oeffnen.
+    "web_zeigen":         "still",
 
     # Google. Ansehen laeuft still, alles Veraendernde und alles, was
     # hinausgeht, fragt nach -- so wie ueberall sonst auch.
@@ -770,6 +784,22 @@ WERKZEUG_STUFEN = {
     # Werkzeug mit aus_posteingang archiviert, und das kann mail_verschieben
     # nicht ohne Rueckfrage.
     "labels_ansehen":     "still",
+    # Nachschlagen, welche Kalender es gibt -- wie labels_ansehen.
+    "kalender_liste":     "still",
+    # Und hier NICHT still, obwohl es wie Lesen aussieht.
+    #
+    # mail_anhang_holen und telegram_medium_holen legen eine Datei aus
+    # FREMDER Hand auf der Platte ab. Dass Name und Zielordner entschaerft
+    # sind, macht den INHALT nicht harmlos -- ausgesucht hat ihn ein
+    # Absender, nicht der Nutzer. Genau das meinen die globalen Regeln
+    # mit "Lieferung von aussen wird angesagt".
+    #
+    # Dazu kommt eine Luecke, die man kennen muss: Der Download schreibt
+    # direkt mit write_bytes, nicht ueber das Write-Werkzeug. Die
+    # Pfadpruefung in schutz.py greift also gar nicht. Diese zwei Zeilen
+    # sind die einzige Bremse.
+    "mail_anhang_holen":     "fragen",
+    "telegram_medium_holen": "fragen",
     "mail_einsortieren":  "fragen",
     "aufgaben_ansehen":   "still",
     "aufgabe_anlegen":    "still",
@@ -865,6 +895,8 @@ FREIGABE_NAMEN = {
     "tabelle_schreiben": "Tabellen schreiben",
     "tabelle_anlegen": "Tabellen anlegen",
     "kontakt_anlegen": "Kontakte anlegen",
+    "mail_anhang_holen": "Mailanhänge herunterladen",
+    "telegram_medium_holen": "Telegram-Medien herunterladen",
     "merken": "sich Dinge merken",
 }
 
@@ -918,6 +950,25 @@ TASTE_STOPP = "<ctrl>+<alt>+s"
 
 # Gemerkte Position der Anzeige (wird beim Verschieben geschrieben).
 ANZEIGE_DATEI = WURZEL / "anzeige.json"
+
+# --- Browser in der Engine ------------------------------------------------
+# Es gibt Dinge, die eine handgemalte Kachel nie so gut zeigen wird wie das
+# echte Programm: eine Kalender-Monatsansicht, ein PDF, ein Drive-Dokument,
+# eine Rechercheseite. Daher die Trennlinie: Die Kachel ist fuer den Blick
+# nebenbei, der Browser fuers Hinsetzen.
+#
+# Dies ist NICHT dein Chrome. Der Cookie-Speicher liegt getrennt, also ist
+# beim ersten Aufruf einer angemeldeten Seite eine eigene Anmeldung faellig.
+# Danach bleibt sie -- geprueft, das Profil steht auf AllowPersistentCookies.
+#
+# Die Startgroesse ist bewusst nicht die halbe Wand: Aufgehen soll er
+# handlich, groesser ziehen kann man ihn am Anfasser unten rechts.
+BROWSER_BREITE = 1100
+BROWSER_HOEHE = 780
+
+# Profil und Zwischenspeicher. Gehoert NICHT ins Repository -- hier liegen
+# Anmeldungen.
+BROWSER_PROFIL = WURZEL / "browser"
 
 # Werkzeugkranz rund um den Ring. Reihenfolge = Anordnung im Kreis,
 # beginnend oben, im Uhrzeigersinn.
