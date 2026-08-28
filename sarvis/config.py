@@ -160,8 +160,45 @@ DIKTAT_STILLE_SEK = 3.0
 # zusammen mit dem Ergebnis. Ein Wartesatz, der die Wartezeit nicht
 # ueberbrueckt, ist schlimmer als keiner: Er behauptet eine Pause, die
 # schon vorbei ist.
-LANGSAME_WERKZEUGE = {"WebSearch", "WebFetch", "Task", "Agent",
-                      "Bash", "PowerShell"}
+# Werkzeuge, bei denen KEIN Wartesatz faellt. Die Liste ist bewusst
+# andersherum gebaut als frueher, und dafuer gibt es zwei Gruende.
+#
+# ERSTENS war die alte Liste nutzlos. Sie zaehlte sechs Werkzeuge auf --
+# WebSearch, WebFetch, Task, Agent, Bash, PowerShell --, also nur
+# eingebaute. Keins von Sarvis' eigenen stand darin, und selbst ein
+# Eintrag haette nichts genuetzt: Verglichen wurde der ROHE Name, und der
+# lautet bei den eigenen "mcp__sarvis__mails_ansehen". Die Pruefung
+# konnte nie zutreffen.
+#
+# ZWEITENS ist der Schaden ungleich verteilt. Vergisst man ein langsames
+# Werkzeug, stehen fuenf bis sieben Sekunden Stille im Raum. Vergisst man
+# ein schnelles, faellt ein "Moment" zu viel. Das eine merkt man sofort,
+# das andere kaum -- also ist "langsam" die richtige Vorgabe, und ein
+# neues Werkzeug schweigt nicht mehr aus Versehen.
+#
+# GEMESSEN an 301 echten Aufrufen aus den Sitzungsprotokollen (Mitte):
+#
+#   mails_ansehen      1,47s      termine_ansehen     0,52s
+#   programm_starten   0,87s      kontakt_suchen      0,37s
+#   aufgaben_ansehen   0,66s      finanzen_kontostand 0,18s
+#   telegram_kontakte  0,63s      timer_stellen       0,01s
+#
+# Die einzelnen Werkzeuge sind also gar nicht das Problem -- die Stille
+# entsteht durch die KETTE: ToolSearch, dann das Werkzeug, dann der
+# Antworttext, jeweils eine Runde zum Modell. Deshalb faellt der
+# Wartesatz beim ToolSearch, dem fruehesten Zeitpunkt, an dem ueberhaupt
+# etwas bekannt ist -- siehe hirn.py.
+SCHNELLE_WERKZEUGE = {
+    # Rein im Arbeitsspeicher oder eine kleine Datei.
+    "timer_stellen", "timer_liste", "timer_abbrechen",
+    "merken", "person_merken", "notiz_schreiben", "vergessen",
+    "gedaechtnis_zeigen", "gedaechtnis_nachschlagen",
+    # Ein Tastendruck bzw. ein Datagramm, das niemand beantwortet.
+    "medien_steuern", "kachel_zeigen", "kachel_weg",
+    "web_zeigen", "web_schliessen", "route_zeigen",
+    # Liest nur die eigene Sicherung.
+    "auftrag_status", "projekt_liste",
+}
 
 # Wie das Werkzeug heisst, mit dem ein Arbeiter Unter-Arbeiter losschickt.
 #
@@ -248,7 +285,21 @@ MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen
 STIMME_DIENST = "piper"        # "piper" | "elevenlabs"
 
 # Welche Stimme drueben gesprochen wird.
-ELEVENLABS_STIMME = "87AwpS6yC86wa2WglbsK"
+#
+# Gemessen am 28.08.2026: Auf dem kostenlosen Tarif gehen NUR Stimmen der
+# Sorte "premade". Die Sorte "professional" -- also alles aus der
+# Stimmbibliothek, darunter die urspruenglich gewuenschte
+# 87AwpS6yC86wa2WglbsK (Michael Danisch) -- wird mit 402 abgelehnt:
+# "Free users cannot use library voices via the API."
+#
+# Weitere premade-Stimmen, falls Brian nicht gefaellt:
+#   onwK4e9ZLuTAKqWW03F9  Daniel, ruhiger Sprecher
+#   cjVigY5qzO86Huf0OWal  Eric, weich
+#   iP95p4xoKVk53GoZ742B  Chris, bodenstaendig
+#
+# ACHTUNG: Das sind englische Stimmen, die ueber das mehrsprachige Modell
+# Deutsch sprechen. Wie stark der Akzent durchschlaegt, muss man hoeren.
+ELEVENLABS_STIMME = "nPczCjzI2devNBz1zQrb"   # Brian, tief und resonant
 ELEVENLABS_MODELL = "eleven_multilingual_v2"
 
 # Rohe 16-Bit-Werte waeren einfacher zu verarbeiten, brauchen aber einen
@@ -260,7 +311,12 @@ ELEVENLABS_FORMAT = "mp3_44100_128"
 # Ueberlegung wie beim Finanzdashboard.
 ELEVENLABS_ZEITGRENZE = 20.0
 
-STIMME = WURZEL / "stimmen" / "de_DE-thorsten-medium.onnx"
+# Ausgewaehlt am 28.08.2026 aus achtzehn Farben auf zwei Stimmdateien,
+# an fuenf echten Saetzen verglichen (Weckantwort, Begruessung, Zahlen,
+# Rueckfrage, lange Aufzaehlung). Die groessere Datei kostet Rechenzeit:
+# bei langen Saetzen 1330 statt 637 Millisekunden -- das ist die
+# Wartezeit vor dem ersten Ton, und sie war es wert.
+STIMME = WURZEL / "stimmen" / "de_DE-thorsten-high.onnx"
 
 # Manche Stimmen bringen mehrere Sprecher mit. Bei
 # de_DE-thorsten_emotional-medium sind das Stimmungen:
@@ -302,7 +358,7 @@ RHYTHMUS = 0.95
 # Modelle, sondern normale Stimmen mit Effektkette -- HAL, GLaDOS und
 # JARVIS sind Schauspieler mit Bearbeitung. Kostet Millisekunden.
 # Moeglich: "aus", "hologramm", "bordcomputer", "halle", "kuenstlich", "nah"
-STIMMFARBE = "aus"
+STIMMFARBE = "sarvis"
 
 # --- Hirn -----------------------------------------------------------------
 MODELL = "claude-opus-5"

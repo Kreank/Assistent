@@ -25,12 +25,23 @@ dieser Faelle spricht Piper weiter, und Sarvis sagt kein Wort darueber
 als eine, die einfach anders klingt. Gemeldet wird auf der Konsole,
 einmal, mit Grund.
 
-STAND HEUTE (28.08.2026): Der hinterlegte Zugang kann NICHT sprechen.
-Zwei Voice-IDs geprueft, beide "402 Free users cannot use library voices
-via the API" -- die gewuenschte 87Aw... ebenso wie die Standardstimme
-Rachel. Zum Freischalten braucht es einen bezahlten Tarif oder eine
-selbst angelegte Stimme. Bis dahin faellt alles auf Piper zurueck, und
-genau dieser Weg ist an dem echten Fehler geprueft.
+WELCHE STIMMEN GEHEN: Gemessen am 28.08.2026 laesst der kostenlose Tarif
+nur die Sorte "premade" durch. Alles aus der Stimmbibliothek -- Sorte
+"professional" -- wird mit 402 abgelehnt ("Free users cannot use library
+voices via the API"), auch die anfangs gewuenschte 87Aw... Das Konto
+sieht 21 premade- und 5 professional-Stimmen; geprueft wurden beide
+Sorten, das Ergebnis ist eindeutig.
+
+WAS ES KOSTET: Der Kopf "character-cost" der Antwort nennt genau die
+Textlaenge (78 Zeichen -> 78). Danach wird gezaehlt. Die Abfrage des
+Kontostands hinkt dagegen hinterher -- 115 vor vier Anfragen ueber je 78
+Zeichen, 115 danach. Deshalb korrigiert sie den eigenen Stand nur nach
+oben, nie nach unten.
+
+WAS ES AN ZEIT KOSTET: 1,30 bis 1,54 Sekunden bis zum ersten Ton, gegen
+0,12 bei Piper. Fuer eine Vorfuehrung ist das zu verschmerzen, fuer den
+Alltag waere es der zweite Grund gegen diesen Dienst -- nach dem
+Kontingent.
 """
 import io
 import time
@@ -90,9 +101,19 @@ class Eleven:
             self.grund = f"Zugang abgelehnt ({a.status_code})"
             return False
         d = a.json()
-        self._verbraucht = int(d.get("character_count") or 0)
+        gemeldet = int(d.get("character_count") or 0)
         self._grenze = int(d.get("character_limit") or 0)
         self._seit_abfrage = 0
+        # Der Zaehler geht NIE zurueck.
+        #
+        # Gemessen: 115 vor vier Anfragen ueber je 78 Zeichen, 115 danach.
+        # Die Abfrage hinkt hinterher -- vermutlich zwischengespeichert.
+        # Wuerde man sie ungeprueft uebernehmen, setzte jede
+        # Nachsynchronisierung den Stand zurueck, und die Bremse bei
+        # neunzig Prozent griffe nie. Der eigene Stand ist im Zweifel der
+        # aktuellere; die Abfrage darf ihn nur nach OBEN korrigieren
+        # (etwa wenn nebenher noch woanders gesprochen wurde).
+        self._verbraucht = max(self._verbraucht, gemeldet)
         return True
 
     def anteil(self) -> float:
@@ -157,7 +178,16 @@ class Eleven:
 
         # Erst zaehlen, dann dekodieren: Verbraucht ist es beim Dienst
         # auch dann, wenn das Umwandeln hier scheitert.
-        self._verbraucht += len(text)
+        #
+        # Gezaehlt wird aus dem Kopf der Antwort, nicht aus der Textlaenge.
+        # Gemessen stimmen beide ueberein (78 Zeichen, "character-cost: 78"),
+        # aber der Dienst rechnet ab, nicht wir -- und wenn er das eines
+        # Tages anders tut, soll die Bremse mitwandern.
+        try:
+            kosten = int(a.headers.get("character-cost", len(text)))
+        except (TypeError, ValueError):
+            kosten = len(text)
+        self._verbraucht += kosten
         self._seit_abfrage += 1
         if self._seit_abfrage >= NACHZAEHLEN_NACH:
             self._stand_holen()

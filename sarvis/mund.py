@@ -6,6 +6,7 @@ import time
 import numpy as np
 from piper import PiperVoice, SynthesisConfig
 
+from . import aussprache
 from . import config
 from . import stimmfarbe
 
@@ -80,6 +81,11 @@ class Mund:
                 # ist, wie sie ist; ein Filter darauf waere, als male man
                 # ueber ein Foto.
                 return fertig
+
+        # Erst hier, nicht vor ElevenLabs: Piper phonemisiert ueber
+        # espeak-ng und liest Zahlen, Geld, Datum und Uhrzeit falsch
+        # vor -- siehe aussprache.py. ElevenLabs kann das selbst.
+        text = aussprache.vorlesbar(text)
 
         teile, rate = [], config.ABTASTRATE
         for brocken in self.stimme.synthesize(text, syn_config=self.einstellung):

@@ -48,7 +48,18 @@ def _betrag(wert) -> str:
         d = Decimal(str(wert))
     except (InvalidOperation, TypeError, ValueError):
         return str(wert)
-    # Kein Tausenderpunkt: "1.098,00" liest Piper als zwei Zahlen.
+    # Kein Tausenderpunkt -- die Begruendung dafuer war allerdings
+    # falsch. Hier stand: "1.098,00 liest Piper als zwei Zahlen."
+    # Nachgemessen an den Phonemen, die espeak wirklich erzeugt, stimmt
+    # das nicht: Daraus wird sauber "eintausendachtundneunzig". Das
+    # KOMMA war das Problem, nicht der Punkt -- espeak sprach es
+    # woertlich aus ("achtundneunzig Komma null null").
+    #
+    # Behoben ist das jetzt woanders: aussprache.vorlesbar() schreibt
+    # Betraege vor der Synthese in Worte um ("eintausendachtundneunzig
+    # Euro"). Die Schreibweise hier bleibt trotzdem ohne Punkt -- sie
+    # geht auch an den Bildschirm und ins Protokoll, und dort ist sie
+    # so einheitlich mit dem Rest.
     return f"{abs(d):.2f}".replace(".", ",") + " Euro"
 
 

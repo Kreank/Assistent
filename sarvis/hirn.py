@@ -6,6 +6,7 @@ Hochfahren, danach nur noch die eigentliche Antwort.
 """
 import asyncio
 import random
+import re
 from datetime import datetime
 from typing import AsyncIterator
 
@@ -310,7 +311,38 @@ class Hirn:
             message=f"Das Werkzeug {kurz} ist für Sarvis nicht freigegeben."
         )
 
-    def _subagenten_verfolgen(self, nachricht) -> None:
+    @staticmethod
+    def _lohnt_warten(block) -> bool:
+        """Dauert das lange genug fuer ein "Moment, ich schaue nach"?
+
+        Zwei Feinheiten, beide gemessen:
+
+        ERSTENS heissen die eigenen Werkzeuge hier
+        "mcp__sarvis__mails_ansehen" und nicht "mails_ansehen". Die alte
+        Fassung verglich den rohen Namen gegen eine Liste kurzer Namen --
+        sie konnte nie zutreffen, und deshalb fiel bei keinem einzigen
+        eigenen Werkzeug je ein Wartesatz.
+
+        ZWEITENS ist ToolSearch der WICHTIGSTE Fall, obwohl er selbst nur
+        Millisekunden dauert. Die Werkzeuge sind aufgeschoben: Bevor eins
+        laeuft, holt das Modell es erst mit ToolSearch -- eine eigene
+        Runde. Wer erst beim Werkzeug selbst reagiert, hat zwei Sekunden
+        verschenkt. Die Anfrage nennt aber schon, worum es geht
+        ("select:mcp__sarvis__mails_ansehen"), also wird dort
+        nachgesehen.
+        """
+        name = kurzer_name(str(getattr(block, "name", "")))
+        if name == "ToolSearch":
+            # Was gesucht wird, entscheidet. Steht nichts Erkennbares
+            # drin, wird gewartet -- Stille ist der teurere Fehler.
+            frage = str((getattr(block, "input", None) or {}).get("query", ""))
+            gefunden = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", frage)
+            gesucht = {kurzer_name(w) for w in gefunden}
+            gesucht.discard("select")
+            if not gesucht:
+                return True
+            return not gesucht.issubset(config.SCHNELLE_WERKZEUGE)
+        return name not in config.SCHNELLE_WERKZEUGE
         """Mitschreiben, welche Unter-Arbeiter gerade laufen.
 
         Start ist ein Werkzeugaufruf aus config.UNTERARBEITER in SEINER
@@ -586,15 +618,14 @@ class Hirn:
                     if punkt and self.leuchten:
                         self.leuchten(punkt)
 
-                    # Ein langsames Werkzeug faengt an, und gesagt wurde
-                    # noch nichts: Dann schiebt der Code den Wartesatz
-                    # vor. Er geht denselben Weg wie jeder andere Satz --
-                    # durch den Satzsammler in den Mund -- und ist damit
-                    # gesprochen, BEVOR das Werkzeug antwortet. Genau das
-                    # war der Punkt.
+                    # Ein Werkzeug faengt an, und gesagt wurde noch
+                    # nichts: Dann schiebt der Code den Wartesatz vor. Er
+                    # geht denselben Weg wie jeder andere Satz -- durch
+                    # den Satzsammler in den Mund -- und ist damit
+                    # gesprochen, BEVOR das Werkzeug antwortet.
                     if (not gestroemt and not gesagt_ohne_strom
                             and not gewartet
-                            and name in config.LANGSAME_WERKZEUGE):
+                            and self._lohnt_warten(block)):
                         gewartet = True
                         yield random.choice(config.WARTESAETZE) + " "
             elif isinstance(nachricht, ResultMessage):
