@@ -560,6 +560,19 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return antwort, ""
 
     @tool(
+        "web_schliessen",
+        "Macht das Browserfenster wieder zu. Für 'mach das Fenster zu', "
+        "'weg damit', 'brauch ich nicht mehr'.",
+        {"type": "object", "properties": {}},
+    )
+    async def web_schliessen(args):
+        # Kein Rueckkanal noetig: Zumachen braucht keine Antwort, und wenn
+        # gar nichts offen war, ist der Zustand hinterher derselbe.
+        sicht.browser_zu()
+        vermerken("web_schliessen: Browserfenster zu")
+        return {"content": [{"type": "text", "text": "Zu."}]}
+
+    @tool(
         "web_lesen",
         "Liest vor, was auf der gezeigten Seite steht. Für 'was steht da', "
         "'lies mir das vor', 'fass die Seite zusammen'. Nur die Seite im "
@@ -722,6 +735,6 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"{len(dateien)} Datei(en):\n" + "\n".join(zeilen)}]}
 
     return [programm_starten, programm_suchen, programm_beenden,
-            web_zeigen, route_zeigen,
+            web_zeigen, web_schliessen, route_zeigen,
             web_lesen, web_elemente, web_klicken, web_tippen,
             web_zoom, web_downloads]

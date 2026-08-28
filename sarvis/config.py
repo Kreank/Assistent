@@ -351,12 +351,42 @@ SYSTEMPROMPT = SYSTEMPROMPT + HALTUNGEN.get(HALTUNG, "")
 
 # --- Begruessung ----------------------------------------------------------
 # Wird beim Start gesprochen. Doppelter Zweck: man hoert sofort, ob Headset
-# oder Boxen ueberhaupt an sind -- und es klingt gut.
-# {tageszeit} und {taste} werden ersetzt.
+# oder Boxen ueberhaupt an sind -- und der Weg Text -> Piper ->
+# Lautsprecher ist einmal durchlaufen, bevor es ernst wird.
+#
+# Der Tastenhinweis stand hier frueher in jedem Satz ("Halt die rechte
+# Steuerungstaste"). Er ist raus, auf ausdruecklichen Wunsch: Wer den
+# Assistenten taeglich benutzt, kennt die Taste, und ein Satz, der jeden
+# Morgen dasselbe erklaert, wird zur Ansage im Fahrstuhl. {taste} wird
+# weiterhin uebergeben -- wer den Hinweis zurueckwill, schreibt ihn
+# einfach in einen Satz.
+#
+# Zwei Regeln bleiben:
+#
+#   Kurz. Man hoert sie JEDEN Start. Ein Satz, der beim dritten Mal
+#   nervt, ist ein schlechter Satz, egal wie gut er beim ersten klang.
+#
+#   Nichts behaupten, was nicht stimmt. "Sensoren aktiv" waere ein
+#   schoener Satz und eine Luege -- Sarvis hat keine. Was er hat, sind
+#   Werkzeuge, und die kann er zaehlen. Deshalb {werkzeuge}: Die Zahl
+#   kommt aus der tatsaechlich gebauten Liste, nicht aus dem Text. Wird
+#   eins gebaut, sagt er es am naechsten Morgen von selbst; faellt ein
+#   Dienst aus, sagt er entsprechend weniger.
+#
+# ACHTUNG bei {taste}, falls jemand ihn zurueckholt: Der Platzhalter
+# bringt seinen eigenen kleinen Artikel mit ("die rechte
+# Steuerungstaste") und darf nie am Satzanfang stehen.
+#
+# {tageszeit} und {werkzeuge} werden ersetzt, {taste} steht bereit.
 BEGRUESSUNGEN = [
-    "{tageszeit}. Sarvis ist bereit. Halte {taste} und sprich mit mir.",
-    "{tageszeit}. Alle Systeme laufen. Halt {taste} gedrückt, ich höre zu.",
-    "{tageszeit}. Ich bin wach. Drück {taste} und leg los.",
+    "{tageszeit}. Ich bin wach. {werkzeuge} Werkzeuge scharf, Mikrofon offen.",
+    "{tageszeit}. Alles läuft. Sag, was du brauchst.",
+    "{tageszeit}. Hochgefahren, Ohren offen, {werkzeuge} Werkzeuge griffbereit.",
+    "{tageszeit}. Wach, scharf und auf Empfang.",
+    "{tageszeit}. Sarvis ist oben. {werkzeuge} Werkzeuge warten.",
+    "{tageszeit}. Systeme wach. Was liegt an?",
+    "{tageszeit}. {werkzeuge} Werkzeuge, ein Mikrofon und volle Aufmerksamkeit.",
+    "{tageszeit}. Bereit, wenn du es bist.",
 ]
 
 # --- Finanzdashboard ------------------------------------------------------
@@ -693,6 +723,14 @@ WERKZEUG_STUFEN = {
     "notiz_schreiben":         "still",
     "gedaechtnis_nachschlagen": "still",
     "gedaechtnis_zeigen": "still",
+
+    # Etwas neben der Engine einblenden. Still, und zwar deutlich: Eine
+    # Kachel zeigt nur, was Sarvis ohnehin gerade sagt -- sie geht nicht
+    # nach draussen, sie aendert nichts, und sie verschwindet von selbst
+    # wieder. Fragte sie nach, waere sie unbenutzbar: Man blendet etwas
+    # WAEHREND der Antwort ein, nicht nach einer Rueckfrage darueber.
+    "kachel_zeigen":      "still",
+    "kachel_weg":         "still",
     # Der Gespraechsverlauf ist kein Gedaechtnis, sondern das Protokoll
     # der eigenen Sitzung -- Nachschlagen darin ist Nachlesen dessen, was
     # ohnehin gesagt wurde.
@@ -784,6 +822,8 @@ WERKZEUG_STUFEN = {
     # Die Seite im eigenen Fenster lesen und bedienen.
     #
     # Lesen ist harmlos: Es steht ohnehin auf dem Bildschirm.
+    # Zumachen ist so harmlos wie Aufmachen.
+    "web_schliessen":     "still",
     "web_lesen":          "still",
     "web_elemente":       "still",
     "web_zoom":           "still",

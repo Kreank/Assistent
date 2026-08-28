@@ -625,6 +625,11 @@ class Sarvis:
         text = random.choice(config.BEGRUESSUNGEN).format(
             tageszeit=tageszeit(datetime.now().hour),
             taste=taste_aussprechen(config.TASTE),
+            # Gezaehlt, nicht geschaetzt: Was hier steht, ist die Laenge
+            # der Liste, die gerade gebaut wurde. Faellt ein Dienst aus
+            # (kein Google-Zugang, kein Finanzschluessel), sagt er
+            # entsprechend weniger -- und das ist richtig so.
+            werkzeuge=len(self.werkzeugnamen),
         )
         self.anzeige.zustand(SPRICHT)
         self.anzeige.untertitel("sarvis", text)

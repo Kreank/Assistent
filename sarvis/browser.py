@@ -50,8 +50,8 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QPoint, QRectF, QThread, QTimer, Qt, QUrl,
-                            Signal)
+from PySide6.QtCore import (QPoint, QPointF, QRectF, QThread, QTimer, Qt,
+                            QUrl, Signal)
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPen
 from PySide6.QtWebEngineCore import (QWebEngineDownloadRequest,
                                      QWebEngineProfile)
@@ -65,6 +65,17 @@ from . import config
 # der Browser rechnet nicht in dem gemalten Raster, weil sein Inhalt
 # nicht von uns gemalt wird.
 KOPF = 30
+
+# Der Schliessknopf, rechts in der Kopfleiste. Quadratisch und so hoch wie
+# die Leiste -- ein Ziel, das man ohne Hinsehen trifft.
+#
+# Er ist noetig, nicht Zierde: Das Fenster traegt WA_ShowWithoutActivating
+# und ist ein Qt.Tool, bekommt also NIE den Tastaturfokus. keyPressEvent
+# feuert damit nicht, und selbst mit Fokus faenge die QWebEngineView als
+# Kindwidget die Taste ab. Die erste Fassung schrieb "Esc schliesst" in
+# die Leiste -- das war schlicht falsch, und der Nutzer sass vor einem
+# Fenster, das er nicht wieder loswurde.
+SCHLIESSER = 30
 RAHMEN = QColor(0, 229, 255)      # dieselbe Farbe wie "hoert" in hud.py
 GRUND = QColor(8, 13, 20)
 
@@ -373,6 +384,7 @@ class Browser(QWidget):
 
         self._titel = ""
         self._griff = None      # Mausversatz beim Verschieben
+        self._schliesst = False  # Maus auf dem Schliessknopf gedrueckt?
 
         # Deckkraft: gestartet wird zurueckgenommen, weil beim ersten
         # Zeigen noch niemand dranstand.
@@ -1194,18 +1206,33 @@ class Browser(QWidget):
         super().resizeEvent(e)
         self._anfasser.move(self.width() - 17, self.height() - 17)
 
+    def _im_schliesser(self, punkt) -> bool:
+        """Liegt der Punkt auf dem Schliessknopf?"""
+        return (punkt.y() <= KOPF
+                and punkt.x() >= self.width() - SCHLIESSER)
+
     def mousePressEvent(self, e):
         # Nur die Kopfleiste ist zum Anfassen da. Weiter unten liegt die
         # Seite, und dort gehoert der Klick der Seite.
-        if e.position().y() <= KOPF:
-            self._griff = e.globalPosition().toPoint() - self.pos()
+        if e.position().y() > KOPF:
+            return
+        if self._im_schliesser(e.position()):
+            # Nicht schon beim Druecken schliessen: Wer danebengreift,
+            # soll die Maus noch wegziehen koennen, bevor es gilt.
+            self._schliesst = True
+            return
+        self._griff = e.globalPosition().toPoint() - self.pos()
 
     def mouseMoveEvent(self, e):
         if self._griff is not None:
             self.move(e.globalPosition().toPoint() - self._griff)
 
-    def mouseReleaseEvent(self, _e):
+    def mouseReleaseEvent(self, e):
         self._griff = None
+        if self._schliesst:
+            self._schliesst = False
+            if self._im_schliesser(e.position()):
+                self.hide()
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
@@ -1251,15 +1278,30 @@ class Browser(QWidget):
         c = QColor(RAHMEN)
         c.setAlphaF(0.92)
         p.setPen(c)
-        p.drawText(QRectF(28, 0, self.width() - 166, KOPF),
+        # Der Titel endet vor dem Schliessknopf, nicht darunter. Hier
+        # stand eine feste 166 -- die passte zum alten Hinweistext
+        # "Esc schliesst", den es nicht mehr gibt. Jetzt haengt die
+        # Breite an dem, was tatsaechlich rechts steht.
+        p.drawText(QRectF(28, 0, self.width() - 28 - SCHLIESSER - 8, KOPF),
                    Qt.AlignLeft | Qt.AlignVCenter, self._titel or "lädt …")
+        self._schliesser_malen(p)
 
-        hinweis = QColor(RAHMEN)
-        hinweis.setAlphaF(0.42)
-        p.setPen(hinweis)
-        p.setFont(QFont("Segoe UI", 7))
-        p.drawText(QRectF(self.width() - 140, 0, 128, KOPF),
-                   Qt.AlignRight | Qt.AlignVCenter, "Esc schließt")
+    def _schliesser_malen(self, p) -> None:
+        """Das Kreuz rechts oben.
+
+        Von Hand gemalt und nicht als Zeichen gesetzt: Ein "X" aus einer
+        Schrift sieht je nach Schriftart anders aus und sitzt selten
+        mittig. Zwei Striche sitzen immer.
+        """
+        links = self.width() - SCHLIESSER
+        c = QColor(RAHMEN)
+        c.setAlphaF(0.85)
+        p.setPen(QPen(c, 1.4, Qt.SolidLine, Qt.RoundCap))
+        rand = 10.5
+        p.drawLine(QPointF(links + rand, rand),
+                   QPointF(links + SCHLIESSER - rand, KOPF - rand))
+        p.drawLine(QPointF(links + SCHLIESSER - rand, rand),
+                   QPointF(links + rand, KOPF - rand))
 
 
 def bauen() -> Browser:
