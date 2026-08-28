@@ -41,8 +41,19 @@ async def _holen(neu: bool = False) -> list[dict]:
                  "Get-StartApps | ConvertTo-Json -Compress"],
                 capture_output=True, timeout=30,
             )
+            # PowerShell kann starten und trotzdem am Befehl scheitern
+            # (Ausfuehrungsrichtlinie, Get-StartApps nicht da). Dann kam
+            # kein Fehler, sondern leerer stdout -- und 'text or "[]"'
+            # machte daraus eine gueltige leere Liste. Der except-Zweig
+            # unten war damit unerreichbar, obwohl sein Kommentar genau
+            # diesen Fall als abgedeckt beschrieb.
+            if ergebnis.returncode != 0 or not (ergebnis.stdout or b"").strip():
+                raise RuntimeError(
+                    (ergebnis.stderr or b"").decode(
+                        "utf-8", errors="replace").strip()[:200]
+                    or f"Rueckgabewert {ergebnis.returncode}, keine Ausgabe")
             text = (ergebnis.stdout or b"").decode("utf-8", errors="replace")
-            roh = json.loads(text or "[]")
+            roh = json.loads(text)
             _liste = [
                 {"name": str(e.get("Name", "")), "id": str(e.get("AppID", ""))}
                 for e in (roh if isinstance(roh, list) else [roh])
@@ -52,7 +63,13 @@ async def _holen(neu: bool = False) -> list[dict]:
             # Nicht stillschweigend leer lassen -- genau das hat den
             # Kodierungsfehler oben so lange verdeckt.
             print(f"  (Programmliste ließ sich nicht laden: {e})")
-            _liste = []
+            # Und den Fehlschlag NICHT merken. Frueher stand hier
+            # _liste = []; weil der Zwischenspeicher oben nur auf
+            # 'is not None' prueft, galt die leere Liste danach als
+            # gueltiges Ergebnis -- fuer den ganzen Lauf, und ein
+            # zweiter Versuch fand nie statt. Sarvis behauptete dann zu
+            # jedem Programm, es gebe es nicht im Startmenue.
+            return []
         return _liste
 
 
@@ -115,28 +132,50 @@ _SIEHT_AUS_WIE_ADRESSE = re.compile(
 )
 
 
-def _adresse(ziel: str, suche: str = "") -> tuple[str, str]:
-    """Aus 'youtube' + 'Katzen' wird eine fertige Adresse."""
+def _adresse(ziel: str, suche: str = "") -> tuple[str, str, bool]:
+    """Aus 'youtube' + 'Katzen' wird eine fertige Adresse.
+
+    Drittes Rueckgabestueck: ob der Suchbegriff wirklich verwendet wurde.
+    Nicht jeder Weg hierdurch kann ihn unterbringen -- und wer ihn
+    fallenlaesst, darf hinterher nicht behaupten, er haette gesucht.
+    """
     from urllib.parse import quote_plus
 
-    schluessel = ziel.lower().strip().rstrip("/")
-    schluessel = re.sub(r"^(https?://)?(www\.)?", "", schluessel)
+    ziel = ziel.strip()
+    ohne_vorspann = re.sub(r"^(https?://)?(www\.)?", "", ziel.lower())
+
+    # Eine Adresse MIT Pfad, Query oder Fragment wird gar nicht erst in
+    # SEITEN nachgeschlagen. Vorher lief die Namensaufloesung zuerst:
+    # aus 'https://github.com/anthropics/claude-code' wurde der
+    # Schluessel 'github', geoeffnet hat sich die blosse Startseite --
+    # Pfad und Parameter still verworfen, ohne Fehler und ohne Hinweis.
+    if (re.search(r"[/?#]", ohne_vorspann.rstrip("/"))
+            and _SIEHT_AUS_WIE_ADRESSE.match(ziel)):
+        adresse = ziel if ziel.lower().startswith("http") else f"https://{ziel}"
+        # Ein Suchbegriff geht hier verloren: In eine fertige Adresse mit
+        # eigenem Pfad laesst er sich nicht hineinschreiben. Das meldet
+        # der Aufrufer -- lautlos schlucken waere genau der Fehler, der
+        # oben gerade behoben wurde.
+        return adresse, ziel, False
+
+    schluessel = ohne_vorspann.rstrip("/")
     schluessel = schluessel.split(".")[0] if "." in schluessel else schluessel
 
     if schluessel in SEITEN:
         start, suchform = SEITEN[schluessel]
         if suche and suchform:
-            return suchform.format(quote_plus(suche)), schluessel.capitalize()
-        return start, schluessel.capitalize()
+            return (suchform.format(quote_plus(suche)),
+                    schluessel.capitalize(), True)
+        return start, schluessel.capitalize(), False
 
     if _SIEHT_AUS_WIE_ADRESSE.match(ziel):
         adresse = ziel if ziel.lower().startswith("http") else f"https://{ziel}"
-        return adresse, ziel
+        return adresse, ziel, False
 
     # Weder bekannt noch eine Adresse -- dann als Suche behandeln.
     from urllib.parse import quote_plus as q
     begriff = f"{ziel} {suche}".strip()
-    return f"https://www.google.de/search?q={q(begriff)}", "Die Suche"
+    return f"https://www.google.de/search?q={q(begriff)}", "Die Suche", True
 
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:
@@ -169,6 +208,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return {"content": [{"type": "text", "text":
                     "Welches Programm denn?"}], "is_error": True}
 
+        # Erst fragen, OB es eine Liste gibt. Ohne diese Trennung klang
+        # ein misslungener PowerShell-Aufruf wie eine Auskunft ueber das
+        # Startmenue -- "gibt es nicht", obwohl nie darin gesucht wurde.
+        if not await _holen():
+            return {"content": [{"type": "text", "text":
+                    "Ich komme gerade nicht an die Programmliste."}],
+                    "is_error": True}
+
         treffer = await _finden(gesucht)
         if not treffer:
             return {"content": [{"type": "text", "text":
@@ -176,30 +223,61 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     "Startmenü."}], "is_error": True}
 
         ziel = treffer[0]
+        ist_pfad = bool(_IST_PFAD.search(ziel["id"]))
         try:
-            if _IST_PFAD.search(ziel["id"]):
-                befehl = ["powershell.exe", "-NoProfile", "-Command",
-                          f'Start-Process "{ziel["id"]}"']
+            if ist_pfad:
+                # Hier laesst sich der Start tatsaechlich pruefen:
+                # Start-Process meldet einen Fehler, wenn die Datei weg
+                # ist. Also abwarten und den Rueckgabewert ansehen, statt
+                # Popen sofort als Erfolg zu deuten.
+                fertig = await asyncio.to_thread(
+                    subprocess.run,
+                    ["powershell.exe", "-NoProfile", "-Command",
+                     f'Start-Process "{ziel["id"]}"'],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if fertig.returncode != 0:
+                    grund = (fertig.stderr or "").strip().splitlines()
+                    return {"content": [{"type": "text", "text":
+                            f"{ziel['name']} ließ sich nicht starten: "
+                            + (grund[0] if grund else
+                               f"Fehlercode {fertig.returncode}")}],
+                            "is_error": True}
             else:
-                # Store-Apps und alles mit AppUserModelID gehen nur so.
-                befehl = ["explorer.exe",
-                          f'shell:AppsFolder\\{ziel["id"]}']
-            await asyncio.to_thread(
-                subprocess.Popen, befehl,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+                # Store-Apps und alles mit AppUserModelID gehen nur so --
+                # und explorer.exe meldet dort IMMER Erfolg, auch bei einer
+                # AppUserModelID, die es nicht mehr gibt. Eine Erfolgs-
+                # pruefung ist hier nicht moeglich, also wird auch keine
+                # behauptet: unten heisst es "angestossen", nicht
+                # "gestartet".
+                await asyncio.to_thread(
+                    subprocess.Popen,
+                    ["explorer.exe", f'shell:AppsFolder\\{ziel["id"]}'],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+        except subprocess.TimeoutExpired:
+            return {"content": [{"type": "text", "text":
+                    f"Der Startbefehl für {ziel['name']} hängt — ob das "
+                    "Programm hochkommt, weiß ich nicht."}],
+                    "is_error": True}
         except Exception as e:
             return {"content": [{"type": "text", "text":
                     f"{ziel['name']} ließ sich nicht starten: {e}"}],
                     "is_error": True}
 
         blinken()
-        vermerken(f"programm_starten: {ziel['name']} wurde gestartet.")
         weitere = ""
         if len(treffer) > 1 and _guete(treffer[1]["name"], gesucht) >= 60:
             weitere = f" (es gäbe auch {treffer[1]['name']})"
+        if ist_pfad:
+            vermerken(f"programm_starten: {ziel['name']} wurde gestartet.")
+            return {"content": [{"type": "text", "text":
+                    f"{ziel['name']} ist gestartet.{weitere}"}]}
+        vermerken(f"programm_starten: {ziel['name']} wurde angestoßen "
+                  "(ob es hochkommt, ist nicht geprüft).")
         return {"content": [{"type": "text", "text":
-                f"{ziel['name']} ist gestartet.{weitere}"}]}
+                f"Ich habe {ziel['name']} angestoßen.{weitere}"}]}
 
     @tool(
         "programm_suchen",
@@ -216,8 +294,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     async def programm_suchen(args):
         gesucht = (args.get("name") or "").strip()
         blinken()
+        alle = await _holen()
+        if not alle:
+            # Nicht "0 Programme insgesamt" melden -- das waere eine
+            # Aussage ueber eine Liste, die nie gelesen wurde.
+            return {"content": [{"type": "text", "text":
+                    "Ich komme gerade nicht an die Programmliste."}],
+                    "is_error": True}
         if not gesucht:
-            alle = await _holen()
             namen = [p["name"] for p in alle[:20]]
             return {"content": [{"type": "text", "text":
                     f"{len(alle)} Programme insgesamt, darunter:\n"
@@ -250,28 +334,44 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         # Ueber den Prozessnamen, nicht ueber das Startmenue: beenden laesst
         # sich nur, was auch laeuft.
         sicher = re.sub(r"[^\w .-]", "", gesucht)[:60]
+        # Die Leerpruefung oben sieht nur den Rohnamen. Besteht der aus
+        # lauter Satzzeichen oder einem Emoji, bleibt hier nichts uebrig
+        # -- und aus dem Muster wurde "**", das in PowerShell JEDEN
+        # laufenden Prozess trifft, Sarvis eingeschlossen.
+        if not sicher.strip(" .-"):
+            return {"content": [{"type": "text", "text":
+                    f"Mit dem Namen {gesucht!r} kann ich nichts anfangen."}],
+                    "is_error": True}
         try:
             ergebnis = await asyncio.to_thread(
                 subprocess.run,
                 ["powershell.exe", "-NoProfile", "-Command",
+                 # Die Namen VOR dem Beenden einsammeln und ALLE melden:
+                 # Stop-Process traf schon immer jeden Treffer, die
+                 # Antwort nannte aber nur den ersten. Wer "beende Chrome"
+                 # sagte, erfuhr nicht, dass auch Chromedriver weg ist.
                  f'$p = Get-Process -Name "*{sicher}*" -ErrorAction '
-                 'SilentlyContinue; if ($p) { $p | Stop-Process -Force; '
-                 '$p | Select-Object -First 1 -ExpandProperty ProcessName } '
-                 'else { "" }'],
+                 'SilentlyContinue; if ($p) { $n = $p | Select-Object '
+                 '-ExpandProperty ProcessName -Unique; '
+                 '$p | Stop-Process -Force; $n } else { "" }'],
                 capture_output=True, text=True, timeout=30,
             )
-            name = (ergebnis.stdout or "").strip().splitlines()
-            name = name[-1] if name else ""
+            namen = [z.strip() for z in (ergebnis.stdout or "").splitlines()
+                     if z.strip()]
         except Exception as e:
             return {"content": [{"type": "text", "text":
                     f"Ging nicht: {e}"}], "is_error": True}
 
         blinken()
-        if not name:
+        if not namen:
             return {"content": [{"type": "text", "text":
                     f"{gesucht} läuft gerade nicht."}]}
-        vermerken(f"programm_beenden: {name} wurde beendet.")
-        return {"content": [{"type": "text", "text": f"{name} ist beendet."}]}
+        alle = ", ".join(namen)
+        einzeln = len(namen) == 1
+        vermerken(f"programm_beenden: {alle} "
+                  f"{'wurde' if einzeln else 'wurden'} beendet.")
+        return {"content": [{"type": "text", "text":
+                f"{alle} {'ist' if einzeln else 'sind'} beendet."}]}
 
     @tool(
         "web_oeffnen",
@@ -306,7 +406,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return {"content": [{"type": "text", "text":
                     "Welche Seite denn?"}], "is_error": True}
 
-        adresse, name = _adresse(ziel, suche)
+        adresse, name, gesucht = _adresse(ziel, suche)
         try:
             await asyncio.to_thread(
                 subprocess.Popen,
@@ -321,9 +421,16 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if leuchten:
             leuchten("Websuche")
         vermerken(f"web_oeffnen: {adresse}")
-        return {"content": [{"type": "text", "text":
-                (f"{name} ist offen" + (f", Suche nach {suche}." if suche
-                                        else ".")) }]}
+        if suche and not gesucht:
+            # Er hat die Adresse geoeffnet, aber nicht gesucht. Das zu
+            # verschweigen hiesse, eine Suche zu behaupten, die nie lief.
+            schluss = (f" ist offen. Nach {suche} habe ich nicht gesucht -- "
+                       "in eine fertige Adresse passt kein Suchbegriff.")
+        elif gesucht and suche:
+            schluss = f" ist offen, Suche nach {suche}."
+        else:
+            schluss = " ist offen."
+        return {"content": [{"type": "text", "text": name + schluss}]}
 
     @tool(
         "route_zeigen",

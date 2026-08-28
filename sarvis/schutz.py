@@ -224,6 +224,27 @@ SUCHBEFEHLE = (
 )
 
 
+def pfade_im_befehl(befehl: str) -> list[str]:
+    """ALLE Pfade eines Befehls -- auch in Git-Bash-Schreibweise.
+
+    Gesucht wurde bisher nur nach Laufwerksbuchstaben. Unter Windows
+    laeuft das Bash-Werkzeug aber in der Git-Bash, und die schreibt
+    Laufwerke als "/d/...". Gemessen: 'ls /d/Strato Server' fiel dadurch
+    auf "frei" durch, waehrend 'dir D:\\Strato Server' richtig fragte --
+    derselbe Ordner, nur anders geschrieben.
+
+    Rueckgabe in Laufwerksform, damit die Stufen-Pruefungen damit
+    weiterarbeiten koennen.
+    """
+    b = str(befehl or "")
+    treffer = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", b)
+    treffer += [
+        f"{lw.upper()}:/{rest}"
+        for lw, rest in re.findall(r"(?<![\w/])/([a-zA-Z])/([^\s\"';|]*)", b)
+    ]
+    return treffer
+
+
 def _heikler_ort_erwaehnt(text: str) -> bool:
     """Kommt ein Ordner aus FRAGEN_TROTZ_FREI im Befehlstext vor?
 
@@ -232,24 +253,101 @@ def _heikler_ort_erwaehnt(text: str) -> bool:
     nicht im geschuetzten Ordner -- der Befehl waere frei durchgelaufen.
     Ein Teilstringvergleich kennt das Problem nicht und trifft auch
     "dir \"D:\\Strato Server\"".
+
+    Beide Schreibweisen, seit gemessen wurde, dass 'ls /d/Strato Server'
+    hier vorbeilief: Verglichen wurde nur "d:/strato server".
     """
-    t = str(text or "").replace(chr(92), "/").lower()
+    # Der geschuetzte Ordner hat ein Leerzeichen im Namen, und in der
+    # Bash wird das als "\\ " geschrieben. Erst den Schutzstrich weg,
+    # dann die Trenner angleichen -- sonst wird aus "Strato\\ Server"
+    # ein "Strato/ Server" und der Vergleich geht daran vorbei.
+    t = str(text or "").replace(chr(92) + " ", " ").replace(chr(92), "/").lower()
     for wurzel in config.FRAGEN_TROTZ_FREI:
-        if str(wurzel).replace(chr(92), "/").lower() in t:
+        w = str(wurzel).replace(chr(92), "/").lower()
+        if w in t:
+            return True
+        laufwerk, trenner, rest = w.partition(":/")
+        if trenner and f"/{laufwerk}/{rest}" in t:
             return True
     return False
+
+
+def heikler_ort_beruehrt(pfad: str, muster: str = "") -> bool:
+    """Beruehrt ein Auflisten/Durchsuchen einen Ort aus FRAGEN_TROTZ_FREI?
+
+    Zwei Wege dorthin, und beide gingen an auflisten_stufe vorbei, weil
+    die nur den Pfad ansieht: Der Ort steht im MUSTER selbst (Glob traegt
+    sein Ziel in "pattern", "path" ist optional -- gemessen: ohne "path"
+    war der Pfad leer und damit "frei"), oder das Muster laeuft rekursiv
+    unter einer Wurzel, die ihn enthaelt ("D:/" mit "**/*").
+    """
+    if _heikler_ort_erwaehnt(f"{pfad} {muster}"):
+        return True
+    if "**" not in str(muster or "") or not pfad:
+        return False
+    try:
+        p = Path(pfad).resolve()
+    except (OSError, ValueError):
+        return False
+    for wurzel in config.FRAGEN_TROTZ_FREI:
+        try:
+            w = Path(wurzel).resolve()
+        except (OSError, ValueError):
+            continue
+        if p == w or p in w.parents:
+            return True
+    return False
+
+
+# Befehle, die etwas veraendern. Nur bei ihnen sperrt NIE_SCHREIBEN --
+# sonst waere schon das blosse Anzeigen von config.py "nie".
+_VERAENDERND = re.compile(
+    r"^(Set-Content|Add-Content|Out-File|Clear-Content|Remove-Item"
+    r"|Move-Item|Rename-Item|Copy-Item|New-Item|del|rm|mv|cp|ren"
+    r"|sed\s+-i|tee)\b",
+    re.IGNORECASE,
+)
+
+
+def _umleitungsziele(befehl: str) -> list[str]:
+    """Wohin ein Befehl seine Ausgabe umleitet.
+
+    "echo x > datei" nennt kein veraenderndes Programm und lief deshalb
+    an der Pruefung vorbei -- gemessen fiel 'echo x > ...\\sarvis\\hirn.py'
+    sogar auf "frei", weil echo in NUR_SCHAUEN steht.
+    """
+    roh = re.findall(r">>?\s*(\"[^\"]+\"|'[^']+'|[^\s\"'|;&]+)", str(befehl or ""))
+    return [z.strip("\"'") for z in roh]
 
 
 def befehl_stufe(befehl: str) -> str:
     befehl = (befehl or "").strip()
     if any(re.search(m, befehl, re.IGNORECASE) for m in NIE_BEFEHL):
         return "nie"
-    if _heikler_ort_erwaehnt(befehl):
-        return "fragen"
 
     # Verkettungen aufteilen: "git status && rm -rf x" ist nicht harmlos,
     # nur weil es harmlos anfaengt.
     teile = [t.strip() for t in re.split(r"&&|\|\||;|\|", befehl) if t.strip()]
+
+    # Die harte Sperre galt bisher nur fuer die Datei-Werkzeuge, nicht
+    # fuer die Shell: schreiben_stufe("...sarvis/schutz.py") war "nie",
+    # 'Set-Content ...sarvis/schutz.py' aber nur "fragen" -- ein einziges
+    # gesprochenes Ja haette die Regeldatei geaendert, die das Fragen
+    # ueberhaupt vorschreibt. Gelesen wird gar nicht (NIE_LESEN),
+    # geschrieben nur im veraendernden Schritt.
+    for teil in teile:
+        veraendernd = bool(_VERAENDERND.match(teil))
+        for pfad in pfade_im_befehl(teil):
+            if _passt(pfad, NIE_LESEN):
+                return "nie"
+            if veraendernd and _passt(pfad, NIE_SCHREIBEN):
+                return "nie"
+    for ziel in _umleitungsziele(befehl):
+        if _passt(ziel, NIE_SCHREIBEN) or _passt(ziel, NIE_LESEN):
+            return "nie"
+
+    if _heikler_ort_erwaehnt(befehl):
+        return "fragen"
     if teile and all(
         any(re.search(m, t, re.IGNORECASE) for m in NUR_SCHAUEN) for t in teile
     ):
@@ -271,7 +369,7 @@ def befehl_stufe(befehl: str) -> str:
             pruefer = durchsuchen_stufe
         else:
             pruefer = auflisten_stufe if nur_namen else lesen_stufe
-        for pfad in re.findall(r"[a-zA-Z]:[\\/][^\s\"']*", befehl):
+        for pfad in pfade_im_befehl(befehl):
             if pruefer(pfad) != "frei":
                 return "fragen"
         return "frei"
@@ -387,6 +485,34 @@ def _zip_text(pfad: Path) -> str:
     return re.sub(r"<[^>]{0,200}>", " ", text)
 
 
+def _als_text(roh: bytes):
+    """Die Rohbytes als Text -- oder None, wenn es wirklich binaer ist.
+
+    Der Nullbyte-Abbruch allein war zu grob: UTF-16 besteht zur Haelfte
+    aus Nullbytes, und unter Windows entsteht so ziemlich alles, was
+    PowerShell 5.1 mit ">" oder Out-File schreibt, in UTF-16. Gemessen:
+    dieselbe Datei mit demselben Schluessel fiel als UTF-8 auf "fragen"
+    und als UTF-16 auf "frei" -- die Inhaltspruefung sah nur Nullen und
+    hielt Text fuer ein Bild.
+    """
+    if roh[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return roh.decode("utf-16", errors="replace")
+    kopf = roh[:4096]
+    if b"\x00" not in kopf:
+        return roh.decode("utf-8", errors="replace")
+    # Ohne Vorzeichen hilft nur die Verteilung: Bei UTF-16 steht in
+    # lateinischem Text jedes zweite Byte auf Null, immer an derselben
+    # Stelle. Ein Bild oder eine EXE hat die Nullen verstreut.
+    gerade = kopf[0::2].count(0)
+    ungerade = kopf[1::2].count(0)
+    haelfte = max(1, len(kopf) // 2)
+    if ungerade > haelfte * 0.8 and gerade < haelfte * 0.2:
+        return roh.decode("utf-16-le", errors="replace")
+    if gerade > haelfte * 0.8 and ungerade < haelfte * 0.2:
+        return roh.decode("utf-16-be", errors="replace")
+    return None
+
+
 def inhalt_heikel(pfad: str) -> bool:
     """Stehen in der Datei mutmasslich Zugangsdaten?
 
@@ -411,9 +537,9 @@ def inhalt_heikel(pfad: str) -> bool:
                 roh = datei.read(PRUEF_BYTES)
         except (OSError, ValueError):
             return False
-        if b"\x00" in roh[:4096]:
+        text = _als_text(roh)
+        if text is None:
             return False                   # binaer, kein Textgeheimnis
-        text = roh.decode("utf-8", errors="replace")
 
     if any(re.search(m, text, re.IGNORECASE) for m in INHALT_EINDEUTIG):
         return True

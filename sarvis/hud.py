@@ -121,6 +121,10 @@ class Hud(QWidget):
         self.tick = 0.0
         self.wer = ""
         self.untertitel = ""
+        # Was davon in den Kasten passt, und wozu es gerechnet wurde --
+        # siehe _untertitel_passend().
+        self._untertitel_quelle = ""
+        self._untertitel_passt = ""
         self.hervor = 0.0        # Sekunden, die wir voll sichtbar bleiben
         self.nachhoeren = 0.0    # Sekunden, in denen kein Weckwort noetig ist
         self.nachhoeren_ganz = 1.0
@@ -235,12 +239,20 @@ class Hud(QWidget):
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if self.verschiebbar and self._griff is not None:
+        # Auf die gehaltene Taste pruefen, nicht nur auf den Griff: sonst
+        # zieht auch ein Zug mit der rechten Maustaste am Fenster.
+        if (self.verschiebbar and self._griff is not None
+                and (e.buttons() & Qt.LeftButton)):
             self.move(e.globalPosition().toPoint() - self._griff)
             e.accept()
 
     def mouseReleaseEvent(self, e):
-        if self.verschiebbar:
+        # Der Griff wurde beim Loslassen nicht geloescht. Nach einem
+        # beendeten Zug stand der alte Versatz weiter da, und die naechste
+        # Mausbewegung im Verschiebemodus sprang das Fenster damit an eine
+        # falsche Stelle -- die dann auch noch gemerkt wurde.
+        if self.verschiebbar and self._griff is not None:
+            self._griff = None
             self._position_merken()
             e.accept()
 
@@ -295,7 +307,10 @@ class Hud(QWidget):
         if self.zustand in (HOERT, SPRICHT):
             self.verlauf.append(self.geglaettet)
         else:
-            self.verlauf.append(self.verlauf[-1] * 0.85)
+            # Der Weckwort-Horcher meldet seinen Pegel auch im Ruhezustand.
+            # Vorher klang der Verlauf hier nur ab, egal wie laut jemand
+            # redete -- man sah dem Ring nie an, ob er einen hoert.
+            self.verlauf.append(max(self.geglaettet, self.verlauf[-1] * 0.85))
 
         self.hervor = max(0.0, self.hervor - 0.016)
         self.nachhoeren = max(0.0, self.nachhoeren - 0.016)
@@ -305,7 +320,12 @@ class Hud(QWidget):
                 self.freigabe = ""
         ziel_deck = DECKKRAFT[self.zustand]
         if self.hervor > 0.0:
-            ziel_deck = max(ziel_deck, 0.97)
+            # Hier stand die 0.97 ein zweites Mal hart im Code -- zufaellig
+            # derselbe Wert wie DECKKRAFT_RUHIG, weshalb das Aufblenden gar
+            # nichts tat. Wer DECKKRAFT_RUHIG in config.py absenkt, haette
+            # ausserdem still die Kopplung verloren: gemeint war immer
+            # "kurz voll sichtbar", also der Aktiv-Wert.
+            ziel_deck = max(ziel_deck, config.DECKKRAFT_AKTIV)
         self.deckkraft += (ziel_deck - self.deckkraft) * 0.10
         for eintrag in self.werkzeuge.values():
             eintrag[1] *= 0.975  # Aufleuchten klingt langsam ab
@@ -330,8 +350,13 @@ class Hud(QWidget):
             farbe = self._mischen(FARBEN[RUHIG], FARBEN[HOERT], anteil)
 
         atem = 0.5 + 0.5 * math.sin(self.tick * 1.6)
+        # Im Ruhezustand atmet der Ring -- es sei denn, das Mikrofon hoert
+        # gerade wirklich etwas. Dann schlaegt er aus, auch ohne gefallenes
+        # Weckwort. Das ist der ganze Unterschied zwischen "er ueberlegt
+        # noch" und "das Ding ist tot".
         staerke = (
-            self.geglaettet if self.zustand in (HOERT, SPRICHT) else atem * 0.25
+            self.geglaettet if self.zustand in (HOERT, SPRICHT)
+            else max(atem * 0.25, self.geglaettet)
         )
 
         self._untergrund(p, staerke)
@@ -600,7 +625,11 @@ class Hud(QWidget):
         Die Ecke ist keine Geschmacksfrage. Mittig unter dem Ring lag die
         Zeile ueber den Beschriftungen des Kranzes UND ueber der
         Freigabe: drei Texte uebereinander, keiner davon lesbar. Oben
-        links ist der einzige Platz, der bei jedem Zustand frei bleibt.
+        links ist der einzige Platz, der bei jedem Zustand frei bleibt --
+        aber nur bis x 200: seit der Kranz siebzehn Werkzeuge hat, liegt
+        die Beschriftung des letzten ('Finanzen') ab x 204 auf derselben
+        Hoehe wie die erste Zeile. Deshalb werden die Zeilen bei 180
+        gekuerzt, mit sichtbarem '…' statt eines stummen Schnitts.
 
         Eigene Farbe, ebenfalls absichtlich: Das gehoert zu keinem der
         Zustaende -- es laeuft weiter, egal ob er zuhoert, denkt oder
@@ -633,11 +662,12 @@ class Hud(QWidget):
         y += 15
 
         p.setFont(QFont("Segoe UI", 7))
+        mass = QFontMetrics(p.font())
         for zeile in self.hintergrund[:3]:
             c = QColor(farbe)
             c.setAlphaF(0.78)
-            self._beschriften(p, QRectF(x + 4, y, 260, 14), Qt.AlignLeft,
-                              zeile, c)
+            self._beschriften(p, QRectF(x + 4, y, 180, 14), Qt.AlignLeft,
+                              mass.elidedText(zeile, Qt.ElideRight, 180), c)
             y += 13
 
     def _text(self, p, farbe):
@@ -677,11 +707,44 @@ class Hud(QWidget):
                 c = QColor(farbe)
                 c.setAlphaF(0.92)
             y = MITTE.y() + KRANZ + 34
+            kasten = QRectF(70, y, BREITE - 140, HOEHE - y - 8)
+            richtung = Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap
             self._beschriften(
-                p, QRectF(70, y, BREITE - 140, HOEHE - y - 8),
-                Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap,
-                self.untertitel, c,
+                p, kasten, richtung,
+                self._untertitel_passend(p, kasten, richtung), c,
             )
+
+    def _untertitel_passend(self, p, kasten, richtung) -> str:
+        """So viel Untertitel, wie in den Kasten passt -- vorn gekuerzt.
+
+        drawText schneidet am Rechteck ab, und mit AlignTop faellt das
+        ENDE weg: Ab rund 390 Zeichen verschwand ausgerechnet der zuletzt
+        gesprochene Teil eines Diktats, ohne ein Zeichen dafuer. Gekuerzt
+        wird deshalb vorn, das Neueste bleibt stehen. Qt.TextDontClip
+        waere keine Loesung -- dann liefe der Text unten aus dem Fenster.
+
+        Das Ergebnis wird gemerkt: Sonst wuerde die Schrift sechzigmal in
+        der Sekunde neu vermessen, obwohl der Satz derselbe bleibt.
+        """
+        if self.untertitel == self._untertitel_quelle:
+            return self._untertitel_passt
+        self._untertitel_quelle = self.untertitel
+        text = self.untertitel
+        if p.boundingRect(kasten, richtung, text).height() > kasten.height():
+            # Kleinster Schnitt, der noch passt -- halbierend gesucht,
+            # weil jeder Versuch den ganzen Text neu umbricht.
+            frueh, spaet = 0, len(text)
+            while frueh < spaet:
+                mitte = (frueh + spaet) // 2
+                probe = "… " + text[mitte:]
+                if p.boundingRect(kasten, richtung,
+                                  probe).height() <= kasten.height():
+                    spaet = mitte
+                else:
+                    frueh = mitte + 1
+            text = "… " + text[frueh:]
+        self._untertitel_passt = text
+        return text
 
 
 def _eltern_wache(app, pid: int):

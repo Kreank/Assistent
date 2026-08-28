@@ -146,14 +146,37 @@ def _doppeln(x, rate, stimmen=3, streuung_ms=9.0, verstimmung=0.004, anteil=0.5)
 
 def _phaser(x, rate, geschwindigkeit=0.25, tiefe=0.7, stufen=4):
     """Langsam wandernde Ausloeschungen -- gibt der Stimme einen
-    'bearbeiteten' Schimmer, ohne den Rhythmus anzutasten."""
+    'bearbeiteten' Schimmer, ohne den Rhythmus anzutasten.
+
+    Der LFO wurde frueher mit lfo.mean() zu EINER Zahl eingedampft. Damit
+    standen die Kerben fuer den ganzen Satz fest -- es wanderte nichts,
+    'geschwindigkeit' war praktisch wirkungslos, und der Klang hing
+    stattdessen an der Satzlaenge, weil der Mittelwert eines Sinus ueber
+    ein endliches Fenster laengenabhaengig ist (gemessen bei fester
+    Geschwindigkeit 0.2: oberste Kerbe 2843 Hz bei 0.8 s, 3091 Hz bei
+    2.0 s, 2400 Hz bei 5.0 s). Jetzt wird blockweise gefiltert, mit dem
+    LFO-Wert aus der Blockmitte. Der Filterzustand laeuft ueber die
+    Blockgrenzen mit (zi) -- ohne das knackt jeder Blockwechsel.
+    """
+    n = len(x)
+    if n == 0:
+        return x.astype("float32")
     y = x.astype("float32").copy()
-    t = np.arange(len(x)) / rate
+    t = np.arange(n) / rate
     lfo = 0.5 + 0.5 * np.sin(2 * np.pi * geschwindigkeit * t)
-    for stufe in range(stufen):
-        mitte = 300.0 * (2 ** stufe) * (0.6 + 0.8 * lfo.mean())
-        b, a = signal.iirnotch(min(mitte, rate / 2 * 0.9), Q=1.4, fs=rate)
-        y = signal.lfilter(b, a, y).astype("float32")
+    block = 512
+    zustand = [None] * stufen
+    for anfang in range(0, n, block):
+        ende = min(anfang + block, n)
+        wert = float(lfo[(anfang + ende) // 2])
+        teil = y[anfang:ende]
+        for stufe in range(stufen):
+            mitte = 300.0 * (2 ** stufe) * (0.6 + 0.8 * wert)
+            b, a = signal.iirnotch(min(mitte, rate / 2 * 0.9), Q=1.4, fs=rate)
+            if zustand[stufe] is None:
+                zustand[stufe] = np.zeros(max(len(a), len(b)) - 1)
+            teil, zustand[stufe] = signal.lfilter(b, a, teil, zi=zustand[stufe])
+        y[anfang:ende] = teil.astype("float32")
     return ((1.0 - tiefe * 0.5) * x + tiefe * 0.5 * y).astype("float32")
 
 
@@ -406,16 +429,40 @@ _TUN = {
 }
 
 
+_GEMELDET = set()
+
+
+def _bekannt(farbe: str) -> bool:
+    """Unbekannter Farbname -- einmal melden statt still nichts zu tun.
+
+    Ein Tippfehler in config.STIMMFARBE fiel vorher lautlos durch:
+    tonhoehe_faktor() nahm 'aus', faerben() gab jeden Satz unbearbeitet
+    zurueck, und die Startzeile von mund.py bestaetigte trotzdem die
+    gewuenschte Farbe. Man hoerte die rohe Sprecherstimme und suchte den
+    Fehler ueberall, nur nicht im Namen. Gemeldet wird beim ersten
+    Nachschlagen -- das ist der Start, nicht jeder Satz.
+    """
+    if farbe in FARBEN:
+        return True
+    if farbe not in _GEMELDET:
+        _GEMELDET.add(farbe)
+        print(f"  ! Stimmfarbe {farbe!r} gibt es nicht -- möglich: "
+              f"{', '.join(sorted(FARBEN))}")
+    return False
+
+
 def tonhoehe_faktor(farbe: str) -> float:
     """Wie stark Piper vorkompensieren muss (1.0 = gar nicht)."""
-    return 2.0 ** (FARBEN.get(farbe, FARBEN["aus"])["halbtoene"] / 12.0)
+    if not _bekannt(farbe):
+        farbe = "aus"
+    return 2.0 ** (FARBEN[farbe]["halbtoene"] / 12.0)
 
 
 def faerben(x: np.ndarray, rate: int, farbe: str) -> tuple[np.ndarray, int]:
     """Wendet die Farbe an. Gibt Audio und (unveraenderte) Abtastrate zurueck."""
-    rezept = FARBEN.get(farbe)
-    if not rezept or not len(x):
+    if not _bekannt(farbe) or not len(x):
         return x, rate
+    rezept = FARBEN[farbe]
 
     # Tonhoehe: sauber ueber Neuabtastung. Die Dauer stimmt trotzdem,
     # weil mund.py Piper entsprechend schneller sprechen laesst.

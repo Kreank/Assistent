@@ -223,12 +223,20 @@ def lage(ordner) -> str:
 
     liesmich = ordner / "README.md"
     if liesmich.exists():
-        try:
-            anfang = " ".join(liesmich.read_text(
-                encoding="utf-8", errors="replace").split())[:300]
-            zeilen.append("README: " + anfang)
-        except OSError:
-            pass
+        # Bis hierher sind nur Namen, Zahlen und Git-Metadaten geflossen.
+        # Ab hier waere es Dateiinhalt -- und der Aufrufer prueft nur die
+        # Namens-Stufe. Stand am Anfang einer README ein API-Schluessel,
+        # ging er ungefragt ans Sprachmodell. lesen_stufe sieht vorher in
+        # die Datei hinein, genau dafuer gibt es sie.
+        if schutz.lesen_stufe(str(liesmich)) != "frei":
+            zeilen.append("README: vorhanden, nicht gelesen")
+        else:
+            try:
+                anfang = " ".join(liesmich.read_text(
+                    encoding="utf-8", errors="replace").split())[:300]
+                zeilen.append("README: " + anfang)
+            except OSError:
+                pass
     return "\n".join(zeilen)
 
 
@@ -301,9 +309,22 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             f"Angelegt am {datetime.now():%d.%m.%Y} auf Zuruf über Sarvis.\n",
             encoding="utf-8",
         )
-        for datei, inhalt in GERUEST.get(args.get("art") or "leer", {}).items():
-            (ziel / datei).write_text(inhalt.format(titel=titel),
-                                      encoding="utf-8")
+        # Kein .format(): stil.css enthaelt geschweifte CSS-Klammern, die
+        # str.format als Ersetzungsfeld liest. Jedes Web-Projekt brach
+        # deshalb mitten im Anlegen mit KeyError ab -- Ordner und README
+        # standen schon, git init lief nie, und der zweite Versuch
+        # scheiterte an "gibt es schon". .replace ist auch gegen Klammern
+        # unempfindlich, die spaeter in JS oder JSON dazukommen.
+        try:
+            for datei, inhalt in GERUEST.get(
+                    args.get("art") or "leer", {}).items():
+                (ziel / datei).write_text(inhalt.replace("{titel}", titel),
+                                          encoding="utf-8")
+        except OSError as e:
+            return {"content": [{"type": "text", "text":
+                    f"Das Grundgerüst ließ sich nicht schreiben: {e}. Der "
+                    f"halbfertige Ordner liegt in {ziel}."}],
+                    "is_error": True}
 
         meldung = ""
         try:
@@ -435,10 +456,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return {"content": [{"type": "text", "text":
                     f"Den Ort {roh} finde ich nicht."}], "is_error": True}
 
-        # Dieses Werkzeug laeuft ohne Rueckfrage. Damit das vertretbar
-        # bleibt, gilt hier dieselbe Grenze wie beim stillen Auflisten --
-        # sonst waere es ein Weg, an der Pruefung vorbei in fremde Ordner
-        # zu sehen.
+        # Dieses Werkzeug laeuft ohne Rueckfrage. Fuer den Ordner selbst
+        # gilt deshalb die Grenze des stillen Auflistens -- sonst waere es
+        # ein Weg, an der Pruefung vorbei in fremde Ordner zu sehen. Sie
+        # deckt aber nur Namen ab, und lage() liest am Ende die README.
+        # Diese eine Stelle prueft dort selbst mit lesen_stufe; hier zu
+        # verschaerfen waere falsch, dann duerfte Sarvis gar nicht mehr
+        # nachsehen und wuerde wieder raten.
         if schutz.auflisten_stufe(str(ziel)) != "frei":
             return {"content": [{"type": "text", "text":
                     "Dort sehe ich nicht ungefragt nach. Nimm ordner_ansehen "

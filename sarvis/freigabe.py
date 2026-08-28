@@ -27,7 +27,6 @@ Drei Dinge sind bewusst so gebaut:
   Mail, Telegram, Freigabe von Dateien -- bleibt aussen vor. Dort ist die
   Rueckfrage nicht laestig, sondern der eigentliche Zweck.
 """
-import re
 import time
 from pathlib import Path
 
@@ -36,25 +35,44 @@ from . import config
 # Woraus sich der Ort einer Anfrage ergibt. Werkzeuge, die hier nicht
 # stehen, haben keinen Ort -- ihre Freigabe gilt fuer das Werkzeug als
 # solches.
-_PFAD_WERKZEUGE = ("datei_lesen", "datei_schreiben", "ordner_ansehen")
+# ordner_durchsuchen gehoert dazu, seit gemessen wurde, was sein Fehlen
+# anrichtet: ort() lieferte "", die Freigabe wurde ortlos eingetragen --
+# und ortlos heisst laut _unter() UEBERALL. Ein "ja, such hier eine
+# halbe Stunde lang" gab damit auch D:\Strato Server frei.
+_PFAD_WERKZEUGE = ("datei_lesen", "datei_schreiben", "ordner_ansehen",
+                   "ordner_durchsuchen")
+
+
+def _pfade_im_befehl(befehl: str) -> list[str]:
+    """Alle Pfade eines Befehls -- dieselbe Sammlung wie in schutz.py.
+
+    Es gab zwei Fassungen davon, und sie waren sich nicht einig: Hier
+    wurde die Git-Bash-Form "/d/..." erkannt, in schutz.befehl_stufe
+    nicht. Wo zwei Stellen dieselbe Frage verschieden beantworten, faellt
+    frueher oder spaeter etwas zwischen sie -- gemessen ist es das
+    schon, in beide Richtungen.
+    """
+    from . import schutz
+    return schutz.pfade_im_befehl(befehl)
 
 
 def _pfad_im_befehl(befehl: str) -> str:
-    """Der erste Pfad in einem Befehl -- auch in Git-Bash-Schreibweise.
+    """Der erste Pfad in einem Befehl -- auch in Git-Bash-Schreibweise."""
+    pfade = _pfade_im_befehl(befehl)
+    return pfade[0] if pfade else ""
 
-    "D:\\Projekte\\x" wurde erkannt, "/d/Projekte/x" nicht -- und genau so
-    schreibt die Git-Bash Laufwerke. Die Folge war nicht harmlos: ort()
-    lieferte "", und eine ortlose Freigabe gilt laut _unter() UEBERALL.
-    Eine Zusage, die sich wie "hier im Projekt" anhoert, haette damit
-    still fuer die ganze Platte gegolten.
-    """
-    treffer = re.search(r"[a-zA-Z]:[\\/][^\s\"';|]*", befehl)
-    if treffer:
-        return treffer.group(0)
-    bash = re.search(r"(?<![\w/])/([a-zA-Z])/([^\s\"';|]*)", befehl)
-    if bash:
-        return f"{bash.group(1).upper()}:/{bash.group(2)}"
-    return ""
+
+def _ordner(pfad: str) -> str:
+    """Der Ordner zu einem Pfad -- bei einer Datei der darueber."""
+    if not pfad:
+        return ""
+    try:
+        p = Path(pfad)
+        # Ein vorhandener Ordner ist selbst der Ort. Sonst waere der Ort
+        # von "D:\Mitra" das Laufwerk D -- viel zu weit.
+        return str((p if p.is_dir() else p.parent).resolve())
+    except (OSError, ValueError):
+        return ""
 
 
 def ort(werkzeug: str, eingabe: dict) -> str:
@@ -70,15 +88,24 @@ def ort(werkzeug: str, eingabe: dict) -> str:
         pfad = str(e.get("pfad") or "")
     elif werkzeug == "befehl_ausfuehren":
         pfad = _pfad_im_befehl(str(e.get("befehl") or ""))
-    if not pfad:
-        return ""
-    try:
-        p = Path(pfad)
-        # Ein vorhandener Ordner ist selbst der Ort. Sonst waere der Ort
-        # von "D:\Mitra" das Laufwerk D -- viel zu weit.
-        return str((p if p.is_dir() else p.parent).resolve())
-    except (OSError, ValueError):
-        return ""
+    return _ordner(pfad)
+
+
+def _befehl_ganz_unter(befehl: str, freigegeben: str) -> bool:
+    """Liegt JEDER Pfad des Befehls unter dem freigegebenen Ort?
+
+    ort() nimmt den ersten Pfad -- fuer das Eintragen reicht das, fuer
+    das Pruefen nicht: 'Get-Content D:\\Privat\\Sarvis\\notiz.txt;
+    Get-Content "D:\\Strato Server\\pw.txt"' bekam den Ort des ersten
+    zugewiesen und lief unter einer Freigabe fuer den Projektordner ohne
+    eine einzige Rueckfrage durch -- gemessen, samt Passwortdatei.
+    Ein Befehl ganz ohne Pfad faellt ebenfalls durch: Wofuer eine
+    Freigabe an einem ORT gilt, muss man an diesem Ort erkennen koennen.
+    """
+    pfade = _pfade_im_befehl(befehl)
+    if not pfade:
+        return False
+    return all(_unter(_ordner(p), freigegeben) for p in pfade)
 
 
 def _unter(kind: str, eltern: str) -> bool:
@@ -115,6 +142,15 @@ class Freigaben:
             return ""
         minuten = max(1.0, min(float(minuten), config.FREIGABE_MAX_MINUTEN))
         wo = ort(werkzeug, eingabe)
+        # Ein Werkzeug, das einen Pfad oder Befehl mitbringt, dessen Ort
+        # sich aber nicht bestimmen laesst, bekommt gar keine Freigabe.
+        # Sonst entstuende genau das, was hier nie entstehen soll: ein
+        # ortloser Eintrag, der ueberall gilt -- so geschehen, weil ein
+        # Werkzeug in _PFAD_WERKZEUGE fehlte. Lieber einmal zu oft
+        # gefragt als eine halbe Stunde lang die ganze Platte frei.
+        e = eingabe or {}
+        if not wo and (e.get("pfad") or e.get("befehl")):
+            return ""
         self._offen[(werkzeug, wo)] = time.monotonic() + minuten * 60
         return f"{self._benennen(werkzeug, wo)} für {self._dauer(minuten)}"
 
@@ -124,7 +160,17 @@ class Freigaben:
         self._aufraeumen()
         wo = ort(werkzeug, eingabe)
         for (w, freigegeben), _ in self._offen.items():
-            if w == werkzeug and _unter(wo, freigegeben):
+            if w != werkzeug:
+                continue
+            # Ein Befehl hat nicht EINEN Ort, sondern so viele, wie er
+            # Pfade nennt -- und eine Freigabe deckt ihn nur, wenn sie
+            # alle deckt.
+            if werkzeug == "befehl_ausfuehren" and freigegeben:
+                if _befehl_ganz_unter(str((eingabe or {}).get("befehl") or ""),
+                                      freigegeben):
+                    return True
+                continue
+            if _unter(wo, freigegeben):
                 return True
         return False
 
@@ -164,26 +210,24 @@ class Freigaben:
         return ("[Ohne Rückfrage freigegeben: " + "; ".join(teile)
                 + ". Läuft von selbst ab; du kannst es nicht verlängern.]")
 
-    def rest_sekunden(self) -> float:
-        """Wie lange die laengste laufende Freigabe noch gilt.
+    def anzeige_stand(self) -> tuple[str, float]:
+        """Text und Restsekunden fuer die Anzeige -- aus DERSELBEN Freigabe.
 
-        Die Anzeige braucht das, um sich selbst wieder auszublenden. Ohne
-        sie stuende dort noch "frei" , wenn laengst wieder gefragt wird --
-        und das waere schlimmer als gar keine Anzeige.
+        Vorher waren das zwei Aufrufe, und sie meinten zwei verschiedene
+        Freigaben: der Text die zuerst ablaufende, der Zaehler den Rest
+        der laengsten. Bei "Dateien lesen 5 Minuten" neben "Befehle
+        ausfuehren 60 Minuten" stand "frei: Dateien lesen in X · 5 min",
+        nachdem genau die schon abgelaufen war -- die Anzeige blendete
+        erst mit der langen aus. Ein Zaehler, der etwas anderes meint als
+        die Zeile darueber, ist schlimmer als keiner.
         """
         self._aufraeumen()
         if not self._offen:
-            return 0.0
-        return max(0.0, max(self._offen.values()) - time.monotonic())
-
-    def kurz(self) -> str:
-        """Ganz knapp fuer die Anzeige -- dort ist kein Platz fuer Saetze."""
-        offen = self.offene()
-        if not offen:
-            return ""
-        was, rest = offen[0]
-        mehr = f" +{len(offen) - 1}" if len(offen) > 1 else ""
-        return f"frei: {was} · {rest:.0f} min{mehr}"
+            return "", 0.0
+        (w, o), bis = min(self._offen.items(), key=lambda x: x[1])
+        rest = max(0.0, bis - time.monotonic())
+        mehr = f" +{len(self._offen) - 1}" if len(self._offen) > 1 else ""
+        return f"frei: {self._benennen(w, o)} · {rest / 60:.0f} min{mehr}", rest
 
     # --- Sprache ----------------------------------------------------------
 

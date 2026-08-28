@@ -65,17 +65,38 @@ def bereit() -> bool:
 
 
 def _dienst(name: str, fassung: str):
-    """Einen API-Zugang bauen und merken."""
+    """Einen API-Zugang bauen und merken, solange die Tokendatei dieselbe ist.
+
+    Vorher wurde ein einmal gebauter Dienst fuer immer behalten. Nach den
+    sieben Testing-Tagen half dann auch google_anmelden.bat nicht: Die
+    schreibt eine neue Tokendatei, laeuft aber in einem eigenen Prozess --
+    das laufende Sarvis hielt weiter den Dienst mit dem toten Zugang und
+    scheiterte bis zum Neustart. Deshalb haengt der Merker jetzt am
+    Aenderungsstempel der Tokendatei: neue Anmeldung, neuer Dienst.
+    """
     from googleapiclient.discovery import build
 
-    if name in _dienste:
-        return _dienste[name]
+    try:
+        stempel = config.GOOGLE_TOKEN.stat().st_mtime
+    except OSError:
+        stempel = None
+    gemerkt = _dienste.get(name)
+    if gemerkt is not None and stempel is not None and gemerkt[0] == stempel:
+        return gemerkt[1]
     zugang = _zugangsdaten()
     if zugang is None:
+        _dienste.pop(name, None)
         return None
-    _dienste[name] = build(name, fassung, credentials=zugang,
-                           cache_discovery=False)
-    return _dienste[name]
+    # Erneut abfragen: _zugangsdaten() schreibt die Datei beim Auffrischen
+    # neu -- mit dem alten Stempel wuerde der naechste Aufruf sinnlos noch
+    # einmal bauen.
+    try:
+        stempel = config.GOOGLE_TOKEN.stat().st_mtime
+    except OSError:
+        stempel = None
+    dienst = build(name, fassung, credentials=zugang, cache_discovery=False)
+    _dienste[name] = (stempel, dienst)
+    return dienst
 
 
 async def _hole(name: str, fassung: str):
@@ -148,6 +169,25 @@ def _wann(zeit: dict) -> str:
         return roh
 
 
+def _faellig_deuten(roh):
+    """Ein Faelligkeitsdatum als (Tag, Monat, Jahr) -- oder None.
+
+    Claude liefert je nach Formulierung mal "03.10.2026", mal ISO. Vorher
+    verstand aufgabe_anlegen nur das erste Format, verschluckte alles
+    andere stillschweigend und meldete trotzdem "Aufgabe angelegt".
+    """
+    text = str(roh or "").strip()
+    if not text:
+        return None
+    for muster in ("%d.%m.%Y", "%Y-%m-%d", "%d.%m.%y"):
+        try:
+            d = datetime.strptime(text, muster)
+        except ValueError:
+            continue
+        return d.day, d.month, d.year
+    return None
+
+
 def _kopf(nachricht: dict, feld: str) -> str:
     for k in nachricht.get("payload", {}).get("headers", []):
         if k.get("name", "").lower() == feld.lower():
@@ -166,6 +206,63 @@ def _text_aus(nutzlast: dict) -> str:
         if gefunden:
             return gefunden
     return ""
+
+
+# --- Labels ---------------------------------------------------------------
+# Gmail hat keine Ordner, sondern Labels -- und die eingebauten sind
+# technisch dieselbe Sorte Ding wie die selbstgemachten. "TRASH" hier zu
+# setzen waere ein zweiter, an mail_verschieben vorbeilaufender Weg in den
+# Papierkorb. Die Liste greift aber ERST, wenn kein eigenes Label so
+# heisst: Ein selbst angelegtes "Archiv" gibt es wirklich, und das muss
+# erreichbar bleiben.
+SYSTEM_LABELS = {
+    "INBOX", "SPAM", "TRASH", "UNREAD", "READ", "STARRED", "IMPORTANT",
+    "SENT", "DRAFT", "CHAT",
+    "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS",
+    "CATEGORY_UPDATES", "CATEGORY_FORUMS",
+    # Wer "Papierkorb" sagt, meint den Papierkorb -- nicht ein neues
+    # Label, das nur so heisst.
+    "POSTEINGANG", "PAPIERKORB", "ARCHIV", "SPAM_ORDNER", "GESENDET",
+    "ENTWUERFE", "MARKIERT", "WICHTIG",
+}
+
+
+async def _labels_holen(dienst) -> list:
+    """Alle Labels des Postfachs, roh wie Gmail sie liefert."""
+    antwort = await asyncio.to_thread(
+        lambda: dienst.users().labels().list(userId="me").execute())
+    return antwort.get("labels", [])
+
+
+def _eigene(labels: list) -> list:
+    """Nur die selbst angelegten. Die eingebauten macht mail_verschieben."""
+    return [eintrag for eintrag in labels
+            if eintrag.get("type") != "system"
+            and eintrag.get("id") not in SYSTEM_LABELS]
+
+
+def _label_finden(labels: list, name: str):
+    """Label nach Namen suchen, Gross- und Kleinschreibung egal.
+
+    Gesucht wird zuerst der volle Name ("Arbeit/Rechnungen"), dann der
+    letzte Abschnitt allein -- gesprochen sagt niemand den ganzen Pfad.
+    Ist der letzte Abschnitt mehrdeutig, wird nichts geraten: Lieber
+    einmal nachfragen als in den falschen Unterordner einsortieren.
+    """
+    gesucht = name.strip().strip("/").casefold()
+    if not gesucht:
+        return None
+    for eintrag in labels:
+        if eintrag.get("name", "").casefold() == gesucht:
+            return eintrag
+    kurz = [eintrag for eintrag in labels
+            if eintrag.get("name", "").rsplit("/", 1)[-1].casefold() == gesucht]
+    return kurz[0] if len(kurz) == 1 else None
+
+
+# Wie viele Termine hoechstens geholt werden. Der Deckel bleibt -- mehr
+# haelt beim Vorlesen niemand aus; nur muss die Antwort sagen, dass er griff.
+TERMINE_GRENZE = 25
 
 
 # --- Drive und Tabellen ---------------------------------------------------
@@ -233,15 +330,27 @@ async def _datei_finden(dienst, name: str):
     antwort = await asyncio.to_thread(
         lambda: dienst.files().list(
             q=frage, pageSize=10, orderBy="modifiedTime desc",
-            fields="files(id,name,mimeType)").execute())
+            fields="files(id,name,mimeType,modifiedTime)").execute())
     treffer = antwort.get("files", [])
     if not treffer:
         return None, {"content": [{"type": "text", "text":
                       f"Keine Datei {name!r} in Drive gefunden."}],
                       "is_error": True}
     genau = [f for f in treffer if f["name"].lower() == str(name).lower()]
-    if genau:
+    if len(genau) == 1:
         return genau[0], None
+    # Drive erlaubt zwei Dateien mit demselben Namen (zweimal hochgeladen,
+    # Archivkopie). Vorher gewann bei genau gleichem Namen einfach die
+    # zuletzt geaenderte -- beim Teilen konnte so still die falsche Datei
+    # fuer jeden mit dem Link lesbar werden. Das Datum unterscheidet die
+    # beiden, im Namen tut es nichts.
+    if len(genau) > 1:
+        namen = "; ".join(f["name"] + _geaendert(f.get("modifiedTime", ""))
+                          for f in genau[:4])
+        return None, {"content": [{"type": "text", "text":
+                      "Mehrere Dateien heißen genau so: " + namen
+                      + ". Frag nach, welche gemeint ist."}],
+                      "is_error": True}
     if len(treffer) > 1:
         return None, {"content": [{"type": "text", "text":
                       "Mehrere passen: "
@@ -267,13 +376,23 @@ async def _tabelle_finden(name: str):
     antwort = await asyncio.to_thread(
         lambda: drive.files().list(
             q=frage, pageSize=10, orderBy="modifiedTime desc",
-            fields="files(id,name)").execute())
+            fields="files(id,name,modifiedTime)").execute())
     treffer = antwort.get("files", [])
     if not treffer:
         return None, {"content": [{"type": "text", "text":
                       f"Keine Tabelle {name!r} gefunden."}],
                       "is_error": True}
     genau = [f for f in treffer if f["name"].lower() == str(name).lower()]
+    # Wie in _datei_finden: Auch zwei gleichnamige Tabellen wurden vorher
+    # stillschweigend nach dem juengsten Aenderungsdatum entschieden --
+    # geschrieben haette Sarvis dann moeglicherweise in die falsche.
+    if len(genau) > 1:
+        namen = "; ".join(f["name"] + _geaendert(f.get("modifiedTime", ""))
+                          for f in genau[:4])
+        return None, {"content": [{"type": "text", "text":
+                      "Mehrere Tabellen heißen genau so: " + namen
+                      + ". Frag nach, welche gemeint ist."}],
+                      "is_error": True}
     if not genau and len(treffer) > 1:
         return None, {"content": [{"type": "text", "text":
                       "Mehrere Tabellen passen: "
@@ -358,31 +477,43 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         tage = int(args.get("tage") or 1)
         von = datetime.now().astimezone()
         if args.get("ab"):
-            try:
-                t, m, j = (int(x) for x in str(args["ab"]).split("."))
+            # Frueher wurde hier nur auf Punkte zerlegt; ein ISO-Datum lief
+            # in den ValueError und der Zeitraum fiel stumm auf jetzt
+            # zurueck. _faellig_deuten kennt beide Schreibweisen.
+            datum = _faellig_deuten(args["ab"])
+            if datum is not None:
+                t, m, j = datum
                 von = von.replace(year=j, month=m, day=t, hour=0, minute=0)
-            except (ValueError, TypeError):
-                pass
         bis = von + timedelta(days=tage)
+        # Bleibt ein unverstandenes 'ab' doch einmal liegen, faellt das nur
+        # auf, wenn die Antwort sagt, welchen Zeitraum sie meint.
+        zeitraum = f"{von:%d.%m.} bis {bis:%d.%m.}"
 
         antwort = await asyncio.to_thread(
             lambda: dienst.events().list(
                 calendarId="primary", timeMin=von.isoformat(),
                 timeMax=bis.isoformat(), singleEvents=True,
-                orderBy="startTime", maxResults=25,
+                orderBy="startTime", maxResults=TERMINE_GRENZE,
             ).execute()
         )
         blinken("Kalender")
         eintraege = antwort.get("items", [])
         if not eintraege:
             return {"content": [{"type": "text", "text":
-                    "In dem Zeitraum steht nichts an."}]}
+                    f"Vom {zeitraum} steht nichts an."}]}
         zeilen = [
             f"{_wann(e.get('start', {}))}: {e.get('summary', '(ohne Titel)')}"
             + (f" — {e['location']}" if e.get("location") else "")
             for e in eintraege
         ]
-        return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
+        # Dieselbe Markierung wie in tabelle_lesen: Google liefert hoechstens
+        # TERMINE_GRENZE Eintraege, und bei vollem Kalender klang der letzte
+        # genannte Termin wie der letzte des Zeitraums.
+        if len(eintraege) >= TERMINE_GRENZE:
+            zeilen.append(f"[… mehr als {TERMINE_GRENZE} Termine — weitere "
+                          "nicht aufgezählt]")
+        return {"content": [{"type": "text", "text":
+                f"Termine {zeitraum}:\n" + "\n".join(zeilen)}]}
 
     @tool(
         "termin_anlegen",
@@ -570,10 +701,17 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 userId="me", id=treffer[0]["id"], format="full").execute()
         )
         blinken("E-Mail")
-        text = _text_aus(n.get("payload", {}))[:4000]
+        # Vorher wurde hier hart auf 4000 Zeichen geschnitten, ohne ein
+        # Zeichen davon zu setzen: Ein langer Verlauf kam mitten im Satz
+        # abgeschnitten bei Claude an und wurde als vollstaendige Mail
+        # vorgelesen. Dieselbe Markierung wie in drive_lesen.
+        text = _text_aus(n.get("payload", {}))
+        gekuerzt = ""
+        if len(text) > LESE_GRENZE:
+            text, gekuerzt = text[:LESE_GRENZE], "\n[… gekürzt]"
         return {"content": [{"type": "text", "text":
                 f"Von {_kopf(n, 'From')}\nBetreff: {_kopf(n, 'Subject')}\n\n"
-                + (text or "(kein lesbarer Text)")}]}
+                + (text or "(kein lesbarer Text)") + gekuerzt}]}
 
     @tool(
         "mail_senden",
@@ -618,7 +756,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     @tool(
         "mail_verschieben",
         "Verschiebt Mails in den Papierkorb, ins Archiv oder auf gelesen. "
-        "Aus dem Papierkorb holt Gmail sie dreißig Tage lang zurück.",
+        "Aus dem Papierkorb holt Gmail sie dreißig Tage lang zurück. "
+        "Nur diese vier Wege. Zum Sortieren nach Thema gibt es "
+        "Labels — dafür mail_einsortieren.",
         {
             "type": "object",
             "properties": {
@@ -669,13 +809,164 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"{len(kennungen)} Mail(s) nach {wohin}."}]}
 
+    @tool(
+        "labels_ansehen",
+        "Zeigt die Labels des Postfachs — das sind Gmails Ordner. Vor dem "
+        "Einsortieren nachsehen, sonst entsteht ein zweites Label mit fast "
+        "gleichem Namen.",
+        {"type": "object", "properties": {}},
+    )
+    async def labels_ansehen(args):
+        dienst = await _hole("gmail", "v1")
+        if dienst is None:
+            return _fehlt()
+        eigene = _eigene(await _labels_holen(dienst))
+        blinken("E-Mail")
+        if not eigene:
+            return {"content": [{"type": "text", "text":
+                    "Eigene Labels gibt es noch keine. Posteingang, Archiv "
+                    "und Papierkorb gibt es immer."}]}
+        namen = sorted(eintrag["name"] for eintrag in eigene)
+        return {"content": [{"type": "text", "text":
+                f"{len(namen)} Label(s): " + ", ".join(namen)}]}
+
+    @tool(
+        "mail_einsortieren",
+        "Hängt ein Label an Mails oder nimmt es wieder ab — so sortiert "
+        "Gmail. Für 'sortier die Werbung weg', 'pack das zu den "
+        "Rechnungen'. Ein Label ändert nichts am Inhalt und ist jederzeit "
+        "wieder abnehmbar.",
+        {
+            "type": "object",
+            "properties": {
+                "suche": {"type": "string",
+                          "description": "Welche Mails, in Gmail-Schreibweise."},
+                "label": {"type": "string",
+                          "description": "Name des Labels. Unterlabel mit "
+                                         "Schrägstrich: 'Arbeit/Rechnungen'."},
+                "abnehmen": {"type": "boolean",
+                             "description": "Label abnehmen statt anhängen. "
+                                            "Vorgabe: anhängen."},
+                "aus_posteingang": {
+                    "type": "boolean",
+                    "description": "Zusätzlich aus dem Posteingang nehmen. "
+                                   "Das ist gemeint, wenn jemand "
+                                   "'wegsortieren' sagt. Vorgabe: nein."},
+                "anlegen": {"type": "boolean",
+                            "description": "Ein Label, das es noch nicht "
+                                           "gibt, neu anlegen. Vorgabe: nein."},
+                "anzahl": {"type": "integer", "minimum": 1, "maximum": 25,
+                           "description": "Höchstens so viele. Vorgabe 1."},
+            },
+            "required": ["suche", "label"],
+        },
+    )
+    async def mail_einsortieren(args):
+        dienst = await _hole("gmail", "v1")
+        if dienst is None:
+            return _fehlt()
+
+        name = (args.get("label") or "").strip().strip("/")
+        if not name:
+            return {"content": [{"type": "text", "text":
+                    "Ohne Labelnamen geht das nicht."}], "is_error": True}
+        # Erst die Mails, dann das Label: Sonst entsteht bei einer Suche, die
+        # nichts trifft, ein leeres Label -- und das steht dann fuer immer in
+        # der Seitenleiste.
+        anzahl = int(args.get("anzahl") or 1)
+        liste = await asyncio.to_thread(
+            lambda: dienst.users().messages().list(
+                userId="me", q=args["suche"], maxResults=anzahl).execute()
+        )
+        kennungen = [m["id"] for m in liste.get("messages", [])]
+        if not kennungen:
+            return {"content": [{"type": "text", "text":
+                    "Dazu finde ich nichts."}]}
+
+        labels = await _labels_holen(dienst)
+        # Gesucht wird nur unter den eigenen Labels -- und die Sperre der
+        # eingebauten Namen greift erst danach. Andersherum waere ein selbst
+        # angelegtes "Archiv" unerreichbar gewesen, bloss weil Gmail einen
+        # Zustand gleichen Namens kennt.
+        ziel = _label_finden(_eigene(labels), name)
+        angelegt = False
+        if ziel is None:
+            if name.upper().replace(" ", "_") in SYSTEM_LABELS:
+                return {"content": [{"type": "text", "text":
+                        f"{name} ist ein Zustand, den Gmail selbst führt, "
+                        "und kein eigenes Label. Posteingang, Archiv, "
+                        "Papierkorb und gelesen/ungelesen macht "
+                        "mail_verschieben."}], "is_error": True}
+            if args.get("abnehmen"):
+                return {"content": [{"type": "text", "text":
+                        f"Ein Label {name!r} gibt es nicht — dann ist da "
+                        "auch nichts abzunehmen."}], "is_error": True}
+            if not args.get("anlegen"):
+                # Kein stilles Anlegen: Ein verhoertes Wort waere sonst ein
+                # neues Label, und niemand sieht, wo die Mail geblieben ist.
+                vorhanden = sorted(e["name"] for e in _eigene(labels))
+                return {"content": [{"type": "text", "text":
+                        f"Ein Label {name!r} gibt es noch nicht. Vorhanden: "
+                        + (", ".join(vorhanden) or "keins")
+                        + ". Soll es wirklich neu angelegt werden, noch "
+                          "einmal mit anlegen=true."}], "is_error": True}
+            ziel = await asyncio.to_thread(
+                lambda: dienst.users().labels().create(
+                    userId="me",
+                    body={"name": name,
+                          "labelListVisibility": "labelShow",
+                          "messageListVisibility": "show"}).execute()
+            )
+            angelegt = True
+
+        abnehmen = bool(args.get("abnehmen"))
+        raus = bool(args.get("aus_posteingang"))
+        dazu = [] if abnehmen else [ziel["id"]]
+        weg = ([ziel["id"]] if abnehmen else []) + (["INBOX"] if raus else [])
+
+        # batchModify: ein Aufruf fuer alle Kennungen statt einer je Mail.
+        await asyncio.to_thread(
+            lambda: dienst.users().messages().batchModify(
+                userId="me",
+                body={"ids": kennungen,
+                      "addLabelIds": dazu,
+                      "removeLabelIds": weg}).execute()
+        )
+        blinken("E-Mail")
+        vermerken(
+            f"mail_einsortieren: Label {ziel['name']!r} "
+            f"{'abgenommen von' if abnehmen else 'gesetzt an'} "
+            f"{len(kennungen)} Mail(s)"
+            + (", raus aus dem Posteingang" if raus else "")
+            + ("; das Label war neu." if angelegt else ".")
+        )
+        satz = (f"{len(kennungen)} Mail(s) aus {ziel['name']} genommen."
+                if abnehmen else
+                f"{len(kennungen)} Mail(s) nach {ziel['name']} einsortiert.")
+        if raus:
+            satz += " Aus dem Posteingang sind sie raus."
+        if angelegt:
+            satz = f"Label {ziel['name']} neu angelegt. " + satz
+        return {"content": [{"type": "text", "text": satz}]}
+
     # --- Aufgaben ---------------------------------------------------------
 
-    async def _erste_liste(dienst):
+    async def _listen(dienst):
+        """Alle Aufgabenlisten des Kontos.
+
+        Frueher wurde nur die erste geholt (maxResults=1). Wer neben
+        "Meine Aufgaben" eine zweite Liste fuehrt, bekam auf "was steht
+        noch offen" ein "Keine offenen Aufgaben" -- eine Behauptung ueber
+        alles, gepruefte war nur eine Liste.
+        """
         listen = await asyncio.to_thread(
-            lambda: dienst.tasklists().list(maxResults=1).execute())
-        eintraege = listen.get("items", [])
-        return eintraege[0]["id"] if eintraege else None
+            lambda: dienst.tasklists().list().execute())
+        return listen.get("items", [])
+
+    async def _aufgaben_holen(dienst, kennung, **weitere):
+        antwort = await asyncio.to_thread(
+            lambda: dienst.tasks().list(tasklist=kennung, **weitere).execute())
+        return antwort.get("items", [])
 
     @tool(
         "aufgaben_ansehen",
@@ -692,31 +983,38 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("tasks", "v1")
         if dienst is None:
             return _fehlt()
-        liste = await _erste_liste(dienst)
-        if liste is None:
+        listen = await _listen(dienst)
+        if not listen:
             return {"content": [{"type": "text", "text":
                     "Es gibt keine Aufgabenliste."}]}
         auch = bool(args.get("auch_erledigte"))
-        antwort = await asyncio.to_thread(
-            lambda: dienst.tasks().list(
-                tasklist=liste, showCompleted=auch,
-                showHidden=auch, maxResults=50).execute())
-        offen = antwort.get("items", [])
+        zeilen = []
+        for eintrag in listen:
+            offen = await _aufgaben_holen(
+                dienst, eintrag["id"], showCompleted=auch,
+                showHidden=auch, maxResults=50)
+            if not offen:
+                continue
+            # Der Listenname nur, wenn es ueberhaupt mehrere gibt -- sonst
+            # steht bei jedem "was steht an" ein "Meine Aufgaben:" davor.
+            if len(listen) > 1:
+                zeilen.append(f"{eintrag.get('title', '(ohne Namen)')}:")
+            for a in offen:
+                haken = "erledigt: " if a.get("status") == "completed" else ""
+                faellig = ""
+                if a.get("due"):
+                    try:
+                        d = datetime.fromisoformat(
+                            a["due"].replace("Z", "+00:00"))
+                        faellig = f" (bis {d:%d.%m.})"
+                    except ValueError:
+                        pass
+                zeilen.append(
+                    f"{haken}{a.get('title', '(ohne Titel)')}{faellig}")
         blinken("Aufgaben")
-        if not offen:
+        if not zeilen:
             return {"content": [{"type": "text", "text":
                     "Keine offenen Aufgaben."}]}
-        zeilen = []
-        for a in offen:
-            haken = "erledigt: " if a.get("status") == "completed" else ""
-            faellig = ""
-            if a.get("due"):
-                try:
-                    d = datetime.fromisoformat(a["due"].replace("Z", "+00:00"))
-                    faellig = f" (bis {d:%d.%m.})"
-                except ValueError:
-                    pass
-            zeilen.append(f"{haken}{a.get('title', '(ohne Titel)')}{faellig}")
         return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
 
     @tool(
@@ -737,25 +1035,38 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("tasks", "v1")
         if dienst is None:
             return _fehlt()
-        liste = await _erste_liste(dienst)
-        if liste is None:
+        # Beim Anlegen bleibt die erste Liste die Vorgabe: Wohin eine neue
+        # Aufgabe soll, sagt der Nutzer nicht -- geraten wird nichts.
+        listen = await _listen(dienst)
+        if not listen:
             return {"content": [{"type": "text", "text":
                     "Es gibt keine Aufgabenliste."}], "is_error": True}
+        liste = listen[0]["id"]
         koerper = {"title": args["titel"]}
         if args.get("notiz"):
             koerper["notes"] = args["notiz"]
+        # Ein unverstandenes Datum wurde hier frueher verschluckt (pass) und
+        # die Aufgabe fristlos angelegt -- die Antwort sagte trotzdem nur
+        # "Aufgabe angelegt". Jetzt bricht es ab wie termin_anlegen, und die
+        # uebernommene Frist steht in der Antwort, damit ein Fehler auffaellt.
+        frist = ""
         if args.get("faellig"):
-            try:
-                t, m, j = (int(x) for x in str(args["faellig"]).split("."))
-                koerper["due"] = f"{j:04d}-{m:02d}-{t:02d}T00:00:00.000Z"
-            except (ValueError, TypeError):
-                pass
+            datum = _faellig_deuten(args["faellig"])
+            if datum is None:
+                return {"content": [{"type": "text", "text":
+                        "Das Fälligkeitsdatum verstehe ich nicht. Format: "
+                        "TT.MM.JJJJ. Nichts angelegt."}], "is_error": True}
+            t, m, j = datum
+            koerper["due"] = f"{j:04d}-{m:02d}-{t:02d}T00:00:00.000Z"
+            frist = f", fällig {t:02d}.{m:02d}.{j}"
         await asyncio.to_thread(
             lambda: dienst.tasks().insert(tasklist=liste,
                                           body=koerper).execute())
         blinken("Aufgaben")
+        vermerken(f"aufgabe_anlegen: Aufgabe {args['titel']!r} wurde "
+                  f"angelegt{frist}.")
         return {"content": [{"type": "text", "text":
-                f"Aufgabe angelegt: {args['titel']}."}]}
+                f"Aufgabe angelegt: {args['titel']}{frist}."}]}
 
     @tool(
         "aufgabe_abhaken",
@@ -773,31 +1084,35 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("tasks", "v1")
         if dienst is None:
             return _fehlt()
-        liste = await _erste_liste(dienst)
-        if liste is None:
+        listen = await _listen(dienst)
+        if not listen:
             return {"content": [{"type": "text", "text":
                     "Es gibt keine Aufgabenliste."}], "is_error": True}
-        antwort = await asyncio.to_thread(
-            lambda: dienst.tasks().list(tasklist=liste,
-                                        maxResults=100).execute())
         suchwort = args["titel"].lower()
-        treffer = [a for a in antwort.get("items", [])
-                   if suchwort in a.get("title", "").lower()
-                   and a.get("status") != "completed"]
+        # Gesucht wird in allen Listen -- sonst hiess es "keine offene
+        # Aufgabe dazu", waehrend sie in der zweiten Liste stand.
+        treffer = []
+        for eintrag in listen:
+            treffer += [(eintrag["id"], a) for a
+                        in await _aufgaben_holen(dienst, eintrag["id"],
+                                                 maxResults=100)
+                        if suchwort in a.get("title", "").lower()
+                        and a.get("status") != "completed"]
         if not treffer:
             return {"content": [{"type": "text", "text":
                     f"Keine offene Aufgabe zu {args['titel']!r}."}]}
         if len(treffer) > 1:
             return {"content": [{"type": "text", "text":
                     "Mehrere passen: "
-                    + "; ".join(a["title"] for a in treffer[:4])
+                    + "; ".join(a["title"] for _, a in treffer[:4])
                     + ". Frag nach, welche gemeint ist."}], "is_error": True}
-        ziel = treffer[0]
+        liste, ziel = treffer[0]
         ziel["status"] = "completed"
         await asyncio.to_thread(
             lambda: dienst.tasks().update(
                 tasklist=liste, task=ziel["id"], body=ziel).execute())
         blinken("Aufgaben")
+        vermerken(f"aufgabe_abhaken: {ziel['title']} wurde abgehakt.")
         return {"content": [{"type": "text", "text":
                 f"{ziel['title']} ist abgehakt."}]}
 
@@ -1128,7 +1443,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                          "description": "Name der Tabelle oder Teil davon."},
                 "bereich": {"type": "string",
                             "description": "A1-Schreibweise, z. B. 'B4' oder "
-                                           "'A1:C3'."},
+                                           "'A1:C1' — genau eine Zeile. "
+                                           "Mehrzeilige Bereiche kann dieses "
+                                           "Werkzeug nicht füllen."},
                 "werte": {"type": "array", "items": {"type": "string"},
                           "description": "Die Werte, von links nach rechts."},
             },
@@ -1143,6 +1460,12 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if dienst is None:
             return _fehlt()
         werte = [str(w) for w in (args.get("werte") or [])]
+        # Ohne diese Pruefung ging {"values": [[]]} hinaus und die Antwort
+        # meldete trotzdem "ist gesetzt" -- wie in tabelle_anhaengen.
+        if not werte:
+            return {"content": [{"type": "text", "text":
+                    "Ohne Werte kann ich nichts eintragen."}],
+                    "is_error": True}
         await asyncio.to_thread(
             lambda: dienst.spreadsheets().values().update(
                 spreadsheetId=blatt["id"], range=args["bereich"],
@@ -1190,6 +1513,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     return [termine_ansehen, termin_anlegen, termin_absagen,
             mails_ansehen, mail_lesen, mail_senden, mail_verschieben,
+            labels_ansehen, mail_einsortieren,
             aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken,
             kontakt_suchen, kontakt_anlegen,
             drive_suchen, drive_lesen, drive_teilen,

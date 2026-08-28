@@ -39,7 +39,7 @@ def gong(rate: int = 22050) -> tuple[np.ndarray, int]:
     return np.concatenate([stuecke[0], pause, stuecke[1]]), rate
 
 
-def _pegel(block: np.ndarray) -> float:
+def pegel(block: np.ndarray) -> float:
     """Lautstaerke eines Blocks auf 0..1, mit Kurve fuers Auge."""
     if not len(block):
         return 0.0
@@ -67,7 +67,7 @@ class Aufnehmer:
         with self._schloss:
             self._brocken.append(daten.copy())
         if self.melden is not None:
-            self.melden(_pegel(daten))
+            self.melden(pegel(daten))
 
     def start(self) -> None:
         if self._strom is not None:
@@ -111,6 +111,19 @@ class Lautsprecher:
         self._abbruch = threading.Event()
         self.leer = threading.Event()
         self.leer.set()
+        # Haelt Einlegen und Leerpruefung auseinander. sagen() setzte leer
+        # zurueck und legte ERST DANACH ein; traf der Abspielfaden mit
+        # seinem empty()-Test genau dazwischen, setzte er leer wieder --
+        # warten() meldete "fertig", waehrend der Satz noch in der
+        # Schlange lag. Beide Seiten fassen nur kurz zu und warten nie
+        # unter dem Schloss, damit daraus keine Verklemmung wird.
+        self._tor = threading.Lock()
+        # Welche Runde gerade gilt. abbrechen() zaehlt hoch, und jeder
+        # Posten traegt die Runde seines Einlegens: Ein Satz, den der
+        # Abspielfaden schon aus der Schlange gezogen hatte, als der
+        # Abbruch kam, laesst sich sonst nicht mehr einholen -- die
+        # Schlange zu leeren erreicht ihn nicht mehr.
+        self._runde = 0
         self._faden = threading.Thread(target=self._schleife, daemon=True)
         self._faden.start()
 
@@ -136,6 +149,13 @@ class Lautsprecher:
         )
         huelle = self._huellkurve(proben, rate)
         sd.play(proben, rate)
+        # Zwischen dem Anlaufen des Stroms und der Pegelschleife unten lag
+        # bisher die ganze Satzlaenge ohne eine einzige Abbruchfrage: fiel
+        # abbrechen() genau hier, lief sd.stop() ins Leere und der Satz
+        # wurde zu Ende gespielt, obwohl warten() schon "fertig" meldete.
+        if self._abbruch.is_set():
+            sd.stop()
+            return
         if self.melden is None or not len(huelle):
             sd.wait()
             return
@@ -155,23 +175,32 @@ class Lautsprecher:
     def _schleife(self):
         while True:
             posten = self._schlange.get()
-            if posten is None:
-                continue
-            proben, rate = posten
             try:
+                if posten is None:
+                    continue
+                proben, rate, runde = posten
+                # Aelter als die laufende Runde heisst: dieser Satz war
+                # beim Abbruch schon aus der Schlange gezogen. Der Merker
+                # allein genuegt dafuer nicht -- ein sagen() danach hat
+                # ihn laengst wieder geloescht.
+                if runde != self._runde or self._abbruch.is_set():
+                    continue
                 self._abspielen(proben, rate)
             except Exception as e:  # ein kaputter Block darf nicht alles killen
                 print(f"  (Wiedergabe fehlgeschlagen: {e})")
             finally:
-                if self._schlange.empty():
-                    if self.melden is not None:
-                        self.melden(0.0)
-                    self.leer.set()
+                with self._tor:
+                    still = self._schlange.empty()
+                    if still:
+                        self.leer.set()
+                if still and self.melden is not None:
+                    self.melden(0.0)
 
     def sagen(self, proben: np.ndarray, rate: int) -> None:
-        self._abbruch.clear()
-        self.leer.clear()
-        self._schlange.put((proben, rate))
+        with self._tor:
+            self._abbruch.clear()
+            self.leer.clear()
+            self._schlange.put((proben, rate, self._runde))
 
     def abbrechen(self) -> None:
         """Sofort still sein -- mitten im Wort, wenn es sein muss.
@@ -181,15 +210,17 @@ class Lautsprecher:
         heraus und redet weiter.
         """
         self._abbruch.set()
-        while True:
-            try:
-                self._schlange.get_nowait()
-            except queue.Empty:
-                break
+        with self._tor:
+            self._runde += 1
+            while True:
+                try:
+                    self._schlange.get_nowait()
+                except queue.Empty:
+                    break
+            self.leer.set()
         sd.stop()
         if self.melden is not None:
             self.melden(0.0)
-        self.leer.set()
 
     def warten(self) -> None:
         self.leer.wait()

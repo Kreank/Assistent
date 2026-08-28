@@ -85,7 +85,21 @@ WECKWORT_MIN_PEGEL = 0.008
 WECKWORT_STILLE_SEK = 0.55       # kurzer Zuruf
 WECKWORT_STILLE_LANG_SEK = 1.4   # laufende Rede
 WECKWORT_LANG_AB_SEK = 2.0       # ab wann als laufende Rede gilt
-WECKWORT_MIN_SEK = 0.5         # kuerzer ist ein Huesteln
+# Kuerzere Abschnitte gelten als Huesteln und werden verworfen.
+#
+# ACHTUNG, diese Schwelle greift derzeit NIE, und das ist Absicht: Die
+# geprüfte Dauer umfasst den gesamten Puffer einschliesslich der
+# Nachlauf-Stille (WECKWORT_STILLE_SEK, 0,55 s). Ein einzelner
+# Sprachblock plus Nachlauf ergibt gemessen 0,600 s -- die 0,5 werden
+# nie unterschritten.
+#
+# Scharf gestellt wurde sie bewusst nicht. Dazu muesste die Stille
+# abgezogen und der Wert auf etwa 0,25 gesenkt werden, und dann traefe
+# die Schwelle genau die Faelle, fuer die der Nachhoer-Zweig gebaut ist:
+# "Ja." liegt bei rund 0,36 s, "YouTube" bei 0,45 s. Ein verschlucktes
+# "Ja" kostet mehr als ein durchgelassenes Huesteln -- letzteres faengt
+# Whisper ohnehin ab, indem es leeren Text liefert.
+WECKWORT_MIN_SEK = 0.5
 
 # Darf man ihm ins Wort fallen?
 #
@@ -107,7 +121,34 @@ NACHHOEREN_SEK = 18.0
 # Puffer nicht endlos fuellen. Stand auf 9 Sekunden, und das war keine
 # Notbremse, sondern eine Wortmeldung: Wer einen Gedanken ausformuliert,
 # braucht laenger, und wurde mitten im Satz abgeschnitten.
-WECKWORT_MAX_SEK = 30.0
+#
+# Dann stand er auf 30 -- und damit exakt auf dem Punkt, an dem ein
+# Diktat gerade erst anfaengt (DIKTAT_AB_SEK). Wer "Hey Sarvis, schreib
+# mir einen Bericht ueber ..." sagte und dann ausholte, wurde nach einer
+# halben Minute abgeschnitten. Ein Fernseher macht ohnehin alle paar
+# Sekunden eine Pause und laeuft nie in diesen Deckel; getroffen hat er
+# nur den, der wirklich etwas zu sagen hatte.
+WECKWORT_MAX_SEK = 90.0
+
+# Derselbe Deckel, wenn er dich gerade angesprochen hat -- also wenn du
+# im offenen Nachhoerfenster zu reden anfaengst. Dann bist DU gemeint,
+# und wer einen Gedanken zu Ende bringt, braucht mehr als eine halbe
+# Minute. Der Wert ist trotzdem endlich: Der Puffer liegt im RAM, und
+# drei Minuten bei 16 kHz sind rund elf Megabyte.
+WECKWORT_MAX_ANGESPROCHEN_SEK = 180.0
+
+# Ab wann er annimmt, dass du nicht zurufst, sondern diktierst.
+#
+# Kein Kommandowort und kein Knopf: Man sagt nicht "Sarvis, ich diktiere
+# jetzt" -- man faengt an zu reden. Die Laenge der Rede ist das Signal.
+# Es ist dieselbe Staffelung wie bei WECKWORT_STILLE_LANG_SEK, nur eine
+# Stufe weiter: je laenger jemand spricht, desto geduldiger wird er.
+#
+# Der Preis steht offen da: Nach dem letzten Wort vergehen erst diese
+# Sekunden, bevor Whisper ueberhaupt anfaengt. Beim Diktat ist das
+# richtig -- unterbrochen zu werden kostet mehr als drei Sekunden.
+DIKTAT_AB_SEK = 30.0
+DIKTAT_STILLE_SEK = 3.0
 
 # Werkzeuge, bei denen es dauert. Beginnt eines davon und Sarvis hat in
 # diesem Zug noch kein Wort gesagt, wird ein Wartesatz vorgeschoben.
@@ -570,6 +611,12 @@ WERKZEUG_STUFEN = {
     "mail_lesen":         "still",
     "mail_senden":        "fragen",
     "mail_verschieben":   "fragen",
+    # Labels ansehen ist Nachschlagen. Einsortieren fragt -- nicht weil ein
+    # Label gefaehrlich waere (es ist abnehmbar), sondern weil dasselbe
+    # Werkzeug mit aus_posteingang archiviert, und das kann mail_verschieben
+    # nicht ohne Rueckfrage.
+    "labels_ansehen":     "still",
+    "mail_einsortieren":  "fragen",
     "aufgaben_ansehen":   "still",
     "aufgabe_anlegen":    "still",
     "aufgabe_abhaken":    "still",
@@ -638,7 +685,11 @@ FREIGABE_MAX_MINUTEN = 240
 # nicht das Laestige am Vorgang, sie ist der Zweck.
 FREIGABE_NIE = {
     "mail_senden", "telegram_senden", "drive_teilen", "vergessen",
-    "termin_absagen", "mail_verschieben",
+    # mail_einsortieren steht hier aus einem Grund: Mit aus_posteingang tut
+    # es, was mail_verschieben tut. Fehlte es, waere die Sperre daneben
+    # umgehbar -- eine halbe Stunde Freigabe aufs Einsortieren, und der
+    # Posteingang laesst sich ohne weitere Frage leerraeumen.
+    "termin_absagen", "mail_verschieben", "mail_einsortieren",
 }
 
 # Wie eine laufende Freigabe genannt wird -- vorgelesen und in der

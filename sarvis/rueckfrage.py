@@ -83,6 +83,19 @@ def _kommt_vor(text: str, muster) -> bool:
     return any(re.search(_wortweise(m), text) for m in muster)
 
 
+def _ohne_freigabe(text: str) -> str:
+    """Die Freigabewendung herausschneiden, was uebrig bleibt zaehlt.
+
+    "frag nicht mehr nach" traegt ein "nicht", das nichts ablehnt -- es
+    gehoert zur Freigabe. Wer den ganzen Satz gegen die Nein-Liste
+    haelt, liest ausgerechnet in der gebraeuchlichsten Zustimmung einen
+    Einwand.
+    """
+    for m in _FREIGABE:
+        text = re.sub(m, " ", text)
+    return " ".join(text.split())
+
+
 def deuten(text: str) -> str:
     """"ja", "nein", "anders" oder "unklar" -- siehe oben."""
     t = re.sub(r"[^\wäöüß ]+", " ", (text or "").lower())
@@ -100,6 +113,15 @@ def deuten(text: str) -> str:
         rest = t[len(zusage):].strip()
         # "ja, aber nur die erste" und "mach das, aber nicht löschen":
         # zugestimmt, doch nicht zu dem, was gefragt wurde.
+        #
+        # Die Freigabewendung wird vorher herausgeschnitten. Sonst las
+        # das "nicht" aus "ja, frag nicht mehr nach" als Einwand: Der
+        # Satz fiel in den Anders-Zweig, die Handlung lief NICHT, die
+        # Freigabe entstand NICHT, und gefragt wurde weiter. Gemessen:
+        # deuten("ja, frag nicht mehr nach") -> "anders", waehrend
+        # freigabe_erkennen() denselben Satz mit 30 Minuten erkennt --
+        # zwei Funktionen derselben Datei, die sich widersprachen.
+        rest = _ohne_freigabe(rest)
         if _kommt_vor(rest, ANDERS) or _kommt_vor(rest, NEIN):
             return ANDERS_
         return JA_SICHER
@@ -132,7 +154,9 @@ _FREIGABE = (
     r"ohne\s+(nach)?zufragen", r"ohne\s+(nach)?frage",
     r"hör\s+auf\s+zu\s+fragen", r"hoer\s+auf\s+zu\s+fragen",
     r"(musst|brauchst)\s+(du\s+)?nicht\s+(mehr\s+)?(zu\s+)?frag",
-    r"nicht\s+jedes\s+mal", r"immer\s+(erlaubt|frei)",
+    # Dieselbe fehlende Wortgrenze wie bei "termin"/"min": ohne \b machte
+    # "mach das immer freitags" eine Dauerfreigabe auf.
+    r"nicht\s+jedes\s+mal", r"immer\s+(erlaubt|frei)\b",
     r"ab\s+jetzt", r"von\s+jetzt\s+an", r"für\s+die\s+nächste",
     r"fuer\s+die\s+naechste", r"für\s+die\s+nächsten",
     r"die\s+nächsten?\s+\S+\s+(minuten|stunde)",
@@ -150,18 +174,24 @@ def freigabe_erkennen(text: str) -> float | None:
     if not t:
         return None
 
-    # Eine ausdrueckliche Zeitangabe reicht als Wunsch fuer sich: "ja, für
-    # die nächste halbe Stunde" sagt niemand, der nur einmal ja meint.
-    dauer = _dauer_lesen(t)
-    if dauer is None and not any(re.search(m, t) for m in _FREIGABE):
+    # Eine Zeitangabe allein reicht NICHT mehr. Vorher tat sie es, und
+    # damit wurde aus "ja, ich habe in einer stunde einen termin" eine
+    # Stunde Blankoerlaubnis fuer das Werkzeug -- gemessen 60.0. Die
+    # Wendung muss ausgesprochen sein; die Dauer verfeinert sie nur.
+    if not any(re.search(m, t) for m in _FREIGABE):
         return None
+    dauer = _dauer_lesen(t)
     return dauer if dauer is not None else config.FREIGABE_MINUTEN
 
 
 def _dauer_lesen(t: str) -> float | None:
+    # Die Wortgrenze steht vorn als Rueckblick und nicht als \b: "termin"
+    # endet auf "min" und ergab damit eine Freigabe von einer Minute, auf
+    # ein blosses "ja" hin. Mit \b davor fiele dafuer "30min" heraus --
+    # das schreibt Whisper so, und gemeint ist es auch so.
     treffer = re.search(
         r"(\d+|" + "|".join(_ZAHLWORT) + r")?\s*"
-        r"(minuten|minute|min|stunden|stunde|std)\b", t)
+        r"(?<![A-Za-zÄÖÜäöüß])(minuten|minute|min|stunden|stunde|std)\b", t)
     if not treffer:
         # "für heute" ist eine Ansage, aber keine Zahl.
         if re.search(r"\b(für|fuer)\s+heute\b", t):
@@ -328,6 +358,24 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         anzahl = e.get("anzahl") or 1
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
         return f"Soll ich {was} zu {_kuerzen(e.get('suche'), 40)} {wohin}?"
+
+    if werkzeug == "mail_einsortieren":
+        anzahl = e.get("anzahl") or 1
+        was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
+        label = _kuerzen(e.get("label"), 40)
+        suche = _kuerzen(e.get("suche"), 40)
+        if e.get("abnehmen"):
+            # "bei eine Mail" -- der Dativ braucht eine eigene Form.
+            bei = "einer Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
+            return f"Soll ich bei {bei} zu {suche} das Label {label} abnehmen?"
+        # Beides muss in die Frage, weil man beides der Mail hinterher nicht
+        # mehr ansieht: dass sie aus dem Posteingang verschwindet, und dass
+        # dabei ein Label entsteht, das es vorher nicht gab.
+        raus = " und aus dem Posteingang nehmen" if e.get("aus_posteingang") else ""
+        frage = f"Soll ich {was} zu {suche} nach {label} einsortieren{raus}?"
+        if e.get("anlegen"):
+            frage += " Das Label lege ich dabei neu an."
+        return frage
 
     if werkzeug == "drive_teilen":
         # Der Satz muss die Tragweite tragen, nicht den Werkzeugnamen:

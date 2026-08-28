@@ -5,7 +5,7 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**54 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+**56 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
 Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
 Projekte und Hintergrundaufträge, das eigene Finanzdashboard.
 
@@ -348,7 +348,7 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-**54 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**56 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
 **im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
 Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
 
@@ -369,7 +369,7 @@ heißt nein.** Eine Sperrliste kann nur verbieten, woran man gedacht hat.
 | Gedächtnis | `merken`, `gedaechtnis_zeigen` | `vergessen` |
 | Telegram | `telegram_kontakte`, `telegram_lesen`, `telegram_suchen` | `telegram_senden` |
 | Kalender | `termine_ansehen` | `termin_anlegen`, `termin_absagen` |
-| Mail | `mails_ansehen`, `mail_lesen` | `mail_senden`, `mail_verschieben` |
+| Mail | `mails_ansehen`, `mail_lesen`, `labels_ansehen` | `mail_senden`, `mail_verschieben`, `mail_einsortieren` |
 | Aufgaben | `aufgaben_ansehen`, `aufgabe_anlegen`, `aufgabe_abhaken` | — |
 | Kontakte | `kontakt_suchen` | `kontakt_anlegen` |
 | Drive | `drive_suchen`, `drive_lesen` | `drive_teilen` |

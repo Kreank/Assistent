@@ -111,6 +111,15 @@ class Sarvis:
         self.arbeitet = False        # Antwort laeuft gerade?
         self.aufgabe = None          # der laufende Durchgang, abbrechbar
         self.abgebrochen = False     # wurde reingeredet?
+        # Zaehler statt Flagge: Welcher Durchgang laeuft gerade?
+        #
+        # self.abgebrochen allein reicht nicht. Der Vorlesefaden laeuft in
+        # einem to_thread und laesst sich nicht abbrechen -- er kehrt aus
+        # der Synthese zurueck, wenn _alles_stoppen die Flagge schon
+        # wieder auf False gesetzt hat, und schiebt seinen Satz dann NACH
+        # dem "Gestoppt." heraus. Eine Zahl, die bei jedem Abbruch
+        # hochzaehlt, kann nicht so zurueckfallen.
+        self.durchgang = 0
         self.verschiebt = False      # Anzeige gerade im Verschiebemodus?
         self.antwort = None          # offene Rueckfrage (Future)
         self.horcher = Horcher(self.ohren, self._geweckt,
@@ -341,6 +350,10 @@ class Sarvis:
         # Ohne das muesste man "Hey Sarvis, ja" sagen -- auf eine Frage,
         # die er gerade selbst gestellt hat.
         self.horcher.nachhoeren(config.RUECKFRAGE_SEKUNDEN + 12)
+        # Solange die Frage offen steht, genuegt ein einzelnes Wort als
+        # Antwort -- der Horcher wirft sonst alles weg, was kuerzer als
+        # zwei Woerter ist und nicht "ja" oder "nein" heisst.
+        self.horcher.frage_offen(True)
         try:
             for versuch in range(2):
                 # Der zweite Versuch wiederholt nicht, er erklaert: Wer
@@ -403,6 +416,7 @@ class Sarvis:
                 self.antwort = self.schleife.create_future()
         finally:
             self.antwort = None
+            self.horcher.frage_offen(False)
 
         # Zweimal kein Ja und kein Nein -- aber es wurde etwas gesagt.
         # Dann ist es eher ein neuer Auftrag als ein Missverstaendnis:
@@ -441,10 +455,19 @@ class Sarvis:
 
         was = self.freigaben.erteilen(werkzeug, eingabe, minuten)
         if not was:
+            # Kein Ort erkennbar, also keine Freigabe. Das muss gesagt
+            # werden: Wer "und frag nicht mehr nach" sagt, geht sonst
+            # davon aus, dass es gilt, und wundert sich beim naechsten
+            # Mal ueber dieselbe Frage. Hier stand ein nacktes return.
+            print(f"  ~ keine Freigabe erteilt ({werkzeug}: kein Ort erkennbar)")
+            await self._sagen(
+                "Diesmal mache ich es. Eine Dauerfreigabe lege ich dafür "
+                "nicht an — ich konnte nicht erkennen, worauf sie sich "
+                "beziehen soll."
+            )
             return
         print(f"  ~ Freigabe erteilt: {was}")
-        self.anzeige.freigabe(self.freigaben.kurz(),
-                              self.freigaben.rest_sekunden())
+        self.anzeige.freigabe(*self.freigaben.anzeige_stand())
         await self._sagen(f"Gut. {was} frage ich nicht mehr nach.")
 
     async def _antwort_hoeren(self) -> None:
@@ -452,6 +475,11 @@ class Sarvis:
         proben = self.aufnehmer.stop()
         dauer = len(proben) / config.ABTASTRATE
         if dauer < config.MIN_AUFNAHME_SEK:
+            # Der Parallelfall in _durchgang druckt hier, dieser nicht --
+            # wer die Taste nur antippt, sah 25 Sekunden lang gar nichts
+            # und suchte den Fehler beim Mikrofon. Die Future bleibt
+            # bewusst offen: Weiterwarten ist hier richtig.
+            print(f"  (Antwort nur {dauer:.2f}s -- verworfen, ich warte weiter)")
             self.anzeige.zustand(FRAGT)
             return
         self.anzeige.zustand(DENKT)
@@ -487,6 +515,7 @@ class Sarvis:
         alte Antwort hinterhergeschoben bekommt.
         """
         self.abgebrochen = True
+        self.durchgang += 1          # alles Aeltere ist ab jetzt ungueltig
         self.lautsprecher.abbrechen()
         if self.aufgabe is not None and not self.aufgabe.done():
             self.aufgabe.cancel()
@@ -495,6 +524,11 @@ class Sarvis:
             except (asyncio.CancelledError, Exception):
                 pass
         self.aufgabe = None
+        # Der letzte Satz war angemeldet, gesagt wird er nicht mehr -- also
+        # abmelden. Wurde das vergessen, blieb der Horcher auf "spricht"
+        # stehen und meldete keinen Pegel mehr an den Ring; die Anzeige
+        # zeigte danach nicht mehr, dass das Mikrofon gehoert wird.
+        self.horcher.spricht(None)
         await self.hirn.unterbrechen()
         self.arbeitet = False
         print("  (unterbrochen)")
@@ -591,6 +625,10 @@ class Sarvis:
         )
         self.anzeige.zustand(SPRICHT)
         self.anzeige.untertitel("sarvis", text)
+        # Der Horcher laeuft jetzt schon -- also den Satz anmelden, damit
+        # der Echo-Filter seine eigenen Worte kennt und er sich nicht
+        # selbst weckt.
+        self.horcher.spricht(text)
         try:
             proben, rate = self.mund.sprechen(text)
             if len(proben):
@@ -600,13 +638,19 @@ class Sarvis:
             print(f"  (Begruessung fehlgeschlagen: {e})")
         self.anzeige.zustand(RUHIG)
         self.anzeige.untertitel("sarvis", text)
+        self.horcher.spricht(None)
+        # Wer direkt nach dem Startsatz loslegt, meint ihn -- genauso wie
+        # nach jeder anderen Antwort. Ohne dieses Fenster muesste man dem
+        # Geraet, das sich gerade vorgestellt hat, mit "Hey Sarvis"
+        # antworten, und genau das hat bisher jeden Anlauf gekostet.
+        self.horcher.nachhoeren()
+        self.anzeige.nachhoeren(config.NACHHOEREN_SEK)
 
     async def _antworten(self, gesagt: str, t_los: float) -> None:
         # Die Freigabe-Anzeige bei jedem Zuruf nachziehen: Sie zaehlt
         # zwar von selbst herunter, aber die Minutenangabe stammt vom
         # Zeitpunkt der Erteilung und waere sonst bald falsch.
-        self.anzeige.freigabe(self.freigaben.kurz(),
-                              self.freigaben.rest_sekunden())
+        self.anzeige.freigabe(*self.freigaben.anzeige_stand())
         # "Hör auf" ist ein Befehl, keine Gespraechseroeffnung. Ginge er
         # ans Hirn, kaeme ein Lagebericht zurueck statt eines Abbruchs --
         # woertlich passiert: "Das Angular-Frontend wird gerade gebaut,
@@ -624,25 +668,48 @@ class Sarvis:
         erstes_wort: float | None = None
         ganze_antwort: list[str] = []
         gesprochen: list[str] = []
+        marke = self.durchgang       # woran dieser Durchgang haengt
 
         def vorlesen(satz: str) -> None:
             nonlocal erster_ton
-            if self.abgebrochen:
+            if self.abgebrochen or self.durchgang != marke:
                 return
             # Beim Reinreden bleibt das Ohr offen -- der Satz geht mit,
             # damit _eigen_echo seine eigene Stimme aussortieren kann.
             self.horcher.spricht(satz)
-            proben, rate = self.mund.sprechen(satz)
-            # Die Synthese laeuft in einem Faden und laesst sich nicht
-            # abbrechen -- also danach nochmal nachsehen, sonst rutscht der
-            # gerade fertige Satz nach dem Abbruch doch noch heraus.
-            if len(proben) and not self.abgebrochen:
-                if erster_ton is None:
-                    erster_ton = time.perf_counter()
-                    self.anzeige.zustand(SPRICHT)
-                gesprochen.append(satz)
-                self.anzeige.untertitel("sarvis", " ".join(gesprochen))
-                self.lautsprecher.sagen(proben, rate)
+            heraus = False
+            try:
+                proben, rate = self.mund.sprechen(satz)
+                # Die Synthese laeuft in einem Faden und laesst sich nicht
+                # abbrechen -- also danach nochmal nachsehen, sonst rutscht
+                # der gerade fertige Satz nach dem Abbruch doch noch heraus.
+                if (len(proben) and not self.abgebrochen
+                        and self.durchgang == marke):
+                    if erster_ton is None:
+                        erster_ton = time.perf_counter()
+                        self.anzeige.zustand(SPRICHT)
+                    gesprochen.append(satz)
+                    self.anzeige.untertitel("sarvis", " ".join(gesprochen))
+                    self.lautsprecher.sagen(proben, rate)
+                    heraus = True
+            finally:
+                # Wurde der Satz nicht gesagt, wird seine Anmeldung wieder
+                # zurueckgenommen. Sonst blieb der Horcher nach einem
+                # Abbruch auf "spricht" stehen -- das spricht(None) unten
+                # wird dann nie erreicht, und keiner der drei finally-
+                # Bloecke holt es nach. Der Horcher meldet in diesem
+                # Zustand keinen Mikrofonpegel mehr (weckwort._block), der
+                # Ring der Anzeige steht still, und nach jedem Not-Aus
+                # sieht es aus, als sei das Mikrofon tot. Gemessen: genau
+                # dieses Bild hat mehrfach Zeit gekostet.
+                #
+                # Bewusst am tatsaechlich Gesagten festgemacht und nicht an
+                # self.abgebrochen: Dieser Faden laeuft nach dem Abbruch
+                # weiter, und die Schleife setzt die Flagge inzwischen
+                # schon wieder auf False -- ein spaeter Blick darauf
+                # verpasste den Abbruch.
+                if not heraus:
+                    self.horcher.spricht(None)
 
         async for schnipsel in self.hirn.fragen(gesagt):
             if erstes_wort is None:
@@ -759,6 +826,18 @@ class Sarvis:
         print("  Warmlaufen ...")
         await asyncio.to_thread(self.ohren.aufwaermen)
         await asyncio.to_thread(self.mund.aufwaermen)
+
+        # Das Ohr geht VOR der Begruessung auf.
+        #
+        # Vorher stand horcher.start() ein Stueck weiter unten: Waehrend
+        # er sich vorstellte -- und in den Sekunden danach, in denen das
+        # VAD-Modell erst noch laedt -- lief kein einziger Mikrofonstrom.
+        # Wer direkt nach dem Startsatz losredete, wurde nicht ueberhoert,
+        # er wurde nie gehoert. Ein Zuruf aus dieser Zeit landet jetzt in
+        # der Schlange und wird abgeholt, sobald die Schleife unten steht.
+        if self.horcher.start():
+            print(f"  Weckwort aktiv: \"Hey {config.NAME.capitalize()}\"")
+
         await asyncio.to_thread(self._begruessen)
 
         # Timer, die den letzten Lauf ueberlebt haben, wieder scharf machen.
@@ -770,9 +849,6 @@ class Sarvis:
 
         # Erste Begruessung im Voraus erzeugen, solange noch nichts los ist.
         asyncio.create_task(self._gruss_vorbereiten())
-
-        if self.horcher.start():
-            print(f"  Weckwort aktiv: \"Hey {config.NAME.capitalize()}\"")
 
         # Eigener Lauscher fuer die Tastenkombination -- der Push-to-talk-
         # Lauscher sieht nur einzelne Tasten, keine Kombinationen.
@@ -808,6 +884,19 @@ class Sarvis:
                 if isinstance(befehl, tuple) and befehl[0] == "weckwort":
                     zuruf = befehl[1]
                     if antwortet:
+                        # "Hör auf" waehrend einer offenen Frage stoppte
+                        # bisher nichts: Der Satz ging als Antwort in die
+                        # Future, und ist_stopp wird nur in _antworten
+                        # gefragt -- laufende Hintergrundauftraege liefen
+                        # weiter. Ein klares Ja bleibt aber ein Ja:
+                        # "ja, hör auf zu fragen" ist eine Freigabe und
+                        # kein Not-Aus.
+                        if (rueckfrage.ist_stopp(zuruf)
+                                and rueckfrage.deuten(zuruf) != "ja"):
+                            if self.arbeitet or self.aufgabe is not None:
+                                await self._unterbrechen()
+                            await self._alles_stoppen()
+                            continue
                         self._antwort_geben(zuruf)
                         continue
                     if self.arbeitet or self.aufgabe is not None:
@@ -868,6 +957,13 @@ class Sarvis:
             melder.cancel()
             lauscher.stop()
             self.horcher.stopp()
+            # schliessen() gab es, aufgerufen hat es nie jemand -- die
+            # Telegram-Verbindung blieb beim Beenden offen stehen.
+            try:
+                from .werkzeuge import telegram
+                await asyncio.to_thread(telegram.schliessen)
+            except Exception as e:
+                print(f"  (Telegram-Verbindung nicht sauber getrennt: {e})")
             if schalter is not None:
                 schalter.stop()
             await self.hirn.stopp()

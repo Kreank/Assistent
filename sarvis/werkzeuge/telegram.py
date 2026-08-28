@@ -27,8 +27,16 @@ async def klient():
     """
     global _klient
     async with _schloss:
-        if _klient is not None and _klient.is_connected():
-            return _klient
+        if _klient is not None:
+            if _klient.is_connected():
+                return _klient
+            # Der alte Klient wurde frueher einfach ueberschrieben und hielt
+            # seine Netzwerk-Tasks weiter offen.
+            try:
+                await _klient.disconnect()
+            except Exception:
+                pass
+            _klient = None
         zugang = config.telegram_zugang()
         if not zugang or not config.TELEGRAM_SITZUNG.exists():
             return None
@@ -38,6 +46,13 @@ async def klient():
         _klient = TelegramClient(str(config.TELEGRAM_SITZUNG), api_id, api_hash)
         await _klient.connect()
         if not await _klient.is_user_authorized():
+            # Ist die Sitzung am Telefon widerrufen, laeuft jeder Aufruf
+            # hier durch; ohne disconnect bliebe jedes Mal eine Verbindung
+            # stehen.
+            try:
+                await _klient.disconnect()
+            except Exception:
+                pass
             _klient = None
         return _klient
 
@@ -69,6 +84,34 @@ def _passt(name: str, gesucht: str) -> int:
     if g in n:
         return 30
     return 0
+
+
+def _marke(n) -> str:
+    """Wofuer eine Nachricht ohne Text steht.
+
+    Die Anzahlgrenze wirkt beim Holen, der Textfilter erst danach: "lies
+    die letzten acht" ergab drei Zeilen, wenn fuenf davon Fotos waren --
+    ohne dass die Luecke sichtbar wurde. Vorlesen kann Sarvis ein Foto
+    nicht, aber sagen, dass eins da war.
+    """
+    # Reihenfolge zaehlt: Ein bewegter Sticker traegt auch das Merkmal
+    # Video, eine Sprachnachricht auch das Merkmal Dokument.
+    for merkmal, marke in (("sticker", "[Sticker]"),
+                           ("photo", "[Foto]"),
+                           ("voice", "[Sprachnachricht]"),
+                           ("video", "[Video]"),
+                           ("audio", "[Audio]"),
+                           ("geo", "[Standort]"),
+                           ("contact", "[Kontakt]"),
+                           ("poll", "[Umfrage]"),
+                           ("document", "[Datei]")):
+        if getattr(n, merkmal, None):
+            return marke
+    if getattr(n, "media", None):
+        return "[Anhang]"
+    if getattr(n, "action", None):
+        return "[Systemnachricht]"
+    return "[ohne Text]"
 
 
 async def _finden(k, gesucht: str, grenze: int = 200):
@@ -172,6 +215,16 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         # Mehrdeutigkeit ist hier kein Randfall, sondern der gefaehrlichste:
         # Eine Nachricht an den Falschen laesst sich nicht zurueckholen.
         beste = treffer[0][0]
+        # Ein einzelner schwacher Treffer galt frueher als eindeutig: "Ben"
+        # fand die Gruppe "Kollegen Benedikt" (Guete 50) und die Nachricht
+        # ging raus. Die Rueckfrage faengt das nicht auf, sie wird aus dem
+        # Rohargument gebaut, bevor hier aufgeloest wird. Ab 70 ist ein
+        # ganzes Wort des Chatnamens getroffen -- darunter wird geraten.
+        if beste < 70:
+            return {"content": [{"type": "text", "text":
+                    f"Der beste Treffer zu {an!r} ist "
+                    f"{treffer[0][1].name} — das ist geraten. Frag nach, "
+                    "wer gemeint ist. Nichts gesendet."}], "is_error": True}
         gleichauf = [d for g, d in treffer if g == beste]
         if len(gleichauf) > 1:
             namen = ", ".join(d.name for d in gleichauf[:5])
@@ -213,16 +266,17 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         anzahl = int(args.get("anzahl") or 8)
         zeilen = []
         async for n in k.iter_messages(ziel.entity, limit=anzahl):
-            if not n.text:
-                continue
             wer = "Du" if n.out else ziel.name
-            zeilen.append(f"[{n.date.astimezone():%d.%m. %H:%M}] {wer}: {n.text}")
+            inhalt = n.text or _marke(n)
+            zeilen.append(f"[{n.date.astimezone():%d.%m. %H:%M}] {wer}: {inhalt}")
         blinken()
         if not zeilen:
             return {"content": [{"type": "text", "text":
-                    f"In {ziel.name} steht nichts Lesbares."}]}
+                    f"In {ziel.name} steht nichts."}]}
+        # reversed() ordnet aufsteigend -- so liest man einen Chat. Der Kopf
+        # behauptete dazu das Gegenteil.
         return {"content": [{"type": "text", "text":
-                f"Chat mit {ziel.name}, neueste zuerst:\n"
+                f"Chat mit {ziel.name}, älteste zuerst:\n"
                 + "\n".join(reversed(zeilen))}]}
 
     @tool(

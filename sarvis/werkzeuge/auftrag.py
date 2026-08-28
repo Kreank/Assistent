@@ -167,6 +167,11 @@ class Auftrag:
     # fortsetzbar, weil die Kennung erst am Ende zurueckkaeme.
     sitzung: str = ""
     zuletzt_gesehen: str = ""      # ISO-Zeit des letzten Lebenszeichens
+    # Der Zweig, von dem abgespalten wurde. Gemessen: Beide Projekte
+    # unter D:/Projekte heissen ihren Basiszweig "master", stand() hat
+    # aber gegen "main" verglichen -- git brach mit "ambiguous argument"
+    # ab und jeder unterbrochene Auftrag meldete "noch kein Commit".
+    basis: str = ""
 
     def dauer(self) -> int:
         ende = self.beendet or datetime.now()
@@ -302,6 +307,7 @@ class Werkstatt:
                 continue
             a.sitzung = str(e.get("sitzung") or "")
             a.zuletzt_gesehen = str(e.get("zuletzt_gesehen") or "")
+            a.basis = str(e.get("basis") or "")
             if a.status == "läuft":
                 a.status = "unterbrochen"
                 a.beendet = a.beendet or datetime.now()
@@ -334,7 +340,8 @@ class Werkstatt:
                 continue
             e = stand.setdefault(nummer, {"nummer": nummer, "status": "läuft"})
             for feld in ("projekt", "was", "zweig", "ordner", "sitzung",
-                         "begonnen", "beendet", "status", "zuletzt_gesehen"):
+                         "begonnen", "beendet", "status", "zuletzt_gesehen",
+                         "basis"):
                 if z.get(feld):
                     e[feld] = z[feld]
             if z.get("ereignis") == "beendet":
@@ -387,14 +394,30 @@ class Werkstatt:
                 # nach draussen. Ohne diese Sperre koennte er die .env mit
                 # den Telegram-Zugangsdaten oeffnen. Fehlt der Pfad, meint
                 # das Werkzeug ohnehin den Projektordner.
-                ziel = (eingabe.get("file_path") or eingabe.get("path")
-                        or eingabe.get("pattern") or "")
-                if ziel and Path(str(ziel)).is_absolute() \
-                        and not innerhalb(str(ziel)):
-                    return PermissionResultDeny(
-                        message="Außerhalb des Projektordners wird nichts "
-                                "gelesen."
-                    )
+                #
+                # Geprueft wurde hier frueher nur, wenn der Pfad absolut
+                # war. Der Arbeiter laeuft aber mit cwd = Projektordner:
+                # Grep(path="../..") oder Glob(pattern="../../**/.env")
+                # sind relativ, die Bedingung fiel komplett aus, und die
+                # .env stand im Kontext. innerhalb() loest Relatives seit
+                # jeher gegen die Wurzel auf -- der Schreibzweig darueber
+                # benutzt genau das. Und geprueft wird jedes Ortsfeld
+                # einzeln: in der alten or-Kette gewann immer das erste
+                # gesetzte, ein harmloses path="." deckte also ein
+                # glob="../../**" zu.
+                if name == "Grep":
+                    felder = ("path", "glob")      # pattern ist ein Regex
+                elif name == "Glob":
+                    felder = ("path", "pattern")
+                else:
+                    felder = ("file_path", "path")
+                for feld in felder:
+                    ziel = str(eingabe.get(feld) or "")
+                    if ziel and not innerhalb(ziel):
+                        return PermissionResultDeny(
+                            message="Außerhalb des Projektordners wird nichts "
+                                    "gelesen."
+                        )
                 return PermissionResultAllow()
 
             if name == "Bash":
@@ -433,6 +456,20 @@ class Werkstatt:
         self._naechste += 1
         zweig = f"sarvis/{nummer}-{re.sub(r'[^a-z0-9]+', '-', was.lower())[:28].strip('-')}"
 
+        # Woher abgespalten wird, weiss nur dieser Moment: Nach dem
+        # checkout -b ist HEAD der neue Zweig. Ohne diese Zeile musste
+        # stand() den Basiszweig spaeter raten -- und riet "main", waehrend
+        # die echten Projekte "master" heissen.
+        basis = ""
+        try:
+            fertig = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                    cwd=ordner, capture_output=True, text=True,
+                                    timeout=10)
+            if fertig.returncode == 0 and fertig.stdout.strip() != "HEAD":
+                basis = fertig.stdout.strip()   # "HEAD": abgeloester Kopf
+        except (OSError, subprocess.SubprocessError):
+            pass
+
         try:
             subprocess.run(["git", "checkout", "-q", "-b", zweig], cwd=ordner,
                            check=True, capture_output=True, timeout=30)
@@ -445,11 +482,12 @@ class Werkstatt:
         # ausgerechnet der abgebrochene Auftrag der einzige ohne Kennung
         # -- also der einzige, den man nicht fortsetzen kann.
         auftrag = Auftrag(nummer=nummer, projekt=ordner.name, was=was,
-                          zweig=zweig, ordner=ordner,
+                          zweig=zweig, ordner=ordner, basis=basis,
                           sitzung=str(uuid.uuid4()))
         self.auftraege[nummer] = auftrag
         journal(nummer, "gestartet", projekt=ordner.name, was=was,
                 zweig=zweig, ordner=str(ordner), sitzung=auftrag.sitzung,
+                basis=basis,
                 begonnen=auftrag.begonnen.isoformat(timespec="seconds"))
         self._sichern()          # erst festhalten, dann loslaufen
         auftrag.aufgabe = asyncio.get_running_loop().create_task(
@@ -464,17 +502,34 @@ class Werkstatt:
         eine Tatsache. Deshalb wird hier nachgesehen und nicht geraten.
         """
         def git(*args):
+            """None heisst "git hat nicht geantwortet", "" heisst "nichts".
+
+            Frueher war beides "" -- ein Fehlschlag sah aus wie ein leeres
+            Ergebnis, und genau das kam hier vor.
+            """
             try:
                 e = subprocess.run(["git", *args], cwd=auftrag.ordner,
                                    capture_output=True, text=True, timeout=10)
-                return e.stdout.strip() if e.returncode == 0 else ""
+                return e.stdout.strip() if e.returncode == 0 else None
             except (OSError, subprocess.SubprocessError):
-                return ""
-        commits = [z for z in git("log", auftrag.zweig, "--not", "main",
-                                  "--oneline").splitlines() if z.strip()]
-        offen = [z for z in git("status", "--porcelain").splitlines() if z.strip()]
+                return None
+
+        basis = auftrag.basis
+        if not basis:
+            # Auftraege von vor dem basis-Feld: nachsehen statt raten.
+            for kandidat in ("master", "main"):
+                if git("rev-parse", "--verify", "-q", kandidat) is not None:
+                    basis = kandidat
+                    break
+        protokoll = git("log", auftrag.zweig, "--not", basis or "HEAD",
+                        "--oneline")
+        commits = [z for z in (protokoll or "").splitlines() if z.strip()]
+        offen = [z for z in (git("status", "--porcelain") or "").splitlines()
+                 if z.strip()]
         teile = []
-        if commits:
+        if protokoll is None:
+            teile.append("wie weit er kam, konnte ich nicht ermitteln")
+        elif commits:
             teile.append(f"{len(commits)} Commits, zuletzt: {commits[0][:60]}")
         else:
             teile.append("noch kein Commit")
@@ -552,6 +607,15 @@ class Werkstatt:
             auftrag.status = "fertig"
         except asyncio.CancelledError:
             auftrag.status = "abgebrochen"
+            # Hier und nicht ueber _melden: Das 'raise' beendet die
+            # Aufgabe, die Zeile hinter dem finally wird nie erreicht --
+            # und ein 'await' in einer gecancelten Aufgabe bricht sofort
+            # wieder ab. Nur die Benachrichtigung, keine Ansage: Nach
+            # einem "Stopp" will niemand noch etwas hoeren, aber der
+            # Zweigname soll nachlesbar stehenbleiben.
+            if self.melden is not None:
+                self.melden("Auftrag abgebrochen",
+                            f"Zweig {auftrag.zweig} · Stand in bericht.md")
             raise
         except Exception as e:
             auftrag.status = "fehler"
@@ -641,6 +705,7 @@ class Werkstatt:
                 {"nummer": a.nummer, "projekt": a.projekt, "was": a.was,
                  "zweig": a.zweig, "status": a.status,
                  "ordner": str(a.ordner),
+                 "basis": a.basis,
                  "sitzung": a.sitzung,
                  "zuletzt_gesehen": a.zuletzt_gesehen,
                  "begonnen": a.begonnen.isoformat(),
@@ -764,7 +829,12 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         if a is None:
             return {"content": [{"type": "text", "text": fehler}],
                     "is_error": True}
-        blinken()
+        # Hier stand blinken() -- eine Funktion, die es in diesem Modul
+        # nie gab. Der NameError traf JEDEN Aufruf, und zwar NACH dem
+        # Neustart des Arbeiters: Sarvis meldete "hat nicht geklappt",
+        # waehrend der Arbeiter im Hintergrund schon weiterschrieb.
+        if leuchten:
+            leuchten("Aufträge")
         vermerken(f"auftrag_fortsetzen: Auftrag {a.nummer} läuft weiter.")
         return {"content": [{"type": "text", "text":
                 f"Auftrag {a.nummer} läuft weiter, auf Zweig {a.zweig}. "

@@ -72,6 +72,10 @@ class Hirn:
         # nicht mehr"). Siehe freigabe.py.
         self.freigaben = freigaben
         self._offen = False  # laeuft gerade eine Antwortrunde?
+        # Ein Abbruch, dessen Leerlesen nicht durchkam: In der Leitung
+        # koennen Reste der alten Runde liegen. Der naechste Zuruf raeumt
+        # sie kurz nach, statt die alte Antwort auf die neue Frage zu sagen.
+        self._leitung_unsauber = False
         self.protokoll = protokoll   # was in diesem Zug schon wirkte
         self._nachtrag = ""          # Hinweis fuer den naechsten Zuruf
         # Liefert eine Zeile mit dem, was gerade laeuft (Arbeitsgedaechtnis)
@@ -153,9 +157,18 @@ class Hirn:
         # Glob liefert nur Namen, keine Inhalte -- das ist eine mildere
         # Stufe. Sonst muesste Sarvis fuer jeden Blick um Erlaubnis
         # fragen und behauptet stattdessen ins Blaue, etwas gebe es nicht.
+        # Geprueft wurde nur "path" -- Glob traegt sein Ziel aber im
+        # Pflichtfeld "pattern", "path" ist optional. Gemessen: mit
+        # {"pattern": "D:/Strato Server/**/*"} war der Pfad leer,
+        # auflisten_stufe("") heisst "frei", und die Dateinamen des
+        # Passwortordners gingen ohne eine Rueckfrage ans Modell.
         if werkzeug == "Glob":
-            return (schutz.auflisten_stufe(pfad), "ordner_ansehen",
-                    {"pfad": pfad})
+            muster = str(e.get("pattern") or "")
+            ziel = pfad or muster
+            stufe = schutz.auflisten_stufe(ziel)
+            if stufe == "frei" and schutz.heikler_ort_beruehrt(pfad, muster):
+                stufe = "fragen"
+            return stufe, "ordner_ansehen", {"pfad": ziel}
 
         # Grep durchsucht einen ganzen Baum. Das ist etwas anderes als
         # eine Datei zu lesen: Beim Lesen sieht die Pruefung vorher in
@@ -324,20 +337,35 @@ class Hirn:
         # Wer beim Abbruch noch lief, ist mit abgebrochen worden.
         self._arbeiter_verloren()
 
-        if self.protokoll is not None:
-            self._nachtrag = self.protokoll.nachtrag()
-
-        if not self._offen:
-            return
         try:
-            async with asyncio.timeout(10):
-                async for nachricht in self.klient.receive_response():
-                    if isinstance(nachricht, ResultMessage):
-                        break
-        except (TimeoutError, asyncio.TimeoutError, Exception):
-            pass
+            if self._offen:
+                try:
+                    async with asyncio.timeout(10):
+                        async for nachricht in self.klient.receive_response():
+                            if isinstance(nachricht, ResultMessage):
+                                break
+                except (TimeoutError, asyncio.TimeoutError):
+                    # Stumm geschluckt sah das hinterher aus wie sauber
+                    # leergeraeumt. Wenn die Runde nicht leer wird, liegen
+                    # ihre Nachrichten noch in der Leitung -- das gehoert
+                    # gesagt, und die naechste Runde raeumt kurz nach.
+                    self._leitung_unsauber = True
+                    print("  (Abbruch: Runde nicht in 10 s leergelesen -- die "
+                          "nächste Antwort kann Reste enthalten)")
+                except Exception as fehler:
+                    self._leitung_unsauber = True
+                    print(f"  (Abbruch: Leerlesen fehlgeschlagen -- {fehler})")
+                finally:
+                    self._offen = False
         finally:
-            self._offen = False
+            # ERST jetzt der Schnappschuss: Ein Werkzeug mit Netzverkehr --
+            # finanzen_buchen, telegram_senden, mail_senden -- kann waehrend
+            # des Leerlesens noch fertig werden und vermerkt danach. Vor dem
+            # Leerlesen gezogen, fehlte genau dieser Eintrag im Nachtrag und
+            # wurde beim naechsten Zuruf von leeren() weggeraeumt: Sarvis
+            # wusste nichts von der Buchung und legte eine zweite an.
+            if self.protokoll is not None:
+                self._nachtrag = self.protokoll.nachtrag()
 
     async def stopp(self) -> None:
         # Beenden darf nie das Beenden verhindern: doppelte Aufrufe und ein
@@ -358,6 +386,10 @@ class Hirn:
 
         # Wurde in diesem Zug schon ein Wartesatz vorgeschoben?
         gewartet = False
+        # Hat der Notnagel schon geredet? TextBlock und ToolUseBlock
+        # koennen in DERSELBEN Nachricht stehen -- ohne diese Marke kaeme
+        # der Wartesatz hinter einem gerade gesprochenen Satz hinterher.
+        gesagt_ohne_strom = False
 
         vorspann = jetzt_zeile()
         # Was gerade laeuft, geht bei JEDEM Zuruf mit. Das ist Arbeits-
@@ -384,6 +416,20 @@ class Hirn:
         if self.protokoll is not None:
             self.protokoll.leeren()
 
+        # Zweiter Anlauf fuer eine Leitung, die beim letzten Abbruch nicht
+        # leer wurde. Kostet im Normalfall nichts -- die Flagge steht nur
+        # nach einem gerissenen Leerlesen. Meist ist die alte Runde
+        # inzwischen laengst fertig und die Reste liegen sofort bereit.
+        if self._leitung_unsauber:
+            self._leitung_unsauber = False
+            try:
+                async with asyncio.timeout(2):
+                    async for nachricht in self.klient.receive_response():
+                        if isinstance(nachricht, ResultMessage):
+                            break
+            except Exception:
+                pass
+
         self._offen = True
         await self.klient.query(vorspann + "\n" + text)
         async for nachricht in self.klient.receive_response():
@@ -405,15 +451,24 @@ class Hirn:
                     if delta.get("type") == "text_delta" and delta.get("text"):
                         gestroemt = True
                         yield delta["text"]
-            elif isinstance(nachricht, AssistantMessage) and not gestroemt:
-                # Notnagel, falls die Teilnachrichten ausbleiben.
-                for block in nachricht.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        yield block.text
             elif isinstance(nachricht, AssistantMessage):
+                # Ein einziger Zweig, und zwar mit Absicht: Vorher stand
+                # hier "elif ... and not gestroemt" und darunter ein
+                # zweites elif fuer den Kranz. Der Fall, fuer den der
+                # zweite gebaut war -- Werkzeug laeuft, gesagt wurde noch
+                # nichts --, wurde damit vom ersten verschluckt. Der
+                # Wartesatz konnte nie fallen und der Kranzpunkt blieb
+                # genau dann dunkel, wenn er das Einzige gewesen waere,
+                # was ueberhaupt etwas zeigt.
                 # Eingebaute Werkzeuge melden sich nicht selbst im Kranz --
                 # die eigenen tun das in ihrem Code, hier fehlen nur die.
                 for block in nachricht.content:
+                    # Notnagel, falls die Teilnachrichten ausbleiben.
+                    if isinstance(block, TextBlock) and block.text:
+                        if not gestroemt:
+                            gesagt_ohne_strom = True
+                            yield block.text
+                        continue
                     name = getattr(block, "name", "")
                     punkt = self.KRANZ.get(name)
                     if punkt and self.leuchten:
@@ -425,7 +480,8 @@ class Hirn:
                     # durch den Satzsammler in den Mund -- und ist damit
                     # gesprochen, BEVOR das Werkzeug antwortet. Genau das
                     # war der Punkt.
-                    if (not gestroemt and not gewartet
+                    if (not gestroemt and not gesagt_ohne_strom
+                            and not gewartet
                             and name in config.LANGSAME_WERKZEUGE):
                         gewartet = True
                         yield random.choice(config.WARTESAETZE) + " "

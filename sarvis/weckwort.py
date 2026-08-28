@@ -18,6 +18,7 @@ einfach.
 
 Solange niemand spricht, rechnet nur der VAD. Whisper rührt sich nicht.
 """
+import queue
 import re
 import threading
 import time
@@ -26,13 +27,27 @@ from difflib import SequenceMatcher
 import numpy as np
 import sounddevice as sd
 
-from . import config, rueckfrage
+from . import audio, config, rueckfrage
+from .anzeige import DENKT, FRAGT, RUHIG
 
 # Silero rechnet in Rahmen von 480 Abtastwerten (30 ms bei 16 kHz).
 # Eine andere Blockgroesse laesst einen Rest uebrig, der die Vorhersage
 # verfaelscht.
 BLOCK = 480
 RATE = 16000
+# Wie viele ungelesene Bloecke sich hoechstens stauen duerfen, bevor
+# Aeltestes wegfaellt: 200 * 30 ms = 6 Sekunden. Der Rueckstand entsteht
+# durch Whisper und ist gemessen rund 0,13 s -- der Deckel ist reine
+# Vorsorge gegen einen Faden, der wirklich haengt. Ohne ihn waechst die
+# Schlange still weiter, und der Horcher hoert immer weiter in der
+# Vergangenheit zu, ohne dass jemand es merkt.
+MAX_RUECKSTAND = 200
+
+# Wie oft eine Stoermeldung hoechstens wiederholt wird. Einmalig waere zu
+# wenig: Faellt der VAD dauerhaft aus, hoert der Horcher auf zu reagieren,
+# ohne abzustuerzen -- und eine einzelne Zeile von vor einer Stunde findet
+# niemand mehr. Jeden Block zu melden waere 33-mal je Sekunde.
+MECKER_PAUSE = 30.0
 
 
 def _sauber(text: str) -> str:
@@ -155,11 +170,20 @@ class Horcher:
         # ist Satz 3 schon gebaut. Ein Filter, der nur den neuesten kennt,
         # vergliche gegen etwas, das noch gar nicht zu hoeren war.
         self._eigene_saetze: list = []
+        # Bis wann die noch zum Vergleich taugen, nachdem er fertig ist.
+        self._eigen_bis = 0.0
         self._puffer: list[np.ndarray] = []
         self._redet = False
         self._stille = 0.0
         self._begonnen = 0.0
         self._nachhoeren_bis = 0.0   # bis wann ohne Weckwort
+        # Sagt er gerade selbst etwas? Dann speist der Lautsprecher den
+        # Ring, und der Horcher haelt sich still -- sonst kaempfen zwei
+        # Quellen um denselben Ausschlag.
+        self._spricht_gerade = False
+        self._diktat = False      # dieser Abschnitt laeuft als Diktat
+        self._frage_offen = False  # er hat gefragt und wartet auf Antwort
+        self._gemeckert: dict[str, float] = {}   # wann welche Stoerung zuletzt
 
     # --- Steuerung ---------------------------------------------------------
 
@@ -187,13 +211,22 @@ class Horcher:
         Ohne REINREDEN ist das schlicht pause(): Ohr zu, solange er redet.
         Mit REINREDEN bleibt es offen, damit man ihn unterbrechen kann.
         """
+        self._spricht_gerade = text is not None
+        if self._spricht_gerade:
+            self._melden(0.0)   # ab hier gehoert der Ring seiner Stimme
         if not config.REINREDEN:
             self.pause(text is not None)
             return
         if text is None:
-            self._eigene_saetze = []
+            # Nicht loeschen, nur ablaufen lassen. Sein Echo steckt beim
+            # letzten Satz noch im Puffer und wird erst 0,55 bis 1,4 s
+            # spaeter ausgewertet -- wer hier sofort leert, hat beim
+            # Vergleich nichts mehr in der Hand, und die eigene Stimme
+            # lief als Zuruf durch. pause(False) raeumt den Puffer nicht ab.
+            self._eigen_bis = time.perf_counter() + config.DIKTAT_STILLE_SEK
             self.pause(False)
             return
+        self._eigen_bis = 0.0
         self._eigene_saetze.append(_worte(text))
         del self._eigene_saetze[:-3]
         # Waehrend er redet, zaehlt jeder Satz als Antwort. Mitten in
@@ -207,7 +240,7 @@ class Horcher:
             self.pausiert = False
             self._verwerfen()
 
-    def _eigen_echo(self, text: str) -> bool:
+    def _eigen_echo(self, text: str, begonnen: float = 0.0) -> bool:
         """Kommt da seine eigene Stimme durchs Mikrofon zurueck?
 
         Mit Kopfhoerern ist das wenig, aber nicht nichts. Was zurueck-
@@ -217,7 +250,14 @@ class Horcher:
         Kurzes bleibt ungeprueft. Sonst verschluckt der Filter ein "nein",
         das zufaellig auch in seinem Satz vorkommt -- und ausgerechnet das
         kurze Dazwischenrufen ist der Fall, um den es hier geht.
+
+        Gezaehlt wird gegen den ANFANG der Aufnahme, nicht gegen jetzt:
+        Zwischen dem letzten Ton und dieser Frage liegt noch Whisper, und
+        wie lange der rechnet, haengt an der Laenge des Stuecks.
         """
+        if self._eigen_bis and begonnen > self._eigen_bis:
+            self._eigene_saetze = []
+            self._eigen_bis = 0.0
         if not self._eigene_saetze:
             return False
         w = _worte(text)
@@ -237,14 +277,40 @@ class Horcher:
         """
         self.pausiert = an
         if an:
+            self._melden(0.0)
             self._verwerfen()
 
     # --- Ablauf -------------------------------------------------------------
+
+    def _melden(self, wert: float) -> None:
+        """Ausschlag an die Anzeige -- damit man SIEHT, dass er zuhoert.
+
+        Bisher meldete nur die Tastenaufnahme ihren Pegel. Beim Weckwort
+        und im Nachhoerfenster stand der Ring still, egal wie laut man
+        redete. Das sieht aus wie ein totes Mikrofon, und genau so wurde
+        es gelesen: Man redet, nichts passiert, man faengt von vorn an.
+        """
+        if self.anzeige is not None:
+            self.anzeige.pegel(wert)
+
+    def _meckern(self, was: str, text: str) -> None:
+        """Eine Stoerung melden, ohne die Konsole zuzuschuetten.
+
+        Der Horcher laeuft 33-mal je Sekunde. Was hier schiefgeht, geht
+        deshalb entweder einmal schief oder tausendmal -- gedrosselt
+        gemeldet sieht man beides.
+        """
+        jetzt = time.perf_counter()
+        if jetzt - self._gemeckert.get(was, -MECKER_PAUSE * 2) < MECKER_PAUSE:
+            return
+        self._gemeckert[was] = jetzt
+        print(text)
 
     def _verwerfen(self):
         self._puffer = []
         self._redet = False
         self._stille = 0.0
+        self._diktat = False
         # Silero ist ein Netz mit Gedaechtnis. Ohne Ruecksetzen bleibt es
         # nach einem laengeren Abschnitt auf "Sprache" haengen und meldet
         # 0.91, obwohl der Pegel bei null liegt -- gemessen. Der Abschnitt
@@ -256,15 +322,67 @@ class Horcher:
                 pass
 
     def _schleife(self):
+        """Mikrofon lesen und verstehen -- getrennt, in zwei Faeden.
+
+        Vorher lag beides in dieser Schleife: strom.read() holte einen
+        Block, und derselbe Faden lief weiter bis in Whisper hinein.
+        Solange das rechnete, rief niemand read(), der Geraetepuffer lief
+        ueber, und das Gehoerte fehlte danach einfach. Gemessen auf der
+        3080 mit echter Sprache: 0,114 s bei einem kurzen Zuruf bis
+        0,150 s bei einem langen Satz -- knapp fuenf Bloecke, also rund
+        eine Silbe. Genug, um einem "Hey Sarvis" den Anfang zu nehmen,
+        wenn kurz davor ein Rascheln geprueft wurde.
+        (Die frueher hier stehende Meldung sprach von "Sekunden verloren"
+        -- das war um eine Groessenordnung zu hoch gegriffen.)
+
+        Jetzt fuellt der Audio-Faden von PortAudio nur noch eine
+        Warteschlange. Whisper darf blockieren, so lange es will: Die
+        Bloecke stauen sich und werden danach nachgeholt, statt zu
+        verschwinden. Am Zustand des Horchers aendert das nichts -- der
+        wird weiterhin ausschliesslich hier angefasst.
+        """
+        eingang: queue.Queue = queue.Queue()
+        uebergelaufen = threading.Event()
+
+        def herein(daten, rahmen, zeit, status):
+            # Laeuft im Audio-Faden. Hier wird NICHTS gerechnet und
+            # nichts gedruckt -- was hier aufhaelt, reisst genau das
+            # Loch, das diese Schleife gerade beseitigt.
+            if status:
+                uebergelaufen.set()
+            eingang.put(daten[:, 0].copy())
+
         try:
             with sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
-                                blocksize=BLOCK) as strom:
+                                blocksize=BLOCK, callback=herein) as strom:
                 self._strom = strom
                 while self._laeuft:
-                    block, _ = strom.read(BLOCK)
+                    try:
+                        block = eingang.get(timeout=0.5)
+                    except queue.Empty:
+                        continue   # nur nachsehen, ob wir noch laufen
+                    if uebergelaufen.is_set():
+                        uebergelaufen.clear()
+                        self._meckern(
+                            "ueberlauf",
+                            "  (Mikro meldet einen Aussetzer -- ein Stueck "
+                            "Aufnahme fehlt)"
+                        )
+                    rueckstand = eingang.qsize()
+                    if rueckstand > MAX_RUECKSTAND:
+                        while eingang.qsize() > MAX_RUECKSTAND // 2:
+                            try:
+                                eingang.get_nowait()
+                            except queue.Empty:
+                                break
+                        self._meckern(
+                            "rueckstand",
+                            f"  (Horcher kommt nicht nach: {rueckstand} "
+                            "Bloecke im Rueckstand, Aelteres verworfen)"
+                        )
                     if self.pausiert:
                         continue
-                    self._block(block[:, 0].copy())
+                    self._block(block)
         except Exception as e:
             print(f"  (Weckwort-Horcher beendet: {e})")
 
@@ -277,14 +395,24 @@ class Horcher:
             # dieser Fehler liess den Horcher stumm bleiben.
             pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)
             wahrscheinlich = float(self.vad.predict(pcm, frame_size=BLOCK))
-        except Exception:
-            return
+        except Exception as e:
+            # Frueher stand hier 'return'. Damit blieb bei einem Dauer-
+            # fehler _redet auf True stehen, _pruefen() wurde nie wieder
+            # erreicht, und der Horcher war dauerhaft taub -- ohne
+            # Absturz und ohne eine einzige Zeile. Als "keine Sprache"
+            # gewertet laeuft ein angefangener Abschnitt normal aus.
+            wahrscheinlich = 0.0
+            self._meckern("vad", f"  (VAD stolperte — {e})")
 
         # Zweite Meinung: der Pegel. Der VAD allein meldete 0.91 bei
         # leerem Pegelbalken -- wer nichts hoert, redet auch nicht.
         pegel = float(np.sqrt(np.mean(np.square(block, dtype=np.float64))))
         spricht = (wahrscheinlich >= config.VAD_SCHWELLE
                    and pegel >= config.WECKWORT_MIN_PEGEL)
+
+        # Solange er nicht selbst redet, gehoert der Ring dem Mikrofon.
+        if not self._spricht_gerade:
+            self._melden(audio.pegel(block))
 
         if spricht:
             if not self._redet:
@@ -293,7 +421,7 @@ class Horcher:
             self._stille = 0.0
             self._puffer.append(block)
             # Notbremse: wer minutenlang redet, meint nicht uns.
-            if jetzt - self._begonnen > config.WECKWORT_MAX_SEK:
+            if jetzt - self._begonnen > self._deckel():
                 self._pruefen()
             return
 
@@ -306,6 +434,22 @@ class Horcher:
         if self._stille >= self._stille_grenze():
             self._pruefen()
 
+    def _deckel(self) -> float:
+        """Wie lange ein Abschnitt hoechstens dauern darf.
+
+        Zwei Werte, weil es zwei Faelle sind. Ein laufender Fernseher soll
+        den Puffer nicht endlos fuellen -- der wird nach WECKWORT_MAX_SEK
+        abgeraeumt. Wer dagegen im offenen Fenster angefangen hat, redet
+        mit ihm und darf dabei ausholen.
+
+        Vorher galt ein Deckel fuer beide. Nach dreissig Sekunden wurde
+        geprueft, das Nachhoerfenster war da laengst zu, und die ganze
+        Rede verschwand ohne ein Wort Antwort.
+        """
+        if self.hoert_nach(self._begonnen):
+            return config.WECKWORT_MAX_ANGESPROCHEN_SEK
+        return config.WECKWORT_MAX_SEK
+
     def _stille_grenze(self) -> float:
         """Wie lange Stille diesen Satz beendet -- je nachdem, wie lange
         schon gesprochen wird.
@@ -315,6 +459,21 @@ class Horcher:
         dazwischen Pausen -- und wurde bisher jedes Mal unterbrochen.
         """
         gesprochen = sum(len(b) for b in self._puffer) / RATE
+        # Dritte Stufe: Wer eine halbe Minute am Stueck spricht, ruft
+        # nichts mehr zu -- der diktiert. Und wer diktiert, denkt
+        # zwischendurch nach. Zwei Sekunden Schweigen sind da kein
+        # Satzende, sondern eine Formulierung, die noch nicht steht.
+        #
+        # Bewusst ohne Kommandowort. "Sarvis, ich diktiere dir jetzt
+        # etwas" sagt kein Mensch; man faengt einfach an zu reden. Die
+        # Laenge der Rede ist das Signal, nicht eine Ansage darueber.
+        if gesprochen >= config.DIKTAT_AB_SEK:
+            if not self._diktat:
+                self._diktat = True
+                print(f"  (Diktat: seit {gesprochen:.0f}s am Stueck -- "
+                      f"er wartet jetzt {config.DIKTAT_STILLE_SEK:.0f}s "
+                      f"Stille ab, statt dir ins Wort zu fallen)")
+            return config.DIKTAT_STILLE_SEK
         if gesprochen >= config.WECKWORT_LANG_AB_SEK:
             return config.WECKWORT_STILLE_LANG_SEK
         return config.WECKWORT_STILLE_SEK
@@ -322,26 +481,52 @@ class Horcher:
     def _pruefen(self) -> None:
         stueck = self._puffer
         dauer = sum(len(b) for b in stueck) / RATE
+        # Wann dieser Abschnitt BEGANN -- nicht, wann er endet. Daran
+        # haengt unten, ob das Nachhoerfenster offen war.
+        begonnen = self._begonnen
         self._verwerfen()
         if dauer < config.WECKWORT_MIN_SEK:
             return
 
-        audio = np.concatenate(stueck)
+        # Ueber ein langes Stueck rechnet Whisper spuerbar -- zwei Minuten
+        # Diktat sind auch auf der Karte keine Millisekunden. Ohne Anzeige
+        # steht der Ring in dieser Zeit still, und das sieht genau aus wie
+        # ein Mikrofon, das gar nichts gehoert hat. Genau der Eindruck,
+        # der einen dazu bringt, noch mal von vorn anzufangen.
+        zeigt = (dauer >= config.WECKWORT_LANG_AB_SEK
+                 and self.anzeige is not None
+                 and not self._spricht_gerade)
+        if zeigt:
+            self.anzeige.zustand(DENKT)
+        geweckt = False
+        try:
+            geweckt = self._deuten(stueck, begonnen)
+        finally:
+            # Wurde geweckt, fuehrt die Schleife die Anzeige weiter. Sonst
+            # zurueck -- aber wohin? Steht eine Rueckfrage offen, gehoert
+            # der Ring ihr: Einfach auf RUHIG zu setzen loeschte das
+            # "wartet auf dich", waehrend er tatsaechlich weiter wartete.
+            if zeigt and not geweckt:
+                self.anzeige.zustand(FRAGT if self._frage_offen else RUHIG)
+
+    def _deuten(self, stueck: list, begonnen: float) -> bool:
+        """Was war das? True, wenn daraus ein Zuruf wurde."""
+        aufnahme = np.concatenate(stueck)
         try:
             # Der Name als Hinweis -- hier zaehlt er am meisten.
             text = self.ohren.hoeren(
-                audio, hinweise=f"Hey {config.NAME.capitalize()}"
+                aufnahme, hinweise=f"Hey {config.NAME.capitalize()}"
             )
         except Exception as e:
             print(f"  (Weckwort: Whisper stolperte — {e})")
-            return
+            return False
         if not text:
-            return
+            return False
         if _halluziniert(text) or _dreht_sich_im_kreis(text):
             print(f"  (Whisper-Halluzination verworfen: {text!r})")
-            return
-        if self._eigen_echo(text):
-            return
+            return False
+        if self._eigen_echo(text, begonnen):
+            return False
 
         zuruf = erkennen(text)
         wie = "Weckwort"
@@ -351,8 +536,16 @@ class Horcher:
             # Fortsetzung -- dann waere ein erneutes "Hey Sarvis" albern.
             # Er fragt ja selbst, wie er dienen kann; die Antwort darauf
             # zu verwerfen war der Fehler.
-            if not self.hoert_nach():
-                return
+            # Entscheidend ist der ANFANG des Satzes, nicht sein Ende.
+            # Hier stand die aktuelle Uhrzeit: Wer im offenen Fenster
+            # loslegte und laenger sprach, als das Fenster dauert, fiel
+            # genau in dem Moment heraus, in dem er fertig war. Gemessen
+            # an einer Rede von 35 Sekunden bei 18 Sekunden Fenster --
+            # verworfen, stumm, ohne eine Zeile in der Konsole.
+            if not self.hoert_nach(begonnen):
+                if len(text.split()) >= 2:
+                    print(f"  (kein Weckwort, Fenster war zu: {text!r})")
+                return False
             # Im Nachhoerfenster genuegt jeder Satz -- deshalb hier eine
             # Mindestlaenge. Ein einzelnes "Ähm" oder ein Rascheln soll
             # keinen Auftrag ausloesen, wenn kein Weckwort davorsteht.
@@ -363,9 +556,18 @@ class Horcher:
             # Ein einzelnes Wort waere sonst zu wenig -- ausser es ist
             # genau die Antwort auf eine Rueckfrage. "Ja." hat ein Wort,
             # und mehr sagt man da auch nicht.
+            #
+            # Und nicht nur "ja": Steht eine Frage offen, ist JEDES
+            # einzelne Wort eine moegliche Antwort. Auf "Was soll ich
+            # öffnen?" sagt man "YouTube" -- ein Wort, das rueckfrage.
+            # deuten() nicht kennt und das deshalb hier stumm verschwand.
+            # Woertlich passiert: dreimal "YouTube" gesagt, dreimal
+            # verworfen, ohne eine Zeile in der Konsole.
             if (len(text.split()) < 2
+                    and not self._frage_offen
                     and rueckfrage.deuten(text) == rueckfrage.UNKLAR):
-                return
+                print(f"  (zu kurz fuer einen Zuruf, verworfen: {text!r})")
+                return False
             zuruf = text.strip()
             wie = "Nachhören"
 
@@ -373,8 +575,19 @@ class Horcher:
         print(f"\n  * {wie}: {text!r}")
         self.pausiert = True     # bis der Durchgang durch ist
         self.wecken(zuruf)
+        return True
 
     # --- Nachhoeren ---------------------------------------------------------
+
+    def frage_offen(self, an: bool) -> None:
+        """Steht gerade eine Rueckfrage offen?
+
+        Der Horcher muss das wissen, weil eine Antwort auf eine Frage
+        anderen Regeln gehorcht als ein Zuruf aus dem Nichts: Sie darf
+        aus einem einzigen Wort bestehen. Auf "Was soll ich öffnen?"
+        sagt man "YouTube" und sonst nichts.
+        """
+        self._frage_offen = bool(an)
 
     def nachhoeren(self, sekunden: float | None = None) -> None:
         """Kurzes Fenster, in dem kein Weckwort noetig ist."""
@@ -384,5 +597,7 @@ class Horcher:
             config.NACHHOEREN_SEK if sekunden is None else sekunden
         )
 
-    def hoert_nach(self) -> bool:
-        return time.perf_counter() < self._nachhoeren_bis
+    def hoert_nach(self, zeitpunkt: float | None = None) -> bool:
+        """War das Fenster zu diesem Zeitpunkt offen? Ohne Angabe: jetzt."""
+        wann = time.perf_counter() if zeitpunkt is None else zeitpunkt
+        return wann < self._nachhoeren_bis

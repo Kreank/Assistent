@@ -138,6 +138,22 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text": fehler or text}],
                 **({"is_error": True} if fehler else {})}
 
+    def _deckelhinweis(gewuenscht: int) -> str:
+        """Der Nachsatz, wenn mehr gewuenscht war als vorgelesen wird.
+
+        Der Deckel ist Absicht (config.FINANZ_HOECHSTENS). Gefehlt hat nur
+        der Hinweis: Wer "die letzten fuenfzehn Buchungen" verlangte, bekam
+        sechs vorgelesen und musste sie fuer alle halten.
+        """
+        if gewuenscht > config.FINANZ_HOECHSTENS:
+            return " Mehr lese ich nicht am Stück vor."
+        return ""
+
+    GEDECKELT = {"type": "integer",
+                 "description": "Wie viele. Vorgabe 5, höchstens "
+                                f"{config.FINANZ_HOECHSTENS} — mehr wird "
+                                "nicht am Stück vorgelesen."}
+
     ZEITRAUM = {
         "von": {"type": "string",
                 "description": "Anfang, ISO wie 2026-07-01. Weglassen = alles.",
@@ -224,13 +240,12 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         "An wen das Geld geht: die größten Gegenparteien in einem Zeitraum. "
         "Für 'wo gebe ich am meisten aus', 'wie viel zahle ich an X'.",
         {"type": "object",
-         "properties": dict(ZEITRAUM,
-                            limit={"type": "integer",
-                                   "description": "Wie viele. Vorgabe 5."})},
+         "properties": dict(ZEITRAUM, limit=GEDECKELT)},
     )
     async def finanzen_empfaenger(args):
         blinken()
-        wie_viele = min(int(args.get("limit") or 5), config.FINANZ_HOECHSTENS)
+        gewuenscht = int(args.get("limit") or 5)
+        wie_viele = min(gewuenscht, config.FINANZ_HOECHSTENS)
         daten, fehler = await _holen("/auswertungen/gegenparteien",
                                      nur_ausgaben=True, limit=wie_viele,
                                      **_zeitraum(args))
@@ -245,7 +260,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             wort = "Buchung" if anzahl == 1 else "Buchungen"
             teile.append(f"{e.get('gegenpartei')} {_betrag(e.get('summe'))} "
                          f"in {anzahl} {wort}")
-        return _antwort("; ".join(teile) + ".")
+        return _antwort("; ".join(teile) + "." + _deckelhinweis(gewuenscht))
 
     @tool(
         "finanzen_buchungen",
@@ -257,12 +272,12 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                             suche={"type": "string",
                                    "description": "Stichwort im "
                                                   "Verwendungszweck."},
-                            limit={"type": "integer",
-                                   "description": "Wie viele. Vorgabe 5."})},
+                            limit=GEDECKELT)},
     )
     async def finanzen_buchungen(args):
         blinken()
-        wie_viele = min(int(args.get("limit") or 5), config.FINANZ_HOECHSTENS)
+        gewuenscht = int(args.get("limit") or 5)
+        wie_viele = min(gewuenscht, config.FINANZ_HOECHSTENS)
         daten, fehler = await _holen("/transaktionen", suche=args.get("suche"),
                                      limit=wie_viele, **_zeitraum(args))
         if fehler:
@@ -281,7 +296,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             teile.append(f"{_datum(b.get('datum'))}: {richtung} "
                          f"{_betrag(b.get('betrag'))}, "
                          f"{b.get('verwendungszweck') or 'ohne Zweck'}")
-        return _antwort(". ".join(teile) + ".")
+        return _antwort(". ".join(teile) + "." + _deckelhinweis(gewuenscht))
 
     @tool(
         "finanzen_konten",

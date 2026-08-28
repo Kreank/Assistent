@@ -14,6 +14,23 @@ from datetime import datetime, timedelta
 from claude_agent_sdk import tool
 
 from .. import config
+# Mitbenutzt statt nachgebaut: Zwei Fassungen desselben Kniffs driften
+# auseinander, und beim Wecker faellt das erst auf, wenn er nicht klingelt.
+# Der saubere Platz waere ein eigenes kleines Dateimodul.
+from .auftrag import _atomar_schreiben
+
+
+def _jetzt_wie(faellig: datetime) -> datetime:
+    """Die Vergleichszeit so beschaffen wie der gespeicherte Zeitpunkt.
+
+    Dauer-Timer haengen an einem absoluten Zeitpunkt (mit Zeitversatz),
+    Uhrzeit-Timer an der Wanduhr (ohne). Beides gegeneinander zu
+    vergleichen wirft TypeError -- und in timer.json koennen nach einem
+    Update beide Sorten nebeneinander stehen.
+    """
+    if faellig.tzinfo is not None:
+        return datetime.now(faellig.tzinfo)
+    return datetime.now()
 
 
 def _dauer_sagen(sekunden: int) -> str:
@@ -52,7 +69,13 @@ class Wecker:
     _naechste_nummer: int = 1
 
     def stellen(self, sekunden: int, was: str) -> tuple[int, datetime]:
-        return self.stellen_bis(datetime.now() + timedelta(seconds=sekunden), was)
+        # Eine Dauer meint echte Zeit, keine Wanduhrzeit: astimezone()
+        # haelt den Zeitversatz von jetzt fest, dann bleibt "in einer
+        # Stunde" auch in der Umstellungsnacht eine Stunde. Bewusst keine
+        # monotone Uhr -- die faengt bei jedem Neustart bei null an, und
+        # der Timer soll den Neustart ueberleben.
+        return self.stellen_bis(
+            datetime.now().astimezone() + timedelta(seconds=sekunden), was)
 
     def stellen_bis(self, faellig: datetime, was: str) -> tuple[int, datetime]:
         """Auf einen festen Zeitpunkt stellen.
@@ -82,7 +105,8 @@ class Wecker:
                 eintrag = self.laufende.get(nummer)
                 if eintrag is None:
                     return
-                rest = (eintrag["faellig"] - datetime.now()).total_seconds()
+                faellig = eintrag["faellig"]
+                rest = (faellig - _jetzt_wie(faellig)).total_seconds()
                 if rest <= 0:
                     break
                 await asyncio.sleep(min(1.0, rest))
@@ -127,14 +151,18 @@ class Wecker:
         man erst merkt, wenn es zu spaet ist.
         """
         try:
-            config.TIMER_DATEI.write_text(
+            # Ueber eine Nebendatei, nicht in die echte hinein: Wer den
+            # Prozess zwischen dem Kuerzen auf null Bytes und dem
+            # Schreiben abschiesst, hinterliess sonst eine halbe Datei --
+            # und die kostet beim naechsten Start alle Timer auf einmal.
+            _atomar_schreiben(
+                config.TIMER_DATEI,
                 json.dumps(
                     [{"nummer": n, "was": e["was"],
                       "faellig": e["faellig"].isoformat()}
                      for n, e in self.laufende.items()],
                     ensure_ascii=False, indent=1,
                 ),
-                encoding="utf-8",
             )
         except OSError as e:
             # Frueher stand hier ein stilles pass. Das ist genau der
@@ -155,18 +183,32 @@ class Wecker:
             return []
         try:
             gespeichert = json.loads(config.TIMER_DATEI.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
+            if not isinstance(gespeichert, list):
+                raise ValueError("kein JSON-Array")
+        except (OSError, ValueError) as e:
+            # Frueher stand hier ein stilles []. Das ist derselbe Fehler
+            # wie ein stilles pass beim Schreiben, nur teurer: Sarvis
+            # haelt danach fest, dass kein Timer laeuft, und der Wecker
+            # klingelt nie. Die kaputte Datei wird beiseitegelegt, sonst
+            # ueberschreibt sie das naechste Sichern.
+            print(f"  ! timer.json unlesbar -- keine Timer wiederhergestellt: {e}")
+            try:
+                config.TIMER_DATEI.replace(
+                    config.TIMER_DATEI.with_name(config.TIMER_DATEI.name + ".kaputt"))
+            except OSError:
+                pass
+            return ["Meine Timerliste war beim Start unlesbar. Falls du einen "
+                    "Wecker gestellt hattest, ist er weg."]
 
         verpasst: list[str] = []
         verworfen = 0
-        jetzt = datetime.now()
         for e in gespeichert:
             try:
                 faellig = datetime.fromisoformat(e["faellig"])
-            except (KeyError, ValueError):
+            except (KeyError, TypeError, ValueError):
                 continue
             was = e.get("was", "")
+            jetzt = _jetzt_wie(faellig)
             if faellig <= jetzt:
                 stunden = (jetzt - faellig).total_seconds() / 3600
                 if stunden <= config.TIMER_NACHMELDEN_STUNDEN:
@@ -182,7 +224,11 @@ class Wecker:
                     print(f"  (Timer{' für ' + was if was else ''} war vor "
                           f"{stunden:.0f} Stunden fällig -- nicht mehr angesagt)")
                 continue
-            self.stellen(int((faellig - jetzt).total_seconds()), was)
+            # Direkt auf den gespeicherten Zeitpunkt, nicht ueber eine
+            # Dauer: Der Umweg schneidet Nachkommastellen ab und legt
+            # einen Wecker auf 06:00:00 bis zu eine Sekunde daneben --
+            # genau deshalb gibt es stellen_bis.
+            self.stellen_bis(faellig, was)
 
         # Auch das stille Wegraeumen muss auf die Platte: Ohne das taucht
         # ein zu alter Timer bei jedem Start erneut auf und wird jedes Mal
@@ -192,10 +238,10 @@ class Wecker:
         return verpasst
 
     def alle(self) -> list[dict]:
-        jetzt = datetime.now()
         return [
             {"nummer": n, "was": e["was"],
-             "rest": max(0, int((e["faellig"] - jetzt).total_seconds()))}
+             "rest": max(0, int((e["faellig"]
+                                 - _jetzt_wie(e["faellig"])).total_seconds()))}
             for n, e in sorted(self.laufende.items())
         ]
 
@@ -258,6 +304,9 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
             try:
                 stunde, minute = int(teile[0]), int(teile[1])
                 sekunde = int(teile[2]) if len(teile) > 2 else 0
+                # Bleibt bewusst ohne Zeitversatz: "um sechs" meint die
+                # Wanduhr, auch wenn die Nacht dazwischen 23 oder 25
+                # Stunden hat. Nur Dauern haengen an der echten Zeit.
                 jetzt = datetime.now()
                 ziel = jetzt.replace(hour=stunde, minute=minute,
                                      second=sekunde, microsecond=0)
@@ -277,14 +326,18 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                     "Ich brauche entweder eine Dauer oder eine Uhrzeit."}],
                     "is_error": True}
 
+        # astimezone() rechnet den Zeitpunkt in die dann gueltige Ortszeit
+        # um -- sonst nennt ein Dauer-Timer ueber die Umstellung hinweg
+        # eine Uhrzeit, die auf keiner Uhr im Haus steht.
+        uhrzeit = faellig.astimezone().strftime('%H:%M:%S')
         leuchten()
         vermerken(f"timer_stellen: Timer {nummer}"
                   + (f" für {wofuer}" if wofuer else "")
-                  + f", fällig um {faellig.strftime('%H:%M:%S')} Uhr — läuft.")
+                  + f", fällig um {uhrzeit} Uhr — läuft.")
         return {"content": [{"type": "text", "text":
                 f"Timer {nummer} läuft: {_dauer_sagen(sekunden)}"
                 + (f" für {wofuer}" if wofuer else "")
-                + f", fällig um {faellig.strftime('%H:%M:%S')} Uhr."}]}
+                + f", fällig um {uhrzeit} Uhr."}]}
 
     @tool(
         "timer_liste",

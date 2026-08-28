@@ -67,6 +67,19 @@ def _sauberer_name(text: str, laenge: int = 40) -> str:
     return t[:laenge] or "ohne-namen"
 
 
+def _falten(text: str) -> str:
+    """Umlaute auf beiden Seiten gleich schreiben.
+
+    Dateinamen sind umlautfrei (_sauberer_name), gesprochene Namen nicht.
+    Ohne diese Faltung fand "Müller" die Zeile "Müller", aber nie die
+    Akte mueller.md -- und "Mueller" umgekehrt nichts von beidem.
+    """
+    t = str(text or "").lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        t = t.replace(alt, neu)
+    return t
+
+
 def _personenordner():
     p = config.GEDAECHTNIS / "personen"
     p.mkdir(parents=True, exist_ok=True)
@@ -101,6 +114,28 @@ def _datum_von(zeile: str) -> str:
     return t.group(1) if t else "0000-00-00"
 
 
+def _ablegen(art: str, zeilen: list[str]) -> None:
+    """Eintraege eine Schicht tiefer legen, statt sie wegzuwerfen.
+
+    EINE Sammeldatei je Monat, nicht eine je Auslagerung. Sonst entstehen
+    im Lauf eines Jahres Dutzende Schnipsel mit je zwei Zeilen -- und die
+    zu durchsuchen ist muehsamer, als sie wert sind.
+    """
+    if not zeilen:
+        return
+    ablage = _notizenordner() / f"{datetime.now():%Y-%m}-ausgelagert-{art}.md"
+    if not ablage.exists():
+        ablage.write_text(
+            f"# Ausgelagert aus {art}\n\n"
+            "Diese Einträge standen im immer geladenen Gedächtnis und sind "
+            "dort verschwunden — weil zu viele dazukamen oder weil eine "
+            "neuere Angabe sie ersetzt hat.\n**Gelöscht ist nichts**, über "
+            "gedaechtnis_nachschlagen sind sie weiter zu finden.\n\n",
+            encoding="utf-8")
+    with open(ablage, "a", encoding="utf-8") as f:
+        f.write("\n".join(zeilen) + "\n")
+
+
 def umschichten(art: str) -> int:
     """Was ueber die Grenze hinausgeht, wandert eine Schicht tiefer.
 
@@ -120,20 +155,7 @@ def umschichten(art: str) -> int:
         return 0
     zeilen.sort(key=_datum_von)
     raus, bleiben = zeilen[:ueber], zeilen[ueber:]
-    # EINE Sammeldatei je Monat, nicht eine je Auslagerung. Sonst
-    # entstehen im Lauf eines Jahres Dutzende Schnipsel mit je zwei
-    # Zeilen -- und die zu durchsuchen ist muehsamer, als sie wert sind.
-    ablage = _notizenordner() / f"{datetime.now():%Y-%m}-ausgelagert-{art}.md"
-    if not ablage.exists():
-        ablage.write_text(
-            f"# Ausgelagert aus {art}\n\n"
-            "Diese Einträge standen im immer geladenen Gedächtnis und sind "
-            "dort ausgelaufen — zu viele, um sie bei jedem Zuruf "
-            "mitzuschleppen.\n**Gelöscht ist nichts**, über "
-            "gedaechtnis_nachschlagen sind sie weiter zu finden.\n\n",
-            encoding="utf-8")
-    with open(ablage, "a", encoding="utf-8") as f:
-        f.write("\n".join(raus) + "\n")
+    _ablegen(art, raus)
     _schreiben(pfad, bleiben)
     print(f"  (Gedächtnis: {len(raus)} alte Einträge in eine Notiz ausgelagert)")
     return len(raus)
@@ -149,6 +171,16 @@ def nachschlagen(stichwort: str, hoechstens: int = 6) -> list:
     suche = " ".join(str(stichwort or "").lower().split())
     if not suche:
         return []
+    # Beim Anlegen wird der Name zum Dateinamen gefaltet ("Thomas Müller"
+    # -> thomas-mueller), beim Suchen war er es nicht. "thomas müller" in
+    # "thomas-mueller" ist False -- die Akte galt dann nur ueber ihre
+    # Ueberschriftzeile als Treffer, und geliefert wurde auch nur die.
+    # Sarvis sah eine leere Akte und sagte, er wisse nichts, obwohl alles
+    # dastand. Deshalb wird jetzt genauso gefaltet wie beim Schreiben.
+    schluessel = _sauberer_name(suche, 80)
+    if schluessel == "ohne-namen":
+        schluessel = ""       # der Rueckfall von _sauberer_name, kein Treffer
+    gefaltet = _falten(suche)
     treffer = []
     for ordner in (_personenordner(), _notizenordner()):
         for datei in sorted(ordner.glob("*.md"), reverse=True):
@@ -158,9 +190,10 @@ def nachschlagen(stichwort: str, hoechstens: int = 6) -> list:
                 text = datei.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            passt = suche in datei.stem.lower()
+            stamm = datei.stem.lower()
+            passt = gefaltet in stamm or (schluessel and schluessel in stamm)
             zeilen = [z.strip() for z in text.splitlines()
-                      if z.strip() and (passt or suche in z.lower())]
+                      if z.strip() and (passt or gefaltet in _falten(z))]
             if zeilen:
                 treffer.append((datei.name, zeilen[:8]))
             if len(treffer) >= hoechstens:
@@ -204,10 +237,31 @@ def aufraeumen(art: str) -> int:
     return weg
 
 
+def _fremdtext(pfad) -> list[str]:
+    """Zeilen, die weder Eintrag noch Kopf sind -- also von Hand geschrieben.
+
+    Der Kopf von beobachtet.md fordert ausdruecklich zum Korrigieren auf.
+    Wer daraufhin einen Satz ohne fuehrenden Strich dazuschreibt, war ihn
+    beim naechsten Schreibvorgang los: _zeilen() liest nur '- '-Zeilen,
+    und _schreiben() baute die Datei genau daraus neu auf.
+    """
+    if not pfad.exists():
+        return []
+    kopf = {z for z in KOPF.get(pfad.name, "").splitlines() if z.strip()}
+    return [z for z in pfad.read_text(encoding="utf-8").splitlines()
+            if z.strip() and not z.strip().startswith("- ") and z not in kopf]
+
+
 def _schreiben(pfad, zeilen: list[str]) -> None:
     kopf = KOPF.get(pfad.name, "")
+    fremd = _fremdtext(pfad)
     pfad.parent.mkdir(parents=True, exist_ok=True)
-    pfad.write_text(kopf + "\n" + "\n".join(zeilen) + "\n", encoding="utf-8")
+    text = kopf + "\n"
+    if fremd:
+        # Vor den Eintraegen, nicht dazwischen: Die urspruengliche Stelle
+        # laesst sich nicht sicher wiederfinden, der Satz selbst schon.
+        text += "\n".join(fremd) + "\n\n"
+    pfad.write_text(text + "\n".join(zeilen) + "\n", encoding="utf-8")
 
 
 def lesen(art: str) -> list[str]:
@@ -274,17 +328,31 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             eintrag += f"  (gilt bis {args['gilt_bis']})"
 
         # Widersprueche ersetzen statt anhaeufen: zwei sich widersprechende
-        # Eintraege sind schlimmer als keiner.
+        # Eintraege sind schlimmer als keiner. Aber erst ab einer Laenge,
+        # die wirklich denselben Sachverhalt meint -- ein kurzer Kern ist
+        # Praefix von allem Moeglichen und frass sonst den genaueren
+        # Eintrag ("Ich mag Kaffee" gegen "Ich mag Kaffee schwarz").
         kern = inhalt.lower()[:40]
-        zeilen = [z for z in zeilen if kern not in z.lower()]
+        ersetzt = [z for z in zeilen if len(kern) >= 20 and kern in z.lower()]
+        if ersetzt:
+            # Aus Schicht 1 nehmen heisst nicht wegwerfen -- dasselbe
+            # Versprechen wie in umschichten().
+            _ablegen(art, ersetzt)
+            zeilen = [z for z in zeilen if z not in ersetzt]
         zeilen.append(eintrag)
         _schreiben(pfad, zeilen)
         umschichten(art)      # Schicht 1 bleibt klein genug, um zu wirken
 
         blinken()
-        vermerken(f"merken ({art}): {inhalt}")
-        return {"content": [{"type": "text", "text":
-                f"Gemerkt ({'Beobachtung' if art == 'bemerkt' else 'gesagt'})."}]}
+        vermerken(f"merken ({art}): {inhalt}"
+                  + (f" (ersetzt {len(ersetzt)})" if ersetzt else ""))
+        antwort = f"Gemerkt ({'Beobachtung' if art == 'bemerkt' else 'gesagt'})."
+        if ersetzt:
+            antwort += (f" {len(ersetzt)} früherer Eintrag ersetzt"
+                        if len(ersetzt) == 1
+                        else f" {len(ersetzt)} frühere Einträge ersetzt")
+            antwort += " — nachzulesen in den Notizen."
+        return {"content": [{"type": "text", "text": antwort}]}
 
     @tool(
         "person_merken",
