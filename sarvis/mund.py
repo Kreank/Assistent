@@ -53,8 +53,34 @@ class Mund:
         print(f"  Piper bereit nach {time.perf_counter() - t:.1f}s "
               f"(Tempo {config.TEMPO}{sprecher}{farbe})")
 
+        # Die schoenere Stimme, wenn sie eingeschaltet ist. Piper wird
+        # TROTZDEM geladen und bleibt geladen: Er ist der Rueckfall, und
+        # ein Rueckfall, den man erst holen muesste, wenn er gebraucht
+        # wird, ist keiner -- dann steht die Antwort still, waehrend ein
+        # Modell von der Platte kommt.
+        self.eleven = None
+        if getattr(config, "STIMME_DIENST", "piper") == "elevenlabs":
+            from .eleven import Eleven
+            self.eleven = Eleven()
+            print(f"  {self.eleven.stand_satz()}")
+
     def sprechen(self, text: str) -> tuple[np.ndarray, int]:
-        """Ein Stueck Text zu Audio. Gibt (Proben, Abtastrate) zurueck."""
+        """Ein Stueck Text zu Audio. Gibt (Proben, Abtastrate) zurueck.
+
+        Der Rueckfall ist hier eine einzige Zeile, und das ist Absicht:
+        eleven.sprechen() gibt None fuer JEDEN Grund -- kein Netz, leeres
+        Kontingent, Schluessel ohne Berechtigung, Ton nicht lesbar. Der
+        Aufrufer muss keinen Fall unterscheiden, und es gibt keinen Pfad,
+        auf dem am Ende gar nichts gesprochen wird.
+        """
+        if self.eleven is not None:
+            fertig = self.eleven.sprechen(text)
+            if fertig is not None:
+                # Keine Stimmfarbe drueber. Der ganze Zweck dieser Stimme
+                # ist, wie sie ist; ein Filter darauf waere, als male man
+                # ueber ein Foto.
+                return fertig
+
         teile, rate = [], config.ABTASTRATE
         for brocken in self.stimme.synthesize(text, syn_config=self.einstellung):
             teile.append(brocken.audio_float_array)

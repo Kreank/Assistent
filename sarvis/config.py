@@ -232,6 +232,34 @@ ABTASTRATE = 16000  # was Whisper erwartet
 MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen
 
 # --- Mund -----------------------------------------------------------------
+# --- Welche Stimme spricht ------------------------------------------------
+# EIN Schalter. "piper" laeuft lokal, kostet nichts und ist der Alltag;
+# "elevenlabs" klingt besser und ist zum Vorfuehren gedacht.
+#
+# Warum nicht dauerhaft die schoenere? Gemessen an fuenf echten Tagen aus
+# Sarvis' eigenen Sitzungsprotokollen: 363 gesprochene Antworten, im
+# Schnitt 73 Zeichen, 5.289 Zeichen an einem Durchschnittstag und 9.719
+# am staerksten. Das kostenlose Kontingent sind 10.000 Zeichen im MONAT
+# -- es reicht 1,9 Tage. Als Alltagsstimme haette man zwei gute Tage und
+# achtundzwanzig, an denen man ueber den Wechsel stolpert; fuer eine
+# Vorfuehrung von zehn Minuten reicht es muehelos.
+#
+# Umschalten heisst: dieses eine Wort aendern und Sarvis neu starten.
+STIMME_DIENST = "piper"        # "piper" | "elevenlabs"
+
+# Welche Stimme drueben gesprochen wird.
+ELEVENLABS_STIMME = "87AwpS6yC86wa2WglbsK"
+ELEVENLABS_MODELL = "eleven_multilingual_v2"
+
+# Rohe 16-Bit-Werte waeren einfacher zu verarbeiten, brauchen aber einen
+# bezahlten Tarif. MP3 geht ueberall und wird mit av dekodiert, das
+# ohnehin im Projekt liegt.
+ELEVENLABS_FORMAT = "mp3_44100_128"
+
+# Ein haengender Dienst darf ein Gespraech nicht anhalten -- dieselbe
+# Ueberlegung wie beim Finanzdashboard.
+ELEVENLABS_ZEITGRENZE = 20.0
+
 STIMME = WURZEL / "stimmen" / "de_DE-thorsten-medium.onnx"
 
 # Manche Stimmen bringen mehrere Sprecher mit. Bei
