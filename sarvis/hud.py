@@ -13,7 +13,7 @@ import math
 import sys
 from collections import deque
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 from . import config
 from .anzeige import ADRESSE, DENKT, FRAGT, HOERT, RUHIG, SPRICHT
+from .kachel import Kachel
 
 # Das Raster, in dem gemalt wird. Alles darunter rechnet in diesen
 # Zahlen -- sie sind KEINE Bildschirmpixel mehr, seit es SKALA gibt.
@@ -47,6 +48,13 @@ ICON_PIXEL = 17          # Kantenlaenge der Werkzeug-Zeichen im Malraster
 # 10 die zweite -- die Zeichencodes sind dieselben.
 ICON_SCHRIFTEN = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
 VERLAUF_LAENGE = BALKEN // 2
+
+# Wie viel vom Fenster ringsum durchsichtiger Rand ist. Das Fenster ist
+# 660x548 Rasterpunkte gross, der Kranz samt Beschriftung nutzt davon nur
+# die Mitte. Wer eine Kachel an der FENSTERkante ausrichtet, setzt sie
+# scheinbar grundlos weit weg -- abgemessen am gerenderten Bild.
+SICHTBAR_EINZUG_X = 70
+SICHTBAR_EINZUG_Y = 14
 
 
 def _icon_schrift():
@@ -138,6 +146,11 @@ class Hud(QWidget):
         self.hg_seit = 0.0        # wie lange laeuft es schon (Sekunden)
         self.hg_fertig = False    # gerade fertig geworden?
         self.verschiebbar = False  # Verschiebemodus?
+        # Kacheln, die gerade neben der Engine stehen: name -> Kachel.
+        # Der Name ist die Identitaet -- zweimal "finanzen" ist dieselbe
+        # Kachel mit neuem Inhalt, nicht zwei uebereinander.
+        self.kacheln: dict = {}
+        self._letzter_anker = None
         self._griff = None         # Mausversatz beim Ziehen
         # Name -> (Zustand, Aufleuchten 0..1)
         self.werkzeuge = {n: [z, 0.0] for n, z in config.WERKZEUGE}
@@ -297,9 +310,98 @@ class Hud(QWidget):
                 eintrag = self.werkzeuge.get(m.get("name", ""))
                 if eintrag and m.get("aktiv"):
                     eintrag[1] = 1.0
+            elif art == "kachel":
+                self._kachel_zeigen(m)
+            elif art == "kachel_weg":
+                vorhanden = self.kacheln.get(str(m.get("name", "")))
+                if vorhanden is not None:
+                    vorhanden.wegnehmen()
+
+    # --- Kacheln -----------------------------------------------------------
+
+    def _sichtbar(self) -> QRect:
+        """Der sichtbare Teil der Engine, nicht ihr Fenster.
+
+        Daran richtet sich eine Kachel aus. Der Unterschied betraegt bei
+        Skala 1,3 rund neunzig Bildschirmpunkte je Seite -- genug, dass es
+        aussaehe, als haette jemand die Kachel danebengelegt.
+        """
+        ex = round(SICHTBAR_EINZUG_X * SKALA)
+        ey = round(SICHTBAR_EINZUG_Y * SKALA)
+        return QRect(self.x() + ex, self.y() + ey,
+                     self.width() - 2 * ex, self.height() - 2 * ey)
+
+    def _kachel_zeigen(self, m: dict) -> None:
+        name = str(m.get("name") or "")
+        if not name:
+            return
+        sorte = "zustand" if m.get("sorte") == "zustand" else "antwort"
+        kachel = self.kacheln.get(name)
+        # Wechselt eine Kachel die Sorte, wird sie neu gebaut: Sorte
+        # bestimmt Farbe und Lebensdauer, und beides nachtraeglich
+        # umzustellen waere mehr Sonderfall als Nutzen.
+        if kachel is not None and kachel.sorte != sorte:
+            kachel.hide()
+            kachel = None
+        if kachel is None:
+            kachel = Kachel(sorte)
+            self.kacheln[name] = kachel
+        kachel.platzieren_an(self._sichtbar())
+        kachel.anzeigen(
+            m.get("kopf") or "",
+            m.get("punkte") or [],
+            gross=m.get("gross") or "",
+            stand=m.get("stand") or "",
+            sekunden=float(m.get("sekunden") or 0.0),
+        )
+        # Erst jetzt anordnen: Die Hoehe steht erst fest, wenn der Inhalt
+        # drin ist, und danach richtet sich der Stapel darunter.
+        self._anordnen()
+
+    def _anordnen(self) -> None:
+        """Alle Kacheln neu verteilen: Antworten rechts, Zustaende links.
+
+        Das Anordnen gehoert hierher und nicht in die einzelne Kachel:
+        Nur die Engine weiss, wie viele es gerade gibt. Eine Kachel, die
+        sich selbst platziert, kennt die anderen nicht -- gemessen landeten
+        Antwort und Zustand auf demselben Punkt.
+
+        Mehrere je Seite werden untereinander gestapelt. Der Regelfall
+        bleibt eine je Seite; der Stapel ist dafuer da, dass ein dritter
+        Kasten nicht unsichtbar unter dem zweiten verschwindet.
+        """
+        anker = self._sichtbar()
+        luft = round(10 * SKALA)
+        versatz = {"rechts": 0, "links": 0}
+        for kachel in self.kacheln.values():
+            if not kachel.isVisible():
+                continue
+            seite = "links" if kachel.sorte == "zustand" else "rechts"
+            kachel.platzieren_an(anker, seite, versatz[seite])
+            versatz[seite] += kachel.height() + luft
+
+    def _kacheln_nachfuehren(self) -> None:
+        """Die Kacheln der Engine hinterherziehen.
+
+        Sie haengt nicht fest: Der Verschiebemodus zieht sie mit der Maus,
+        und ein Bildschirmwechsel setzt sie neu. Eine Kachel, die stehen
+        bleibt, wo die Engine vorhin war, sieht aus wie vergessen.
+
+        Neu verteilt wird auch, wenn sich die ZAHL der sichtbaren Kacheln
+        aendert -- sonst bleibt nach dem Ausblenden der ersten eine Luecke
+        stehen, in die niemand nachrueckt.
+        """
+        anker = self._sichtbar()
+        sichtbare = sum(1 for k in self.kacheln.values() if k.isVisible())
+        stand = (anker, sichtbare)
+        if stand == self._letzter_anker:
+            return
+        self._letzter_anker = stand
+        self._anordnen()
 
     def _schlag(self):
         self.tick += 0.016
+        self._kacheln_nachfuehren()
         # Traeges Nachziehen: schnell hoch, langsam runter -- sonst zappelt es.
         ziel = self.pegel
         k = 0.45 if ziel > self.geglaettet else 0.12

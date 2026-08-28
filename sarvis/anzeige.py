@@ -64,6 +64,35 @@ class Anzeige:
                      zeilen=[str(z) for z in (zeilen or [])][:3],
                      seit=round(float(seit), 1), fertig=bool(fertig))
 
+    def kachel(self, name: str, kopf: str, punkte, sorte: str = "antwort",
+               gross: str = "", stand: str = "", sekunden: float = 0.0) -> None:
+        """Eine Kachel neben der Engine zeigen -- oder ihren Inhalt ersetzen.
+
+        name ist die Identitaet, nicht die Ueberschrift: Zweimal "finanzen"
+        heisst dieselbe Kachel mit neuem Inhalt, nicht zwei uebereinander.
+
+        sorte trennt die beiden Lebensdauern. Eine "antwort" gehoert zu
+        einem Satz und geht nach einer Weile von selbst; ein "zustand"
+        gehoert zu etwas, das laeuft, und bleibt stehen, bis er endet.
+
+        punkte sind DATENPUNKTE, keine fertigen Zeilen:
+        {"text": "Wohnen", "wert": "1.098,00", "zahl": 1098.0}. Aus "zahl"
+        wird die Laenge des Balkens, und daran erkennt die Kachel spaeter,
+        welchen Posten Sarvis gerade nennt. Wer hier Text schickt, kann
+        weder zeichnen noch hervorheben.
+        """
+        self._senden(art="kachel", name=str(name), sorte=str(sorte),
+                     kopf=str(kopf), gross=str(gross), stand=str(stand),
+                     # Zwoelf reichen. Eine Kachel wird im Vorbeigehen
+                     # gelesen, nicht studiert -- und der Deckel haelt
+                     # nebenbei das Datagramm klein.
+                     punkte=list(punkte or [])[:12],
+                     sekunden=round(float(sekunden), 1))
+
+    def kachel_weg(self, name: str) -> None:
+        """Eine Kachel ausblenden lassen -- der Auftrag ist fertig."""
+        self._senden(art="kachel_weg", name=str(name))
+
     def werkzeug(self, name: str, aktiv: bool = True) -> None:
         """Ein Werkzeug im Kranz aufleuchten lassen (Stufe 2)."""
         self._senden(art="werkzeug", name=name, aktiv=bool(aktiv))
