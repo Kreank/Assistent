@@ -520,6 +520,104 @@ def befehl_stufe(befehl: str) -> str:
     return "fragen"
 
 
+# --- Klicken und Tippen im eingebauten Browser ---------------------------
+# Bis heute galt: "Sarvis bringt die Seite, du bedienst sie." Das trug,
+# weil Zeigen keine Handlung ist. Ein Klick ist eine -- und der Browser
+# ist in den Konten des Nutzers angemeldet.
+#
+# Freigegeben wurde das ausdruecklich, mit einer Bedingung: Formulare und
+# alles Bedenkliche oder Unumkehrbare holen sich eine Bestaetigung. Diese
+# Bedingung steht hier in Python und nicht im Systemprompt, aus demselben
+# Grund wie bei den Shell-Befehlen: Ein Modell laesst sich umstimmen --
+# und zwar ausgerechnet von der Seite, die es gerade liest. Eine Funktion
+# nicht.
+#
+# Drei Pruefungen, und die ersten beiden sind die verlaesslichen:
+#
+#   1. Ist es ein Absenden?        aus dem DOM (type=submit)
+#   2. Steht es in einem Formular? aus dem DOM (closest("form"))
+#   3. Sagt die Beschriftung etwas? aus der SEITE -- also das schwaechste
+#      Glied, denn wer die Seite schreibt, schreibt auch die Beschriftung
+#
+# Deshalb nennt die Rueckfrage nicht nur, was draufsteht, sondern was
+# erkannt wurde. Ein Loeschen-Knopf, der "Cookies akzeptieren" heisst,
+# bleibt ein Formular-Absenden, und genau das wird vorgelesen.
+
+# Woerter in der Beschriftung, bei denen immer gefragt wird. Bewusst als
+# Wortanfaenge: "loesch" trifft loeschen, Loeschung, geloescht.
+KLICK_HEIKEL = (
+    r"kauf", r"bestell", r"bezahl", r"zahlungspflicht", r"ueberweis",
+    r"überweis", r"abschick", r"absend", r"senden", r"abschließ",
+    r"abschliess", r"loesch", r"lösch", r"entfern", r"verwerf",
+    r"kuendig", r"kündig", r"abbestell", r"abmeld", r"ausloggen",
+    r"bestaetig", r"bestätig", r"endgueltig", r"endgültig",
+    r"unwiderruf", r"zustimm", r"akzeptier", r"einwillig", r"freigeb",
+    r"veroeffentlich", r"veröffentlich", r"teilen", r"posten",
+    r"abonnier", r"reservier", r"beauftrag", r"registrier",
+    r"anmelden", r"speichern", r"uebernehmen", r"übernehmen",
+)
+
+# Feldarten, in die Sarvis NIE schreibt. Ein Passwort kennt er nicht, und
+# ein Werkzeug, das in ein Passwortfeld schreiben darf, ist ein Werkzeug,
+# das man dazu bringen kann, etwas Falsches hineinzuschreiben.
+FELD_NIE = ("password", "hidden")
+
+
+def _beschriftung_heikel(text: str) -> bool:
+    t = str(text or "").casefold()
+    return any(re.search(m, t, re.IGNORECASE) for m in KLICK_HEIKEL)
+
+
+def klick_stufe(element: dict) -> str:
+    """Darf dieser Klick ohne Rueckfrage laufen?
+
+    Ohne Element -- also wenn gar nicht feststellbar ist, worauf geklickt
+    wird -- wird gefragt. Nicht aufgezaehlt heisst auch hier nein.
+    """
+    if not isinstance(element, dict) or not element:
+        return "fragen"
+    if element.get("absenden"):
+        return "fragen"
+    if element.get("im_formular"):
+        return "fragen"
+    if _beschriftung_heikel(element.get("text")):
+        return "fragen"
+    return "frei"
+
+
+def tipp_stufe(element: dict) -> str:
+    """Darf hier hineingeschrieben werden?
+
+    Ein Formular auszufuellen ist noch keine Handlung nach draussen -- das
+    wird es erst beim Absenden, und das fragt ohnehin. Trotzdem steht hier
+    "fragen": So war es ausgemacht, und wer ein langes Formular diktiert,
+    sagt einmal "ja, frag die naechste Minute nicht mehr". Genau dafuer
+    gibt es die Freigaben auf Zeit.
+    """
+    if not isinstance(element, dict) or not element:
+        return "fragen"
+    if str(element.get("feldart") or "").lower() in FELD_NIE:
+        return "nie"
+    return "fragen"
+
+
+def klick_grund(element: dict) -> str:
+    """Was der Code erkannt hat -- fuer die Rueckfrage.
+
+    Der wichtigste Halbsatz der ganzen Browsersteuerung. Die Beschriftung
+    stammt von der Seite und kann luegen; das hier stammt aus dem HTML.
+    """
+    if not isinstance(element, dict) or not element:
+        return "unklar, worauf"
+    if element.get("absenden"):
+        return "ein Formular wird damit abgeschickt"
+    if element.get("im_formular"):
+        return "das steht in einem Formular"
+    if _beschriftung_heikel(element.get("text")):
+        return "die Beschriftung klingt nach etwas Endgültigem"
+    return ""
+
+
 # --- Zugangsdaten am Inhalt erkennen -------------------------------------
 #
 # Die Namensliste oben ist eine SPERRLISTE, und die kann nur verbieten,

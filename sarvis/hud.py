@@ -10,7 +10,9 @@ Stimme, beim Sprechen mit seiner. Aussen herum der Werkzeugkranz.
 """
 import json
 import math
+import socket
 import sys
+import threading
 from collections import deque
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer
@@ -53,6 +55,16 @@ VERLAUF_LAENGE = BALKEN // 2
 # 660x548 Rasterpunkte gross, der Kranz samt Beschriftung nutzt davon nur
 # die Mitte. Wer eine Kachel an der FENSTERkante ausrichtet, setzt sie
 # scheinbar grundlos weit weg -- abgemessen am gerenderten Bild.
+# Browser-Fragen, die ueber JavaScript laufen und deshalb einen eigenen
+# Faden brauchen -- so steht es im Vertrag von browser.py.
+_WEB_MIT_JS = ("web_lesen", "web_elemente", "web_element",
+               "web_klicken", "web_tippen")
+
+# Eine Antwort und kein leeres Ergebnis: "kein Fenster offen" ist etwas
+# anderes als "die Seite ist leer", und nur eine der beiden Auskuenfte
+# hilft weiter.
+_KEIN_BROWSER = {"ok": False, "grund": "Es ist gerade keine Seite offen."}
+
 SICHTBAR_EINZUG_X = 70
 SICHTBAR_EINZUG_Y = 14
 
@@ -155,6 +167,9 @@ class Hud(QWidget):
         # Chromium im Voraus zu starten kostet Hunderte Megabyte fuer
         # etwas, das an vielen Tagen niemand braucht.
         self._browser = None
+        # Der zuletzt gelesene Elementstand. Siehe _web_bedienen, warum er
+        # nicht bei jeder Frage neu geholt wird.
+        self._elemente: list = []
         self._griff = None         # Mausversatz beim Ziehen
         # Name -> (Zustand, Aufleuchten 0..1)
         self.werkzeuge = {n: [z, 0.0] for n, z in config.WERKZEUGE}
@@ -316,6 +331,41 @@ class Hud(QWidget):
                     eintrag[1] = 1.0
             elif art == "browser":
                 self._browser_zeigen(str(m.get("adresse") or ""))
+            elif art in _WEB_MIT_JS:
+                # Diese vier gehen ueber runJavaScript und MUESSEN laut
+                # browser.py aus einem Arbeitsfaden kommen -- hier laeuft
+                # der Qt-Faden. Also weiterreichen. Der Browser wird noch
+                # hier geholt, solange wir im richtigen Faden sind.
+                threading.Thread(target=self._web_bedienen,
+                                 args=(art, m, self._browser_holen()),
+                                 daemon=True).start()
+            elif art == "web_zoom":
+                b = self._browser_holen()
+                if b is None:
+                    self._antworten(m, _KEIN_BROWSER)
+                else:
+                    self._antworten(m, {"ok": True,
+                                        "faktor": b.zoom(m.get("faktor"))})
+            elif art == "web_suchen":
+                b = self._browser_holen()
+                if b is not None:
+                    b.suchen(str(m.get("text") or ""))
+                self._antworten(m, {"ok": b is not None}
+                                if b else _KEIN_BROWSER)
+            elif art == "web_downloads":
+                b = self._browser_holen()
+                self._antworten(m, {"ok": True, "dateien": b.downloads()}
+                                if b else _KEIN_BROWSER)
+            elif art == "web_stand":
+                # Was gerade offen ist. Die erste Frage ueber den
+                # Rueckkanal -- und die einzige, die auch dann eine
+                # sinnvolle Antwort hat, wenn gar kein Browser laeuft.
+                b = self._browser_holen()
+                self._antworten(m, {
+                    "offen": b is not None,
+                    "adresse": b.ansicht.url().toString() if b else "",
+                    "titel": (b._titel if b else ""),
+                })
             elif art == "browser_zu":
                 if self._browser is not None:
                     self._browser.hide()
@@ -339,6 +389,88 @@ class Hud(QWidget):
         ey = round(SICHTBAR_EINZUG_Y * SKALA)
         return QRect(self.x() + ex, self.y() + ey,
                      self.width() - 2 * ex, self.height() - 2 * ey)
+
+    def _antworten(self, m: dict, inhalt: dict) -> None:
+        """Die Antwort dorthin zurueckschicken, wo die Frage herkam.
+
+        Der Port steht in der Frage, nicht in einer Einstellung: Wer
+        fragt, macht sich seinen Socket selbst auf und schliesst ihn
+        wieder. Damit gibt es keinen zweiten festen Port, der belegt sein
+        koennte, und keine Verbindung, die laenger lebt als die Frage.
+        """
+        port = m.get("antwort_an")
+        if not port:
+            return
+        # Ein GEWOEHNLICHER Socket, nicht der QUdpSocket der Anzeige.
+        # Grund: Die Browser-Antworten entstehen in einem Arbeitsfaden
+        # (siehe _web_bedienen), und ein Qt-Objekt aus einem fremden Faden
+        # zu benutzen ist ein Fehler, den man erst Wochen spaeter als
+        # sporadischen Absturz wiedersieht. Ein Datagramm an localhost
+        # braucht Qt ohnehin nicht.
+        try:
+            daten = json.dumps({"nummer": m.get("nummer"), **inhalt},
+                               ensure_ascii=False).encode("utf-8")
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(daten, ("127.0.0.1", int(port)))
+        except (OSError, ValueError, TypeError) as e:
+            print(f"Antwort ging nicht raus: {type(e).__name__}: {e}")
+
+    def _web_bedienen(self, art: str, m: dict, browser) -> None:
+        """Die Browser-Fragen, die JavaScript brauchen. Im Arbeitsfaden.
+
+        Was hier passiert, darf dauern -- eine Seite, die nicht antwortet,
+        laesst das Zeitlimit von browser.py verstreichen. Genau deshalb
+        laeuft es nicht im Qt-Faden: Sonst stuende waehrenddessen die
+        ganze Anzeige, Ring und Kacheln eingeschlossen.
+        """
+        if browser is None:
+            self._antworten(m, _KEIN_BROWSER)
+            return
+        try:
+            if art == "web_lesen":
+                inhalt = {"ok": True, "text": browser.text_holen()}
+            elif art == "web_elemente":
+                liste = browser.elemente_holen()
+                # Gemerkt, damit web_element daraus antworten kann, ohne
+                # die Seite neu zu lesen. Der Unterschied ist nicht
+                # Bequemlichkeit: browser.klicken() vergleicht beim Klick
+                # gegen den Fingerabdruck AUS DIESEM Lesen und merkt
+                # dadurch, wenn sich die Seite zwischendurch geaendert
+                # hat. Ein Neulesen wuerde genau diese Wache abschalten.
+                self._elemente = liste
+                inhalt = {"ok": True, "elemente": liste}
+            elif art == "web_element":
+                # Die Frage, mit der hirn.darf_ich entscheidet. Sie kommt
+                # aus dem gemerkten Stand; gibt es keinen, wird einmal
+                # gelesen -- lieber frisch als gar nicht.
+                if not self._elemente:
+                    self._elemente = browser.elemente_holen()
+                nummer = m.get("nummer_element")
+                treffer = next((e for e in self._elemente
+                                if e.get("nummer") == nummer), {})
+                inhalt = {"ok": True, "element": treffer}
+            elif art == "web_klicken":
+                inhalt = {"ok": True,
+                          "ergebnis": browser.klicken(m.get("nummer_element"))}
+            else:   # web_tippen
+                inhalt = {"ok": True,
+                          "ergebnis": browser.tippen(m.get("nummer_element"),
+                                                     str(m.get("text") or ""))}
+        except Exception as e:
+            inhalt = {"ok": False,
+                      "grund": f"{type(e).__name__}: {e}"}
+        self._antworten(m, inhalt)
+
+    def _browser_holen(self):
+        """Den Browser liefern -- oder None, wenn keiner offen ist.
+
+        Anders als beim Zeigen wird hier NICHT gebaut: Wer fragt, was auf
+        der Seite steht, meint eine Seite, die es gibt. Ein frisch
+        gestartetes, leeres Chromium waere keine Antwort.
+        """
+        if self._browser is None or not self._browser.isVisible():
+            return None
+        return self._browser
 
     def _browser_zeigen(self, adresse: str) -> None:
         """Seite im eingebauten Browser zeigen, ihn notfalls erst bauen.

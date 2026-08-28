@@ -6,6 +6,8 @@ Nichts. Die Schleife darf nie auf die Optik warten muessen.
 """
 import json
 import socket
+import time
+from uuid import uuid4
 
 ADRESSE = ("127.0.0.1", 49731)
 
@@ -32,6 +34,56 @@ class Anzeige:
             self._sock.sendto(json.dumps(felder).encode("utf-8"), ADRESSE)
         except OSError:
             pass  # Anzeige laeuft nicht -- egal
+
+    def fragen(self, art: str, sekunden: float = 8.0, **felder):
+        """Eine Frage an die Anzeige -- und diesmal MIT Antwort.
+
+        Der uebrige Draht ist mit Absicht einseitig: Der Sender blockiert
+        nie, und laeuft die Anzeige nicht, verschwinden die Meldungen im
+        Nichts. Fuer "was steht auf der Seite" reicht das nicht -- eine
+        Frage ohne Antwort ist keine.
+
+        Also ein zweiter Socket, der nur fuer diese eine Frage lebt:
+        aufmachen, den eigenen Port in der Frage nennen, warten,
+        zumachen. Kein fester zweiter Port, den irgendwer belegt haben
+        koennte, und nichts, was ueber die Frage hinaus offen bleibt.
+
+        Blockiert bis zum Zeitlimit -- also NUR aus einem Faden aufrufen
+        (asyncio.to_thread), nie aus der Schleife heraus.
+
+        Gibt None zurueck, wenn niemand antwortet. Das ist der Normalfall,
+        wenn die Anzeige gar nicht laeuft, und muss vom Aufrufer als
+        "geht gerade nicht" gesagt werden -- nicht als leeres Ergebnis.
+        """
+        if not self._sock:
+            return None
+        rueck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            rueck.bind(("127.0.0.1", 0))
+            nummer = uuid4().hex[:12]
+            self._senden(art=art, antwort_an=rueck.getsockname()[1],
+                         nummer=nummer, **felder)
+            ende = time.monotonic() + sekunden
+            while True:
+                rest = ende - time.monotonic()
+                if rest <= 0:
+                    return None
+                rueck.settimeout(rest)
+                try:
+                    daten, _ = rueck.recvfrom(65535)
+                except OSError:
+                    return None
+                try:
+                    antwort = json.loads(daten.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                # Nur die Antwort auf GENAU diese Frage. Eine verspaetete
+                # von vorhin wuerde sonst die von jetzt beantworten -- und
+                # zwar mit dem Inhalt der falschen Seite.
+                if antwort.get("nummer") == nummer:
+                    return antwort
+        finally:
+            rueck.close()
 
     def zustand(self, was: str, text: str = "") -> None:
         self._senden(art="zustand", zustand=was, text=text)

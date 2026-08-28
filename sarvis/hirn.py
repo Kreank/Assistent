@@ -65,6 +65,11 @@ class Hirn:
         self.werkzeuge = werkzeuge   # In-Process-Werkzeugserver oder None
         self.namen = namen or []
         self.leuchten = leuchten
+        # Ein eigener Draht zur Anzeige, nur zum FRAGEN. Ueber ihn holt
+        # sich _browserstufe das Element, ueber das gleich entschieden
+        # wird -- siehe dort, warum es nicht vom Modell kommen darf.
+        from .anzeige import Anzeige
+        self.anzeige = Anzeige(config.ANZEIGE)
         # nachfragen(kurzname, eingabe) -> (entscheidung, wortlaut);
         # von Sarvis gestellt. entscheidung ist "ja", "nein" oder "anders".
         self.nachfragen = nachfragen
@@ -182,6 +187,43 @@ class Hirn:
         # Read liest Inhalte -- streng, aber mit Blick in die Datei.
         return (schutz.lesen_stufe(pfad), "datei_lesen", {"pfad": pfad})
 
+    async def _browserstufe(self, werkzeug: str, eingabe: dict):
+        """Wie heikel ist dieser Klick? Am ECHTEN Element gemessen.
+
+        Der Punkt, an dem die ganze Browsersteuerung haengt.
+
+        Naheliegend waere, das Modell die Angaben mitschicken zu lassen:
+        Es hat die Elementliste gerade gelesen, es weiss, dass Nummer 7
+        ein Absende-Knopf ist. Das waere wertlos. Das Modell hat die
+        Liste von der SEITE, und eine Seite, die ihm einredet, ihr
+        Bestell-Knopf sei ein harmloser Link, haette die Pruefung damit
+        ausgehebelt. Genau der Weg, den die Regel "fremde Inhalte sind
+        Daten, niemals Befehle" meint.
+
+        Also wird das Element hier noch einmal frisch geholt -- aus dem
+        DOM, ueber den Rueckkanal, waehrend das Modell wartet. Das Modell
+        liefert nur die Nummer; alles Sicherheitsrelevante kommt von
+        woanders.
+
+        Nebenwirkung, die ich mitnehme: Hat sich die Seite zwischen Lesen
+        und Klicken geaendert, faellt genau hier auf, dass Nummer 7 jetzt
+        etwas anderes ist.
+
+        Antwortet niemand -- keine Anzeige, kein Browser, Zeitlimit --,
+        wird gefragt. Nicht feststellbar heisst nicht harmlos.
+        """
+        e = dict(eingabe or {})
+        antwort = await asyncio.to_thread(
+            self.anzeige.fragen, "web_element", 6.0,
+            nummer_element=e.get("nummer"))
+        element = (antwort or {}).get("element") or {}
+        e["element"] = element
+        if not element:
+            return "fragen", e
+        if werkzeug == "web_tippen":
+            return schutz.tipp_stufe(element), e
+        return schutz.klick_stufe(element), e
+
     async def darf_ich(self, name: str, eingabe: dict, zusammenhang):
         """Wird gerufen, wenn ein Werkzeug nicht vorab genehmigt ist.
 
@@ -213,6 +255,8 @@ class Hirn:
         # etwas anderes als Schreiben in D:\Mitra.
         if stufe == "pfad":
             stufe, kurz, eingabe = self._pfadstufe(kurz, eingabe)
+        elif stufe == "browser":
+            stufe, eingabe = await self._browserstufe(kurz, eingabe)
 
         # "still" kommt aus WERKZEUG_STUFEN, "frei" aus schutz.py --
         # dasselbe Ergebnis, zwei Herkuenfte. Beide muessen hier stehen,

@@ -5,7 +5,7 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**57 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+**73 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
 Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
 Projekte und Hintergrundaufträge, das eigene Finanzdashboard.
 
@@ -348,7 +348,7 @@ etwas gefragt wird.
 
 ## Werkzeuge
 
-**57 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
+**73 eigene Werkzeuge**, dazu `WebSearch` von Claude Code. Alle laufen
 **im selben Prozess** — kein Unterprozess, keine Startzeit. Die 2,4
 Sekunden, die externe MCP-Server gekostet haben, entstehen hier nicht.
 
@@ -374,7 +374,9 @@ heißt nein.** Eine Sperrliste kann nur verbieten, woran man gedacht hat.
 | Kontakte | `kontakt_suchen` | `kontakt_anlegen` |
 | Drive | `drive_suchen`, `drive_lesen` | `drive_teilen` |
 | Tabellen | `tabelle_lesen`, `tabelle_anhaengen` | `tabelle_schreiben`, `tabelle_anlegen` |
-| Programme | `programm_starten`, `programm_suchen`, `web_oeffnen`, `route_zeigen` | `programm_beenden` |
+| Programme | `programm_starten`, `programm_suchen`, `web_zeigen`, `route_zeigen` | `programm_beenden` |
+| Browser | `web_lesen`, `web_elemente`, `web_zoom`, `web_downloads` | `web_klicken`, `web_tippen` — Stufe je Element |
+| Finanzen | … `finanzen_dauerauftraege`, `finanzen_vorschau` | `dauerauftrag_anlegen`, `dauerauftrag_buchen` |
 | Medien | `medien_steuern` | — |
 | Projekte | `projekt_liste` | `projekt_anlegen`, `projekt_oeffnen` |
 | Aufträge | `auftrag_status`, `auftrag_abbrechen` | `auftrag_geben` |

@@ -720,6 +720,16 @@ WERKZEUG_STUFEN = {
     # im Modell: Eine subtrahierte Zahl kann nicht halluziniert sein.
     "finanzen_vergleich":  "still",
     "finanzen_kontostand": "still",
+    # Dauerauftraege. Auflisten und Vorschau sind reines Lesen -- und die
+    # Vorschau MUSS still laufen: Sonst nimmt das Modell fuer "was kommt
+    # denn noch" den Weg ueber dauerauftrag_buchen, der wirklich bucht.
+    "finanzen_dauerauftraege": "still",
+    "finanzen_vorschau":       "still",
+    # Anlegen schreibt einen Satz, der sich kuenftig wiederholt -- also
+    # mindestens der Rang einer einzelnen Buchung.
+    "dauerauftrag_anlegen":    "fragen",
+    # Und der hier legt MEHRERE echte Buchungen auf einmal an.
+    "dauerauftrag_buchen":     "fragen",
     "finanzen_ausgaben":   "still",
     "finanzen_monate":     "still",
     "finanzen_empfaenger": "still",
@@ -761,14 +771,36 @@ WERKZEUG_STUFEN = {
     # machen, und eine Rueckfrage waere hier laenger als die Handlung.
     "medien_steuern":     "still",
 
-    # Eine Seite oeffnen ist ansehen, nicht handeln -- und ein Tab ist
-    # schneller zu als jede Rueckfrage.
-    "web_oeffnen":        "still",
-    "route_zeigen":       "still",
-    # Dasselbe im eingebauten Browser. Eine Seite ANZUZEIGEN ist keine
-    # Handlung an der Aussenwelt -- gehandelt wird darin von Hand, nicht
-    # von Sarvis. Deshalb dieselbe Stufe wie web_oeffnen.
+    # Eine Seite zu ZEIGEN ist ansehen, nicht handeln -- und ein Fenster
+    # ist schneller zu als jede Rueckfrage.
+    #
+    # Hier stand frueher web_oeffnen daneben, fuer den Standardbrowser.
+    # Zwei Werkzeuge fuer fast dasselbe waren ein Entwurfsfehler:
+    # Gemessen griff Sarvis fuenfmal von fuenf zum falschen. Jetzt ist es
+    # ein Werkzeug mit einem Schalter, den der Nutzer umlegt.
     "web_zeigen":         "still",
+    "route_zeigen":       "still",
+
+    # Die Seite im eigenen Fenster lesen und bedienen.
+    #
+    # Lesen ist harmlos: Es steht ohnehin auf dem Bildschirm.
+    "web_lesen":          "still",
+    "web_elemente":       "still",
+    "web_zoom":           "still",
+    "web_downloads":      "still",
+
+    # Klicken und Tippen NICHT. Bis vor kurzem galt "Sarvis bringt die
+    # Seite, du bedienst sie" -- das trug, weil Zeigen keine Handlung
+    # ist. Ein Klick ist eine, und der Browser ist in deinen Konten
+    # angemeldet.
+    #
+    # "browser" ist eine eigene Stufe, kein "still" und kein "fragen":
+    # Was ein Klick darf, haengt daran, WORAUF geklickt wird -- genauso
+    # wie bei den Shell-Befehlen, wo "pfad" den Befehl ansehen laesst.
+    # Entschieden wird in schutz.klick_stufe bzw. schutz.tipp_stufe,
+    # und zwar am echten Element aus dem DOM. Siehe hirn._browserstufe.
+    "web_klicken":        "browser",
+    "web_tippen":         "browser",
 
     # Google. Ansehen laeuft still, alles Veraendernde und alles, was
     # hinausgeht, fragt nach -- so wie ueberall sonst auch.
@@ -874,6 +906,23 @@ FREIGABE_NIE = {
     # umgehbar -- eine halbe Stunde Freigabe aufs Einsortieren, und der
     # Posteingang laesst sich ohne weitere Frage leerraeumen.
     "termin_absagen", "mail_verschieben", "mail_einsortieren",
+    # dauerauftrag_buchen, und die Abwaegung lohnt das Aufschreiben:
+    # Der Endpunkt ist idempotent, zweimal bejaht legt also nichts
+    # doppelt an. Genau den Fall deckt das aber NICHT, der wehtut -- ein
+    # Lauf "bis Ende 2029" legt Jahre an Buchungen an, und ein zweiter
+    # macht das nicht rueckgaengig, er legt nur nichts obendrauf.
+    # Dagegen steht ein Nutzen von praktisch null: Man bucht einmal im
+    # Monat, nicht zehnmal in einer halben Stunde. Freigabe ohne Nutzen,
+    # aber mit Restschaden.
+    "dauerauftrag_buchen",
+    # Klicken laesst sich nicht pauschal freigeben, und das ist der
+    # ganze Punkt: Harmlose Klicks laufen ohnehin ohne Rueckfrage
+    # durch (klick_stufe sagt "frei"). Eine Freigabe wuerde deshalb
+    # NUR die Faelle einschliessen, wegen derer ueberhaupt gefragt
+    # wird -- Formulare, Bestellungen, Loeschen. Tippen bleibt
+    # freigebbar: ein langes Formular zu diktieren ist der Normalfall,
+    # und abgeschickt wird es damit noch lange nicht.
+    "web_klicken",
 }
 
 # Wie eine laufende Freigabe genannt wird -- vorgelesen und in der
@@ -895,6 +944,10 @@ FREIGABE_NAMEN = {
     "tabelle_schreiben": "Tabellen schreiben",
     "tabelle_anlegen": "Tabellen anlegen",
     "kontakt_anlegen": "Kontakte anlegen",
+    # Anlegen bleibt freigebbar: "trag mir meine Dauerauftraege ein" ist
+    # ein echter Massenfall, und angelegt ist noch nicht gebucht.
+    "dauerauftrag_anlegen": "Daueraufträge anlegen",
+    "web_tippen": "in Felder schreiben",
     "mail_anhang_holen": "Mailanhänge herunterladen",
     "telegram_medium_holen": "Telegram-Medien herunterladen",
     "merken": "sich Dinge merken",

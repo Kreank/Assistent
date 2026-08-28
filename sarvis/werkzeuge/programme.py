@@ -384,11 +384,19 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"{alle} {'ist' if einzeln else 'sind'} beendet."}]}
 
     @tool(
-        "web_oeffnen",
-        "Öffnet eine Internetseite im Standardbrowser. Für 'geh auf "
-        "YouTube', 'mach mal Amazon auf' oder 'such auf YouTube nach "
-        "Katzenvideos'. Bekannte Seiten kennt es beim Namen, sonst nimmt "
-        "es die Adresse.",
+        "web_zeigen",
+        "Zeigt eine Internetseite. Für 'geh auf YouTube', 'mach mal Amazon "
+        "auf', 'zeig mir meinen Kalender als Monatsansicht', 'zeig mir die "
+        "Seite'. Bekannte Seiten kennt es beim Namen, sonst nimmt es die "
+        "Adresse. Die Seite erscheint in Sarvis' eigenem Fenster; es lässt "
+        "sich größer ziehen und schließt mit Escape. "
+        "extern=true NUR, wenn der Nutzer einen Browser als SEINEN "
+        "bezeichnet: 'in meinem Browser', 'in meinem Chrome', 'im "
+        "richtigen Browser', 'im normalen Browser'. Das bloße Wort "
+        "'Browser' reicht NICHT — 'öffne im Browser' und 'mach den "
+        "Browser auf' meinen Sarvis' Fenster, denn das IST der Browser. "
+        "Im Zweifel ohne extern: Dort kann Sarvis die Seite hinterher "
+        "lesen und bedienen, im fremden Browser nicht.",
         {
             "type": "object",
             "properties": {
@@ -405,97 +413,74 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     "description": "Optional: wonach dort gesucht werden "
                                    "soll. Nur bei den bekannten Seiten.",
                 },
-            },
-            "required": ["ziel"],
-        },
-    )
-    async def web_oeffnen(args):
-        ziel = (args.get("ziel") or "").strip()
-        suche = (args.get("suche") or "").strip()
-        if not ziel:
-            return {"content": [{"type": "text", "text":
-                    "Welche Seite denn?"}], "is_error": True}
-
-        adresse, name, gesucht = _adresse(ziel, suche)
-        try:
-            await asyncio.to_thread(
-                subprocess.Popen,
-                ["powershell.exe", "-NoProfile", "-Command",
-                 f'Start-Process "{adresse}"'],
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception as e:
-            return {"content": [{"type": "text", "text":
-                    f"Ging nicht: {e}"}], "is_error": True}
-
-        if leuchten:
-            leuchten("Websuche")
-        vermerken(f"web_oeffnen: {adresse}")
-        if suche and not gesucht:
-            # Er hat die Adresse geoeffnet, aber nicht gesucht. Das zu
-            # verschweigen hiesse, eine Suche zu behaupten, die nie lief.
-            schluss = (f" ist offen. Nach {suche} habe ich nicht gesucht -- "
-                       "in eine fertige Adresse passt kein Suchbegriff.")
-        elif gesucht and suche:
-            schluss = f" ist offen, Suche nach {suche}."
-        else:
-            schluss = " ist offen."
-        return {"content": [{"type": "text", "text": name + schluss}]}
-
-    @tool(
-        "web_zeigen",
-        "Zeigt eine Seite IN der Anzeige, statt den Browser daneben "
-        "aufzumachen. Für 'zeig mir meinen Kalender als Monatsansicht', "
-        "'zeig mir die Seite', 'mach das hier auf'. Nimm dieses Werkzeug, "
-        "wenn der Nutzer etwas SEHEN will; web_oeffnen, wenn er in seinem "
-        "gewohnten Browser weiterarbeiten will. Das Fenster lässt sich "
-        "größer ziehen und schließt mit Escape.",
-        {
-            "type": "object",
-            "properties": {
-                "ziel": {
-                    "type": "string",
-                    "description": "Name einer bekannten Seite oder eine "
-                                   "vollständige Adresse.",
-                },
-                "suche": {
-                    "type": "string",
-                    "description": "Optional: wonach dort gesucht werden "
-                                   "soll. Nur bei den bekannten Seiten.",
+                "extern": {
+                    "type": "boolean",
+                    "description": "Im Standardbrowser des Nutzers öffnen "
+                                   "statt in Sarvis' Fenster. Nur wenn er "
+                                   "das ausdrücklich sagt.",
                 },
             },
             "required": ["ziel"],
         },
     )
     async def web_zeigen(args):
+        """Eine Seite zeigen -- hier, oder auf Wunsch im eigenen Browser.
+
+        Frueher waren das ZWEI Werkzeuge, web_oeffnen und web_zeigen, und
+        das Modell musste sich zwischen zwei fast gleichen Beschreibungen
+        entscheiden. Gemessen an acht Zurufen: Es nahm fuenfmal von fuenf
+        das falsche -- auch bei "zeig mir meinen Kalender als
+        Monatsansicht", wo es die richtige Monatsadresse baute und sie
+        dann im Standardbrowser oeffnete.
+
+        Jetzt gibt es nichts zu entscheiden: einen Weg, und die Ausnahme
+        kommt vom Nutzer. Das ist auch der Grund, warum der Engine-Browser
+        der Normalfall ist und nicht umgekehrt -- Lesen, Klicken und
+        Herunterladen gehen nur dort. In einem Chrome-Fenster daneben
+        waere "und jetzt klick auf das erste Video" nicht mehr moeglich.
+        """
         ziel = (args.get("ziel") or "").strip()
         suche = (args.get("suche") or "").strip()
+        extern = bool(args.get("extern"))
         if not ziel:
             return {"content": [{"type": "text", "text":
                     "Welche Seite denn?"}], "is_error": True}
 
         adresse, name, gesucht = _adresse(ziel, suche)
-        sicht.browser(adresse)
+
+        if extern:
+            try:
+                await asyncio.to_thread(
+                    subprocess.Popen,
+                    ["powershell.exe", "-NoProfile", "-Command",
+                     f'Start-Process "{adresse}"'],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception as e:
+                return {"content": [{"type": "text", "text":
+                        f"Ging nicht: {e}"}], "is_error": True}
+        else:
+            sicht.browser(adresse)
+
         if leuchten:
             leuchten("Websuche")
-        vermerken(f"web_zeigen: {adresse}")
+        vermerken(f"web_zeigen{' (extern)' if extern else ''}: {adresse}")
 
-        # Dieselbe Ehrlichkeit wie bei web_oeffnen: Eine Suche, die nicht
-        # lief, wird nicht behauptet.
+        wo = "ist offen" if extern else "steht in der Anzeige"
+        # Eine Suche, die nicht lief, wird nicht behauptet.
         if suche and not gesucht:
-            schluss = (f" steht in der Anzeige. Nach {suche} habe ich nicht "
-                       "gesucht -- in eine fertige Adresse passt kein "
-                       "Suchbegriff.")
+            schluss = (f" {wo}. Nach {suche} habe ich nicht gesucht -- in "
+                       "eine fertige Adresse passt kein Suchbegriff.")
         elif gesucht and suche:
-            schluss = f" steht in der Anzeige, Suche nach {suche}."
+            schluss = f" {wo}, Suche nach {suche}."
         else:
-            schluss = " steht in der Anzeige."
+            schluss = f" {wo}."
 
         # Der Hinweis auf die eigene Anmeldung faellt genau einmal: beim
         # ersten Mal, wenn es das Profil noch nicht gibt. Danach waere er
         # Geschwaetz -- und beim ersten Mal ist er der Unterschied
         # zwischen "kaputt" und "einmal anmelden".
-        if not config.BROWSER_PROFIL.exists():
+        if not extern and not config.BROWSER_PROFIL.exists():
             schluss += (" Das ist ein eigener Browser, nicht dein Chrome -- "
                         "bei angemeldeten Seiten musst du dich dort einmal "
                         "anmelden.")
@@ -559,5 +544,184 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"Route {wie} " + (f"von {von} " if von else "")
                 + f"nach {nach} ist offen."}]}
 
+    # --- Die Seite lesen und bedienen -------------------------------------
+    #
+    # Alle sechs sprechen mit dem Anzeigeprozess, in dem der Browser lebt.
+    # sicht.fragen() blockiert bis zum Zeitlimit, deshalb geht es durch
+    # einen Faden -- die Schleife darf nie auf die Optik warten muessen.
+
+    async def _browser_fragen(art: str, sekunden: float = 12.0, **felder):
+        antwort = await asyncio.to_thread(sicht.fragen, art, sekunden,
+                                          **felder)
+        if antwort is None:
+            return None, ("Die Anzeige antwortet nicht. Läuft sie noch?")
+        if not antwort.get("ok"):
+            return None, str(antwort.get("grund") or "Das ging nicht.")
+        return antwort, ""
+
+    @tool(
+        "web_lesen",
+        "Liest vor, was auf der gezeigten Seite steht. Für 'was steht da', "
+        "'lies mir das vor', 'fass die Seite zusammen'. Nur die Seite im "
+        "eigenen Fenster — in einem fremden Browser sieht Sarvis nichts.",
+        {"type": "object", "properties": {}},
+    )
+    async def web_lesen(args):
+        antwort, fehler = await _browser_fragen("web_lesen")
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        if leuchten:
+            leuchten("Websuche")
+        return {"content": [{"type": "text",
+                             "text": antwort.get("text") or "(nichts lesbar)"}]}
+
+    @tool(
+        "web_elemente",
+        "Zählt auf, was auf der Seite anklickbar oder beschreibbar ist — "
+        "nummeriert. Diese Nummern brauchen web_klicken und web_tippen. "
+        "Vor jedem Klick einmal aufrufen: Nummern von vorhin können auf "
+        "eine andere Seite zeigen.",
+        {"type": "object", "properties": {}},
+    )
+    async def web_elemente(args):
+        antwort, fehler = await _browser_fragen("web_elemente")
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        elemente = antwort.get("elemente") or []
+        if not elemente:
+            return {"content": [{"type": "text", "text":
+                    "Auf der Seite ist nichts zu bedienen."}]}
+        zeilen = []
+        for e in elemente:
+            teile = [f"{e.get('nummer')}. {e.get('art')}: "
+                     f"{e.get('text') or '(ohne Beschriftung)'}"]
+            # Was die Rueckfrage spaeter auffangen wird, steht hier schon
+            # dabei -- dann weiss das Modell vorher, dass es nicht der
+            # harmlose Weg ist, und muss nicht raten.
+            if e.get("absenden"):
+                teile.append("(schickt das Formular ab)")
+            elif e.get("im_formular"):
+                teile.append("(im Formular)")
+            zeilen.append(" ".join(teile))
+        if leuchten:
+            leuchten("Websuche")
+        return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
+
+    @tool(
+        "web_klicken",
+        "Klickt ein Element auf der gezeigten Seite an — die Nummer kommt "
+        "aus web_elemente. Vorher web_elemente aufrufen, sonst stimmt die "
+        "Nummer womöglich nicht mehr.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer",
+                           "description": "Nummer aus web_elemente."},
+            },
+            "required": ["nummer"],
+        },
+    )
+    async def web_klicken(args):
+        antwort, fehler = await _browser_fragen(
+            "web_klicken", nummer_element=args.get("nummer"))
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        e = antwort.get("ergebnis") or {}
+        if not e.get("geklickt"):
+            return {"content": [{"type": "text", "text":
+                    e.get("grund") or "Das ging nicht."}], "is_error": True}
+        if leuchten:
+            leuchten("Websuche")
+        vermerken(f"web_klicken: {e.get('text')!r}")
+        satz = f"Geklickt: {e.get('text') or 'das Element'}."
+        if e.get("navigiert"):
+            satz += " Die Seite hat gewechselt."
+        if e.get("neues_fenster"):
+            # Ehrlich gesagt statt verschwiegen: Der Link wollte ein neues
+            # Fenster, und das gibt es hier nicht. Sonst stuende Sarvis da
+            # und behauptete, er habe geklickt, waehrend nichts passiert.
+            satz += (" Der Link wollte ein neues Fenster aufmachen — das "
+                     "kann ich hier nicht, es ist nichts passiert.")
+        return {"content": [{"type": "text", "text": satz}]}
+
+    @tool(
+        "web_tippen",
+        "Schreibt Text in ein Eingabefeld der gezeigten Seite. Die Nummer "
+        "kommt aus web_elemente. Abgeschickt wird dabei NICHT — dafür "
+        "danach den Absende-Knopf mit web_klicken.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer",
+                           "description": "Nummer aus web_elemente."},
+                "text": {"type": "string",
+                         "description": "Was hineingeschrieben werden soll."},
+            },
+            "required": ["nummer", "text"],
+        },
+    )
+    async def web_tippen(args):
+        antwort, fehler = await _browser_fragen(
+            "web_tippen", nummer_element=args.get("nummer"),
+            text=str(args.get("text") or ""))
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        e = antwort.get("ergebnis") or {}
+        if not e.get("getippt"):
+            return {"content": [{"type": "text", "text":
+                    e.get("grund") or "Das ging nicht."}], "is_error": True}
+        if leuchten:
+            leuchten("Websuche")
+        return {"content": [{"type": "text", "text":
+                f"Eingetragen: {e.get('wert_danach') or e.get('text')}."}]}
+
+    @tool(
+        "web_zoom",
+        "Macht die gezeigte Seite größer oder kleiner. Für 'mach das "
+        "größer', 'zoom mal rein'. 1 ist die Normalgröße.",
+        {
+            "type": "object",
+            "properties": {
+                "faktor": {"type": "number",
+                           "description": "0,5 bis 3. 1 ist normal."},
+            },
+            "required": ["faktor"],
+        },
+    )
+    async def web_zoom(args):
+        antwort, fehler = await _browser_fragen(
+            "web_zoom", 6.0, faktor=args.get("faktor"))
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        return {"content": [{"type": "text", "text":
+                f"Auf {antwort.get('faktor')} gestellt."}]}
+
+    @tool(
+        "web_downloads",
+        "Sagt, was von den gezeigten Seiten heruntergeladen wurde und wo "
+        "es liegt. Für 'wo ist die Datei hin', 'hast du das runtergeladen'.",
+        {"type": "object", "properties": {}},
+    )
+    async def web_downloads(args):
+        antwort, fehler = await _browser_fragen("web_downloads", 6.0)
+        if fehler:
+            return {"content": [{"type": "text", "text": fehler}],
+                    "is_error": True}
+        dateien = antwort.get("dateien") or []
+        if not dateien:
+            return {"content": [{"type": "text", "text":
+                    "Von der Seite wurde nichts heruntergeladen."}]}
+        zeilen = [f"{d.get('name')} ({d.get('zustand')}) — {d.get('pfad')}"
+                  for d in dateien[-6:]]
+        return {"content": [{"type": "text", "text":
+                f"{len(dateien)} Datei(en):\n" + "\n".join(zeilen)}]}
+
     return [programm_starten, programm_suchen, programm_beenden,
-            web_oeffnen, web_zeigen, route_zeigen]
+            web_zeigen, route_zeigen,
+            web_lesen, web_elemente, web_klicken, web_tippen,
+            web_zoom, web_downloads]

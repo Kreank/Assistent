@@ -380,6 +380,29 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
             frage += " Das Label lege ich dabei neu an."
         return frage
 
+    if werkzeug == "dauerauftrag_anlegen":
+        # Zwei Kleinigkeiten, die nur beim VORLESEN auffallen: Ein Minus
+        # vor dem Betrag spricht Piper nicht, es verschwindet einfach --
+        # aus "-312,00" wuerde eine Einnahme. Und der Rhythmus steht in
+        # der Schnittstelle ohne Umlaut ("jaehrlich"). Beides kommt hier
+        # aus finanzen.py, damit es nur eine Fassung davon gibt.
+        from .werkzeuge.finanzen import _rhythmus
+        roh = str(e.get("betrag") or "").strip()
+        richtung = "raus" if roh.startswith("-") else "rein"
+        betrag = roh.lstrip("-") or "dem genannten Betrag"
+        return (f"Soll ich einen Dauerauftrag {_kuerzen(e.get('name'), 40)} "
+                f"über {betrag} Euro {richtung} anlegen, "
+                f"{_rhythmus(e.get('rhythmus') or 'monatlich')} ab "
+                f"{e.get('start') or 'dem genannten Datum'}?")
+
+    if werkzeug == "dauerauftrag_buchen":
+        # Das "bis" MUSS in die Frage. Es ist der einzige Unterschied
+        # zwischen "bucht den faelligen Monat" und "legt drei Jahre
+        # Buchungen an" -- und zurueckholen laesst sich das nicht.
+        bis = e.get("bis")
+        return ("Soll ich die fälligen Daueraufträge buchen"
+                + (f", alles bis {bis}?" if bis else " bis heute?"))
+
     if werkzeug == "telegram_medium_holen":
         return (f"Soll ich das Medium aus Nachricht "
                 f"{e.get('nachricht_id')} im Chat mit "
