@@ -530,14 +530,44 @@ class Hud(QWidget):
         Mehrere je Seite werden untereinander gestapelt. Der Regelfall
         bleibt eine je Seite; der Stapel ist dafuer da, dass ein dritter
         Kasten nicht unsichtbar unter dem zweiten verschwindet.
+
+        ZWEI DURCHGAENGE, und das ist der Punkt: Die Sorte sagt nur, wo
+        eine Kachel hin SOLL. Wo sie landet, entscheidet
+        Kachel._platzieren -- passt die gewuenschte Seite nicht mehr auf
+        den Schirm, klappt es auf die andere um. Wer danach nach der
+        gewuenschten Seite stapelt, stapelt am falschen Ort.
+
+        Gemessen bei der Engine auf x=3801 des Ultrawide: Bis 360
+        Rasterpunkte Breite passt eine Antwort rechts (529 Pixel frei).
+        Ab 500 klappt sie nach links, wo 3869 frei sind -- und lag dort
+        zu 100 Prozent auf der Zustands-Kachel, weil beide den Versatz
+        null ihrer je eigenen Seite trugen. Heute faellt das nicht auf:
+        Die breiteste Form ist 360. Eine breite Form wie ein Fluss
+        loest es sofort aus.
+
+        Deshalb wird erst hingestellt und NACHGESEHEN, wo die Kachel
+        wirklich steht, und erst im zweiten Durchgang gestapelt. Die
+        Alternative waere, die Passt-das-noch-Rechnung hier zu
+        wiederholen -- zwei Stellen, die dasselbe rechnen und
+        auseinanderlaufen, sobald eine sich aendert.
         """
         anker = self._sichtbar()
         luft = round(10 * SKALA)
+        sichtbare = [k for k in self.kacheln.values() if k.isVisible()]
+
+        # Erster Durchgang: hinstellen und fragen, wo sie gelandet ist.
+        # Links vom Anker heisst links, alles andere rechts.
+        seiten = []
+        for kachel in sichtbare:
+            wunsch = "links" if kachel.sorte == "zustand" else "rechts"
+            kachel.platzieren_an(anker, wunsch, 0)
+            seiten.append("links" if kachel.x() < anker.left() else "rechts")
+
+        # Zweiter Durchgang: nach der TATSAECHLICHEN Seite stapeln. Die
+        # Seite wird jetzt ausdruecklich verlangt -- dort hat sie eben
+        # gepasst, also bleibt sie auch diesmal dort.
         versatz = {"rechts": 0, "links": 0}
-        for kachel in self.kacheln.values():
-            if not kachel.isVisible():
-                continue
-            seite = "links" if kachel.sorte == "zustand" else "rechts"
+        for kachel, seite in zip(sichtbare, seiten):
             kachel.platzieren_an(anker, seite, versatz[seite])
             versatz[seite] += kachel.height() + luft
 
