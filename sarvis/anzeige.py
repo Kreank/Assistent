@@ -11,6 +11,15 @@ from uuid import uuid4
 
 ADRESSE = ("127.0.0.1", 49731)
 
+# Wie viele Datenpunkte je Form hoechstens mitgehen. Siehe kachel(),
+# warum das nicht eine Zahl fuer alle ist.
+PUNKTE_DECKEL = {
+    "liste": 12, "blasen": 12, "vergleich": 12, "text": 12,
+    "balken": 24,       # zwei Jahre Monatswerte
+    "torte": 8,         # mehr Tortenstuecke unterscheidet niemand
+    "kategorien": 30,   # gruppiert, also lesbar auch bei vielen
+}
+
 # Zustaende
 RUHIG = "ruhig"
 HOERT = "hoert"
@@ -143,10 +152,17 @@ class Anzeige:
         """
         self._senden(art="kachel", name=str(name), sorte=str(sorte),
                      kopf=str(kopf), gross=str(gross), stand=str(stand),
-                     # Zwoelf reichen. Eine Kachel wird im Vorbeigehen
-                     # gelesen, nicht studiert -- und der Deckel haelt
-                     # nebenbei das Datagramm klein.
-                     punkte=list(punkte or [])[:12],
+                     # Der Deckel haengt an der Form. Zwoelf reichen zum
+                     # Vorbeigehen -- aber ein Balkendiagramm ueber zwoelf
+                     # Monate braucht genau zwoelf, und eine Kategorien-
+                     # liste vertraegt mehr, weil sie gruppiert ist.
+                     #
+                     # Am Datagramm liegt es nicht: Gemessen sind 150
+                     # Buchungen 24.570 Bytes gegen einen harten Deckel
+                     # von 65.507. Es liegt an der Lesbarkeit, und die
+                     # ist je Form verschieden.
+                     punkte=list(punkte or [])[:PUNKTE_DECKEL.get(
+                         str(form or "liste"), 12)],
                      # Die Form entscheidet, WIE gemalt wird -- Liste,
                      # Gespraechsblasen, zwei Spalten mit Differenz oder
                      # Fliesstext. Die Spaltennamen sind Inhalt, keine

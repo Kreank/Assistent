@@ -437,6 +437,14 @@ Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlic
 
 Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
 
+Du hast eine Anzeige, und du sollst sie benutzen. Sobald deine Antwort aus Zahlen, einer Liste, einem Verlauf oder einem Vergleich besteht, stell sie hin, statt sie nur vorzulesen. Vorgelesene Zahlen sind nach dem dritten Posten weg.
+
+Zwei Wege, und die Größe entscheidet. kachel_zeigen ist eine Kachel neben der Engine, für den Blick nebenbei: ein paar Zeilen, ein Balken- oder Tortendiagramm, ein Gesprächsverlauf, ein Vergleich. seite_zeigen ist eine Seite im eingebauten Browser, fürs Hinsetzen: eine richtige Auswertung, mehrere Diagramme, etwas zum Durchsehen oder Behalten.
+
+Bei drei Zahlen fragst du nicht, da nimmst du die Kachel. Bei einer Jahresauswertung fragst du auch nicht, da nimmst du die Seite. Nur wenn es wirklich dazwischen liegt, fragst du in einem Halbsatz: "Als Kachel daneben oder als Seite zum Hinsetzen?" Das ist eine Frage zur Sache, keine Erlaubnisfrage — sie ist erlaubt.
+
+Was du hinstellst, sagst du trotzdem. Die Anzeige ersetzt die Antwort nicht, sie zeigt sie. Und schick den Nutzer nie auf eine fremde Webseite und lass ihn sich nirgends anmelden, um etwas zu sehen, das du ihm gerade vorgelesen hast.
+
 Du bist der Einzige, der mit dem Nutzer spricht. Gibst du Arbeit an einen Unter-Arbeiter ab, dann redet der NICHT mit ihm: Was der Arbeiter meldet, ist für dich bestimmt, nicht zum Vorlesen. Sag dem Arbeiter das auch — er berichtet an dich, du berichtest dem Nutzer. Und du berichtest in deinen Worten, auf Deutsch.
 
 Deine Antwort wird VORGELESEN, nicht gelesen. Fasse zusammen: zwei, drei Sätze, das Wichtigste zuerst. Was du gebaut hast, gehört in einen Satz — nicht Datei für Datei, nicht Schritt für Schritt. Die ganze Geschichte des Arbeiters will niemand hören. Der Nutzer fragt nach, wenn er mehr wissen will; eine Aufzählung von zehn Punkten ist gesprochen nicht auszuhalten.
@@ -562,6 +570,10 @@ def telegram_bereit() -> bool:
 # Der Sandkasten. Bewusst NEBEN Privat, Mitra und Wissen, nicht darin:
 # Der Ordner ist die Grenze, nicht die Vernunft des Modells.
 PROJEKTE = Path("D:/Projekte")
+
+# Wo Sarvis ablegt, was beim Antworten entsteht -- Berichte, Auswertungen,
+# Zwischenstaende. Siehe FREI_SCHREIBEN weiter unten.
+ABLAGE = WURZEL / "ablage"
 
 # Wohin ein neues Projekt darf. Der Schluessel ist das Wort, das Sarvis
 # versteht; der Wert der Ordner.
@@ -694,6 +706,19 @@ FREI_LESEN = [
 # auch schreiben -- er fragt vorher.
 FREI_SCHREIBEN = [
     PROJEKTE,
+    # Sarvis' eigener Werktisch. Hier legt er ab, was beim Antworten
+    # entsteht: Berichte als Seite, Auswertungen, Zwischenstaende.
+    #
+    # Warum still und nicht mit Rueckfrage: Gemessen hat er sich schon
+    # ohne diesen Ordner beholfen -- "Soll ich chat-niko.html anlegen?
+    # Der Ordner tmp entsteht dabei in Sarvis im Ordner Privat." Die
+    # Absicht war richtig, der Ort war falsch, und die Rueckfrage stellte
+    # die falsche Frage: Sie fragte nach dem ORDNER, waehrend es um die
+    # Darstellung ging. Mit einem festen Platz faellt beides weg.
+    #
+    # Der Ordner steht in der .gitignore. Was hier entsteht, ist
+    # Arbeitsergebnis und kein Quelltext.
+    ABLAGE,
 ]
 
 # Wo ganze Ordner still DURCHSUCHT werden duerfen.
@@ -835,6 +860,19 @@ WERKZEUG_STUFEN = {
     # WAEHREND der Antwort ein, nicht nach einer Rueckfrage darueber.
     "kachel_zeigen":      "still",
     "kachel_weg":         "still",
+    # Die grosse Schwester der Kachel: eine ganze Seite im eingebauten
+    # Browser. Still aus denselben Gruenden -- es geht nichts nach
+    # draussen, es aendert nichts, und geschrieben wird in Sarvis'
+    # eigenen Werktisch (ABLAGE, steht in FREI_SCHREIBEN und in der
+    # .gitignore). Der Inhalt stammt von ihm selbst und nicht aus
+    # fremder Hand; genau das ist der Unterschied zu mail_anhang_holen,
+    # das deshalb fragt.
+    #
+    # Und eine Rueckfrage waere hier unbenutzbar: Man zeigt etwas
+    # WAEHREND der Antwort, nicht nach einer Rueckfrage darueber. Die
+    # falsche Frage ("Soll ich chat-niko.html anlegen?") war der Anlass
+    # fuer das Werkzeug.
+    "seite_zeigen":       "still",
     # Der Gespraechsverlauf ist kein Gedaechtnis, sondern das Protokoll
     # der eigenen Sitzung -- Nachschlagen darin ist Nachlesen dessen, was
     # ohnehin gesagt wurde.

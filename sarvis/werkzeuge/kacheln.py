@@ -61,9 +61,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         "Webseite und lass ihn sich NICHT anmelden für etwas, das du ihm "
         "gerade vorgelesen hast. Sag den Inhalt trotzdem — die Kachel "
         "ersetzt die Antwort nicht, sie zeigt sie.\n"
-        "Wähle die Form nach dem Inhalt: Nachrichten und Mails als "
+        "Wähle die Form nach dem Inhalt: ein Verlauf über Monate als "
+        "'balken', Anteile an einem Ganzen als 'torte', Posten mit "
+        "Oberbegriffen als 'kategorien', Nachrichten und Mails als "
         "'blasen', zwei Zeiträume nebeneinander als 'vergleich', eine "
-        "Zusammenfassung als 'text', alles Übrige als 'liste'.",
+        "Zusammenfassung als 'text', alles Übrige als 'liste'.\n"
+        "Für eine GROSSE Auswertung — viele Werte, mehrere Diagramme, "
+        "etwas zum Durchsehen — nimm stattdessen seite_zeigen.",
         {
             "type": "object",
             "properties": {
@@ -75,13 +79,21 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 },
                 "form": {
                     "type": "string",
-                    "enum": ["liste", "blasen", "vergleich", "text"],
+                    "enum": ["liste", "blasen", "vergleich", "text",
+                             "balken", "torte", "kategorien"],
                     "description": "liste: Zeilen mit Wert und Balken "
-                                   "(Vorgabe). blasen: ein Gesprächsverlauf, "
-                                   "Telegram oder Mail. vergleich: zwei "
-                                   "Zeiträume nebeneinander, die Differenz "
-                                   "rechnet die Kachel selbst. text: ein "
-                                   "Fließtext, Zusammenfassung oder Auszug.",
+                                   "(Vorgabe). balken: senkrechte Säulen mit "
+                                   "Achse — für einen Verlauf über Monate "
+                                   "oder Wochen, Minuswerte gehen nach "
+                                   "unten. torte: Kreisdiagramm für Anteile "
+                                   "an einem Ganzen, höchstens acht Stücke. "
+                                   "kategorien: Posten unter Oberbegriffen, "
+                                   "jede Gruppe mit eigener Summe. blasen: "
+                                   "ein Gesprächsverlauf, Telegram oder "
+                                   "Mail. vergleich: zwei Zeiträume "
+                                   "nebeneinander, die Differenz rechnet die "
+                                   "Kachel selbst. text: ein Fließtext, "
+                                   "Zusammenfassung oder Auszug.",
                 },
                 "spalten": {
                     "type": "array",
@@ -93,7 +105,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 },
                 "punkte": {
                     "type": "array",
-                    "description": "Die Zeilen, höchstens zwölf.",
+                    "description": "Die Zeilen. Zwölf bei den meisten "
+                                   "Formen, vierundzwanzig bei balken, acht "
+                                   "bei torte, dreißig bei kategorien — was "
+                                   "darüber liegt, wird abgeschnitten.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -109,8 +124,22 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                             "zahl": {"type": "number",
                                      "description": "Der rohe Wert, wenn es "
                                                     "einer ist — daraus wird "
-                                                    "ein Balken. Bei Geld der "
-                                                    "Betrag ohne Vorzeichen."},
+                                                    "der Balken oder das "
+                                                    "Tortenstück. Bei balken "
+                                                    "darf er negativ sein "
+                                                    "(Ausgaben und Einnahmen "
+                                                    "in einem Bild), bei "
+                                                    "torte zählt nur, was "
+                                                    "über null liegt."},
+                            "gruppe": {"type": "string",
+                                       "description": "Nur bei kategorien: "
+                                                      "der Oberbegriff, unter "
+                                                      "dem die Zeile steht — "
+                                                      "'Wohnen', 'Mobilität'. "
+                                                      "Gleiche Gruppe heißt "
+                                                      "zusammen, in der "
+                                                      "Reihenfolge des ersten "
+                                                      "Auftretens."},
                             "wert2": {"type": "string",
                                       "description": "Nur bei vergleich: der "
                                                      "Wert der zweiten "

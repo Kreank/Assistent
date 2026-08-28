@@ -9,6 +9,9 @@ browser/
 # Was aus fremder Hand hereinkommt: Mailanhaenge und Telegram-Medien.
 # Inhalt ist fremd und persoenlich, der Ordner gehoert nirgendwohin.
 anhaenge/
+# Sarvis' Werktisch: Berichte und Auswertungen, die beim
+# Antworten entstehen. Arbeitsergebnis, kein Quelltext.
+ablage/
 telegram/
 anzeige.log
 aufnahmen/

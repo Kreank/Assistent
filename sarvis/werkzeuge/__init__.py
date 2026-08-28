@@ -13,7 +13,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, erinnern, finanzen, google, kacheln, medien,
+from . import (auftrag, bericht, erinnern, finanzen, google, kacheln, medien,
                programme, projekte, telegram, verlauf, zeit)
 
 SERVER = "sarvis"
@@ -70,6 +70,7 @@ def bauen(sagen, leuchten=None, melden=None):
             + erinnern.werkzeuge(protokoll, leuchten)
             + verlauf.werkzeuge(protokoll, leuchten))
     alle += kacheln.werkzeuge(protokoll, leuchten)
+    alle += bericht.werkzeuge(protokoll, leuchten)
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)
