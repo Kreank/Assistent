@@ -18,6 +18,13 @@ PUNKTE_DECKEL = {
     "balken": 24,       # zwei Jahre Monatswerte
     "torte": 8,         # mehr Tortenstuecke unterscheidet niemand
     "kategorien": 30,   # gruppiert, also lesbar auch bei vielen
+    # Die beiden Graphen haengen nicht an der Lesbarkeit, sondern an der
+    # Hoehe: Gemessen faechert ein Knoten auf 24 Ziele auf und die
+    # Kachel wird 498 Raster hoch -- bei 30 waeren es 582 und damit
+    # hoeher als die Engine mit 548. Beim Ablauf sind 10 einzeilige
+    # Kaesten 518 Raster.
+    "fluss": 24,
+    "ablauf": 10,
 }
 
 # Zustaende
@@ -150,8 +157,17 @@ class Anzeige:
         welchen Posten Sarvis gerade nennt. Wer hier Text schickt, kann
         weder zeichnen noch hervorheben.
         """
+        # Erst kappen, dann senden -- und die Zahl der Weggelassenen
+        # mitschicken. Ohne sie waere die Kuerzung STUMM: Die Kachel
+        # rechnet Knoten- und Gruppensummen aus dem, was ankommt, und
+        # zeigt sie, als waeren es alle. Bei einer Liste fehlen dann nur
+        # Zeilen; bei einem Fluss steht eine falsche Zahl da.
+        alle = list(punkte or [])
+        deckel = PUNKTE_DECKEL.get(str(form or "liste"), 12)
+        behalten = alle[:deckel]
         self._senden(art="kachel", name=str(name), sorte=str(sorte),
                      kopf=str(kopf), gross=str(gross), stand=str(stand),
+                     weggelassen=len(alle) - len(behalten),
                      # Der Deckel haengt an der Form. Zwoelf reichen zum
                      # Vorbeigehen -- aber ein Balkendiagramm ueber zwoelf
                      # Monate braucht genau zwoelf, und eine Kategorien-
@@ -161,8 +177,7 @@ class Anzeige:
                      # Buchungen 24.570 Bytes gegen einen harten Deckel
                      # von 65.507. Es liegt an der Lesbarkeit, und die
                      # ist je Form verschieden.
-                     punkte=list(punkte or [])[:PUNKTE_DECKEL.get(
-                         str(form or "liste"), 12)],
+                     punkte=behalten,
                      # Die Form entscheidet, WIE gemalt wird -- Liste,
                      # Gespraechsblasen, zwei Spalten mit Differenz oder
                      # Fliesstext. Die Spaltennamen sind Inhalt, keine

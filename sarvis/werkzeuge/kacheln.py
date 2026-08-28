@@ -63,9 +63,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         "ersetzt die Antwort nicht, sie zeigt sie.\n"
         "Wähle die Form nach dem Inhalt: ein Verlauf über Monate als "
         "'balken', Anteile an einem Ganzen als 'torte', Posten mit "
-        "Oberbegriffen als 'kategorien', Nachrichten und Mails als "
-        "'blasen', zwei Zeiträume nebeneinander als 'vergleich', eine "
-        "Zusammenfassung als 'text', alles Übrige als 'liste'.\n"
+        "Oberbegriffen als 'kategorien', Geld das sich verzweigt als "
+        "'fluss', Schritte und Verzweigungen als 'ablauf', Nachrichten "
+        "und Mails als 'blasen', zwei Zeiträume nebeneinander als "
+        "'vergleich', eine Zusammenfassung als 'text', alles Übrige als "
+        "'liste'.\n"
         "Für eine GROSSE Auswertung — viele Werte, mehrere Diagramme, "
         "etwas zum Durchsehen — nimm stattdessen seite_zeigen.",
         {
@@ -80,7 +82,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "form": {
                     "type": "string",
                     "enum": ["liste", "blasen", "vergleich", "text",
-                             "balken", "torte", "kategorien"],
+                             "balken", "torte", "kategorien",
+                             "fluss", "ablauf"],
                     "description": "liste: Zeilen mit Wert und Balken "
                                    "(Vorgabe). balken: senkrechte Säulen mit "
                                    "Achse — für einen Verlauf über Monate "
@@ -88,7 +91,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                    "unten. torte: Kreisdiagramm für Anteile "
                                    "an einem Ganzen, höchstens acht Stücke. "
                                    "kategorien: Posten unter Oberbegriffen, "
-                                   "jede Gruppe mit eigener Summe. blasen: "
+                                   "jede Gruppe mit eigener Summe. fluss: "
+                                   "wohin sich Beträge verzweigen — die "
+                                   "Dicke des Bandes ist der Betrag, "
+                                   "höchstens fünf Stufen tief. ablauf: "
+                                   "Schritte und Verzweigungen als Kästen "
+                                   "mit Pfeilen, für etwas das einen Weg "
+                                   "nimmt. blasen: "
                                    "ein Gesprächsverlauf, Telegram oder "
                                    "Mail. vergleich: zwei Zeiträume "
                                    "nebeneinander, die Differenz rechnet die "
@@ -106,9 +115,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "punkte": {
                     "type": "array",
                     "description": "Die Zeilen. Zwölf bei den meisten "
-                                   "Formen, vierundzwanzig bei balken, acht "
-                                   "bei torte, dreißig bei kategorien — was "
-                                   "darüber liegt, wird abgeschnitten.",
+                                   "Formen, vierundzwanzig bei balken und "
+                                   "fluss, acht bei torte, dreißig bei "
+                                   "kategorien, zehn bei ablauf — was "
+                                   "darüber liegt, wird abgeschnitten und "
+                                   "in der Kachel vermerkt.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -131,6 +142,25 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                                     "in einem Bild), bei "
                                                     "torte zählt nur, was "
                                                     "über null liegt."},
+                            "von": {"type": "string",
+                                    "description": "Bei fluss: woher der "
+                                                   "Betrag kommt "
+                                                   "('Einnahmen'). Bei "
+                                                   "ablauf: der Kasten "
+                                                   "davor — fehlt er, ist "
+                                                   "der vorige Schritt "
+                                                   "gemeint, und genau so "
+                                                   "entsteht eine gerade "
+                                                   "Kette."},
+                            "nach": {"type": "string",
+                                     "description": "Bei fluss: wohin er "
+                                                    "geht ('Wohnen'). Bei "
+                                                    "ablauf: ein "
+                                                    "ZUSÄTZLICHER Kasten, "
+                                                    "in den dieser Schritt "
+                                                    "auch mündet — damit "
+                                                    "laufen zwei Zweige "
+                                                    "wieder zusammen."},
                             "gruppe": {"type": "string",
                                        "description": "Nur bei kategorien: "
                                                       "der Oberbegriff, unter "

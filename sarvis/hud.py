@@ -514,6 +514,9 @@ class Hud(QWidget):
             sekunden=float(m.get("sekunden") or 0.0),
             form=m.get("form") or "liste",
             spalten=tuple(m.get("spalten") or ()),
+            # Wie viele Punkte der Draht abgeschnitten hat, bevor die
+            # Kachel sie sah. Nur sie kann es vermerken.
+            weggelassen=int(m.get("weggelassen") or 0),
         )
         # Erst jetzt anordnen: Die Hoehe steht erst fest, wenn der Inhalt
         # drin ist, und danach richtet sich der Stapel darunter.

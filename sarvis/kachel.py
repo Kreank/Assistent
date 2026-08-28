@@ -29,8 +29,8 @@ Gemalt wird wie ueberall sonst in einem festen Raster, gestreckt wird
 nur der Maler (SKALA). Auf einem 5120er Bildschirm waere eine in
 Bildschirmpunkten gerechnete Kachel eine Briefmarke.
 
-SIEBEN FORMEN, EIN AUSSEHEN
-===========================
+NEUN FORMEN, EIN AUSSEHEN
+=========================
 
 Der Aufrufer waehlt die FORM, nicht das Aussehen. Farben, Schriften und
 Abstaende stehen hier im Modul und kommen nirgends von aussen herein:
@@ -51,6 +51,11 @@ darf, zerlegt genau das. Was er waehlt, ist die Bauart des Inhalts:
                   Kachel SELBST.
     "kategorien"  Liste mit Zwischenueberschriften und Gruppensummen.
                   Die Summen rechnet die Kachel SELBST.
+    "fluss"       Sankey: Mengen, die sich verzweigen. Die DICKE eines
+                  Bandes ist der Betrag. Knoten, Spalten, Summen und
+                  Stapelreihenfolge rechnet die Kachel SELBST.
+    "ablauf"      Kaesten und Pfeile: ein Weg durch Schritte und
+                  Verzweigungen, kein Mengenfluss.
 
 Warum Differenz, Prozente und Gruppensummen nicht uebernommen werden,
 sondern hier entstehen: Eine gerechnete Zahl kann nicht halluziniert
@@ -62,6 +67,37 @@ Dieselbe Ueberlegung ist der Grund, warum ein zu kleines Tortenstueck
 NICHT auf eine Mindestgroesse aufgeblasen wird: Ein Bild, das 0,5 Prozent
 wie 5 Prozent aussehen laesst, behauptet etwas Falsches -- und zwar
 lautlos.
+
+ZWEI GRAPHEN IN EINER FLACHEN LISTE
+===================================
+
+"fluss" und "ablauf" sind Graphen, aber der Draht von aussen kennt nur
+eine flache Liste von Punkten. Ein Graph muss sich also als Punktliste
+ausdruecken lassen, und dafuer gibt es genau zwei Moeglichkeiten: Ein
+Punkt ist eine KANTE, oder ein Punkt ist ein KNOTEN. Beide Formen
+waehlen verschieden, und zwar aus demselben Grund -- was der Nutzer
+ansieht und was leuchten soll:
+
+    fluss    Punkt = Kante ({"von": ..., "nach": ..., "zahl": ...}).
+             Ein Sankey IST eine Menge von Baendern; die Knoten sind
+             das, was uebrig bleibt, wenn man die Baender zaehlt. Und
+             leuchten soll das Band, also muss das Band der Punkt sein.
+             Zwei Namen mit gleichem Rang brauchen zwei Feldnamen: "von"
+             und "nach" statt "text" und "gruppe". Eine Richtung, die in
+             einer Namenskonvention steckt, wird irgendwann vertauscht,
+             und ein vertauschter Sankey sieht richtig aus.
+
+    ablauf   Punkt = Knoten ({"text": ..., "von": ..., "wert": ...}).
+             Ein Ablauf ist eine Kette von Kaesten; leuchten soll der
+             Kasten. Und die KETTE ist der Regelfall: Steht "von" nicht
+             da, ist der vorige Punkt gemeint -- eine gerade Kette
+             braucht dann nichts als ihre Texte. Verzweigungen entstehen
+             dadurch, dass zwei Punkte dasselbe "von" tragen.
+
+Beide teilen sich _raenge(): die Einteilung in Spalten (fluss) bzw.
+Zeilen (ablauf) ueber den laengsten Weg von vorn. Dort sitzt auch der
+Kreisschutz -- ein Modell kann "A -> B -> A" schicken, und eine
+Rangrechnung, die das nicht erwartet, laeuft endlos.
 
 DER UMBRUCH WIRD EINMAL GERECHNET
 =================================
@@ -135,8 +171,50 @@ SKALA = max(0.6, min(3.0, config.ANZEIGE_SKALA))
 #              sich nicht beruehren: "VERSICHERUNGEN" misst gesperrt und
 #              in Grossbuchstaben 86, die Summenspalte nimmt 78 -- das
 #              sind 164 von 242 Punkten Innenbreite.
+#
+# Fuer "fluss" und "ablauf" steht hier die OBERGRENZE, nicht die Breite.
+# Das ist der eine Unterschied zu den sieben oberen Formen, und er hat
+# einen Grund: Deren Breite haengt an der Schrift und steht damit fest.
+# Bei einem Graphen haengt sie an der Zahl der SPALTEN -- und die steht
+# erst fest, wenn die Daten da sind. Eine Kachel mit drei Knoten in 739
+# Punkten waere ein Bild mit zwei Handbreit Nichts darin. _fluss_rechnen
+# und _ablauf_rechnen setzen self.breite deshalb selbst; sie kommen dabei
+# nie ueber den Wert hier.
+#
+#   fluss      800 -- die Freigabe des Nutzers, und zwar ganz. Eine Spalte
+#              besteht aus 9 Knotenbalken + 111 Namensspur + 72 Schwung,
+#              zusammen 192; die letzte Spalte braucht keinen Schwung
+#              mehr. Damit ist 14 + n * 120 + (n-1) * 72 + 14 die Breite:
+#
+#                  zwei Spalten   340        vier Spalten   724
+#                  drei Spalten   532        fuenf Spalten  800
+#
+#              Bei fuenf Spalten reichen die 800 nicht mehr fuer 72
+#              Schwung; er faellt dann auf sein Mindestmass 44, und die
+#              Namensspur bekommt, was uebrig bleibt (110 statt 111 --
+#              der Name verliert einen Punkt, nicht seinen Sinn). GENAU
+#              DA IST DIE GRENZE: Fuenf Spalten sind die letzten, die
+#              eine eigene Namensspur UND einen Bogen unterbringen.
+#              Deshalb steht F_SPALTEN auf 5 und nicht mehr auf 6.
+#
+#              Der Finanzfall der Aufgabe (Einnahmen -> Bereich -> Posten)
+#              hat drei Spalten und ist 532 breit. Das sind 150 mehr als
+#              die erste Fassung brauchte -- und genau diese 150 sind der
+#              Unterschied zwischen einer Schrift, die auf den Baendern
+#              klebt, und einer, die daneben steht.
+#   ablauf     708 -- vier Kaesten nebeneinander: 14 + 4 * 150 + 3 * 22
+#              + 14 = 694, plus 14 fuer die Gasse am rechten Rand, durch
+#              die ein Pfeil laeuft, der eine Zeile ueberspringt. 150 ist
+#              die Kastenbreite, in der "Ergebnis geprueft" (misst 78)
+#              und "Auftrag angelegt" (75) einzeilig stehen. Mehr als vier
+#              Kaesten in einer Zeile werden nicht weggelassen, sondern
+#              schmaler -- 708 ist auch dann die Grenze. Untergrenze ist
+#              BREITE: Eine gerade Kette waere sonst 178 breit, und
+#              schmaler als die schmalste vorhandene Form soll keine
+#              Kachel sein.
 FORM_BREITE = {"liste": BREITE, "blasen": 320, "vergleich": 360, "text": 300,
-               "balken": 320, "torte": 320, "kategorien": 270}
+               "balken": 320, "torte": 320, "kategorien": 270,
+               "fluss": 800, "ablauf": 708}
 FORMEN = tuple(FORM_BREITE)
 
 # Abstand zwischen der sichtbaren Engine und der Kachel, im Malraster.
@@ -240,11 +318,89 @@ K_WERT = 78            # Wertspalte, wie in der Liste
 # Gruppen waeren 576 Rasterpunkte. Die Engine ist 548 hoch.
 K_HOEHE = 360
 
+# --- Fluss (Sankey) -----------------------------------------------------
+
+F_KNOTEN = 9           # Breite eines Knotenbalkens
+# Die Namensspur: der Streifen RECHTS neben jedem Knotenbalken, in dem
+# seine Beschriftung steht. Sie ist der Kern dieser Form, und die erste
+# Fassung hatte sie nicht -- dort stand die Schrift mitten in den
+# Baendern. Warum das nicht zu retten war und warum eine eigene Spur
+# ueberhaupt moeglich ist, steht bei _fluss_rechnen unter GERADE STRECKE.
+#
+#   111 = 5 Innenabstand + 56 Name + 4 Luft + 42 Betrag + 4 Innenabstand.
+#   56 fuer den Namen, weil "Lebensmittel" 51 misst und "Versicherung"
+#   ebenfalls 51; 42 fuer den Betrag, weil "1.098,00" 33 misst.
+F_NAME = 111
+F_WERT = 42            # davon die Betragsspalte
+F_NAME_RAND = 5        # Innenabstand der Spur, links am Balken
+# Wie weit ein Band schwingen darf -- der Teil zwischen zwei Spuren, in
+# dem es seine Hoehe wechselt. Hoechstens 72: mehr macht das Bild breiter,
+# ohne dass die Kurve besser wird. Mindestens 44: darunter ist der
+# Schwung kein Bogen mehr, sondern ein Knick.
+F_KURVE = 72
+F_KURVE_MIN = 44
+# Tiefer wird nicht aufgefaechert. Fuenf und nicht sechs, seit die
+# Beschriftung ihre eigene Spur hat: Bei sechs Spalten bliebe fuer den
+# Namen eine Spur von 83 Punkten und damit 28 fuer den Namen selbst --
+# aus "Lebensmittel" wuerde "Leb…". Die Wahl steht zwischen einer sechsten
+# Stufe ohne lesbare Namen und fuenf Stufen mit; ein Geldfluss hat
+# Einnahmen, Bereich, Posten, Detail -- das sind vier. Was tiefer liegt,
+# faellt weg und wird vermerkt.
+F_SPALTEN = 5
+F_HOCH = 200           # Grundhoehe der Zeichenflaeche
+# So viel der Zeichenflaeche bleibt mindestens fuer die Balken selbst.
+# Der senkrechte Abstand zweier Knoten ist eine ganze Textzeile hoch --
+# das ist es, was die Beschriftung duenner Baender rettet: Zwei Knoten
+# liegen dann immer so weit auseinander, dass ihre Namen sich nicht
+# ueberlappen koennen, egal wie duenn sie sind. Bei vielen Knoten in
+# einer Spalte fressen diese Abstaende die Flaeche auf, deshalb waechst
+# sie mit -- unter F_BALKEN_MIN sinkt der Platz fuer die Balken nie.
+F_BALKEN_MIN = 84
+# Duenner als das wird ein Knotenbalken nicht gemalt. Das ist KEIN
+# Aufblasen im Sinne der Torte: Aufgeblasen wird nichts, was verglichen
+# wird -- verglichen werden die Baender, und die bleiben genau so duenn,
+# wie sie sind. Der Balken ist die Marke, an der die Baender haengen,
+# und eine Marke von null Punkten ist neben ihrer Beschriftung ein
+# Fehler und keine Auskunft.
+F_STRICH = 0.8
+
+# --- Ablauf --------------------------------------------------------------
+
+A_KASTEN = 150         # Breite eines Kastens, wenn Platz dafuer ist
+A_LUFT = 22            # zwischen zwei Kaesten derselben Zeile, hoechstens
+A_PFEIL = 24           # senkrechter Abstand zweier Zeilen: der Pfeil und
+                       # seine Beschriftung ("ja"/"nein") wohnen darin
+A_RAND = 5             # Innenabstand im Kasten
+A_ZEILEN = 2           # mehr Textzeilen bekommt kein Kasten
+A_ECKE = 5             # Rundung der Kastenecken
+A_GASSE = 14           # Spur am rechten Rand fuer Pfeile ueber eine Zeile
+A_KOPF = 3.2           # halbe Breite der Pfeilspitze
+# Wie hoch der Ablauf hoechstens wird -- dieselbe Ueberlegung wie
+# BLASEN_HOEHE, nur andersherum gerechnet: Der Deckel steht bei zehn
+# Schritten, und zehn einzeilige Kaesten sind 10 * 25 + 9 * 24 = 466.
+# Mit Kopf, Fusszeile und Rand bleibt die Kachel damit unter der 548
+# Punkte hohen Engine. Erst zweizeilige Kaesten sprengen das, und dann
+# wird UNTEN gekappt -- beim Ablauf ist das der schlechtere Schnitt (das
+# Ende ist das Ziel), aber der einzige, der nicht luegt: Oben zu kappen
+# hiesse, einen Weg ohne Anfang zu zeigen.
+A_HOEHE = 470
+# Die aeusserste Breite. Sie steht hier und nicht nur in FORM_BREITE,
+# weil die Kastenbreite daraus gerechnet wird.
+A_MAX = 708
+
 # Die Marke, mit der ueberall im Projekt gekuerzt wird. Ein stummer
 # Schnitt sieht aus wie ein vollstaendiger Text.
 MARKE = "[… gekürzt]"
 MARKE_ALT = "[… ältere ausgeblendet]"
 MARKE_OHNE = "[… ohne negative Werte]"
+MARKE_KANTEN = "[… unvollständige Bänder weggelassen]"
+MARKE_KREIS = "[… Kreis aufgetrennt]"
+MARKE_TIEF = "[… tiefere Stufen weggelassen]"
+# Nicht die Kachel hat gekuerzt, sondern der Draht: anzeige.PUNKTE_DECKEL
+# schneidet ab, bevor die Kachel etwas sieht. Sie kann also nicht sagen,
+# WAS fehlt -- nur, DASS etwas fehlt. Das ist immer noch besser als eine
+# Knotensumme, die wie das Ganze aussieht und es nicht ist.
+MARKE_DECKEL = "[… zu viele Punkte, gekürzt]"
 
 
 class Kachel(QWidget):
@@ -275,9 +431,10 @@ class Kachel(QWidget):
         # Sarvis gerade nennt. Wer hier fertige Strings schickt, kann
         # weder zeichnen noch hervorheben.
         #
-        # Vier Felder kommen fuer die anderen Formen dazu und stoeren die
+        # Sechs Felder kommen fuer die anderen Formen dazu und stoeren die
         # alten nicht, weil sie leer bleiben duerfen: "von_mir" (Blasen),
-        # "wert2" und "zahl2" (Vergleich), "gruppe" (Kategorien).
+        # "wert2" und "zahl2" (Vergleich), "gruppe" (Kategorien), "von"
+        # und "nach" (Fluss und Ablauf).
         self.punkte: list = []
         self.spalten: tuple = ()  # Ueberschriften der beiden Wertspalten
         self.stand = ""          # "Stand 10:42" -- wann die Daten geholt wurden
@@ -295,6 +452,7 @@ class Kachel(QWidget):
         # jeder dieser Schleifen ein Sonderfall.
         self._bau: dict = {}
         self._gekappt = False    # wurde oben etwas weggelassen?
+        self._weggelassen = 0    # ... und wie viele schon am Draht?
         self._zh = ZEILE_FLIESS  # gemessene Zeilenhoehe der Fliessschrift
         self._zf = 12            # gemessene Hoehe der kleinen Fusszeile
 
@@ -318,10 +476,10 @@ class Kachel(QWidget):
         Text. Das erspart jedem Aufrufer die Huelle, ohne dass die
         Zeichenlogik drei Faelle kennen muss.
 
-        Es gibt EINE Punktform fuer alle sieben Kachelformen, nicht
-        sieben. Sonst muesste jede Stelle, die einen Punkt anfasst,
-        vorher nach der Form fragen -- und ein Punkt aus der falschen
-        Form waere ein Absturz statt eines leeren Feldes.
+        Es gibt EINE Punktform fuer alle neun Kachelformen, nicht neun.
+        Sonst muesste jede Stelle, die einen Punkt anfasst, vorher nach
+        der Form fragen -- und ein Punkt aus der falschen Form waere ein
+        Absturz statt eines leeren Feldes.
         """
         def zahl_von(wert):
             # bool ist in Python ein int. Ein True als Balkenlaenge waere
@@ -337,19 +495,23 @@ class Kachel(QWidget):
                     "zahl": zahl_von(roh.get("zahl")),
                     "zahl2": zahl_von(roh.get("zahl2")),
                     "von_mir": bool(roh.get("von_mir")),
-                    "gruppe": str(roh.get("gruppe", ""))}
+                    "gruppe": str(roh.get("gruppe", "")),
+                    "von": str(roh.get("von", "")),
+                    "nach": str(roh.get("nach", ""))}
         if isinstance(roh, (tuple, list)):
             text = str(roh[0]) if roh else ""
             wert = str(roh[1]) if len(roh) > 1 else ""
             return {"text": text, "wert": wert, "wert2": "",
                     "zahl": None, "zahl2": None, "von_mir": False,
-                    "gruppe": ""}
+                    "gruppe": "", "von": "", "nach": ""}
         return {"text": str(roh), "wert": "", "wert2": "",
-                "zahl": None, "zahl2": None, "von_mir": False, "gruppe": ""}
+                "zahl": None, "zahl2": None, "von_mir": False, "gruppe": "",
+                "von": "", "nach": ""}
 
     def anzeigen(self, kopf: str, punkte: list, gross: str = "",
                  stand: str = "", sekunden: float = 0.0,
-                 form: str = "liste", spalten=()) -> None:
+                 form: str = "liste", spalten=(),
+                 weggelassen: int = 0) -> None:
         """Inhalt setzen und aufklappen.
 
         sekunden=0 heisst: bleibt stehen, bis jemand sie wegnimmt. Das ist
@@ -377,6 +539,20 @@ class Kachel(QWidget):
             torte       text, wert, zahl -- nur zahl > 0 bekommt ein
                         Stueck
             kategorien  text, wert, zahl, gruppe
+            fluss       von, nach, zahl -- ein Punkt ist eine KANTE.
+                        "zahl" muss groesser als null sein, sonst gibt
+                        es kein Band. "text" und "wert" liest der Fluss
+                        nicht: Die Knotennamen stehen in von/nach, und
+                        die Betraege an den Knoten sind SUMMEN, die die
+                        Kachel selbst bildet.
+            ablauf      text, von, wert, nach -- ein Punkt ist ein KASTEN.
+                        "von" nennt den Kasten davor; fehlt es, ist der
+                        vorige Punkt gemeint (das ist die Kette). "wert"
+                        beschriftet den Pfeil, der in diesen Kasten
+                        fuehrt ("ja"/"nein"). "nach" nennt einen
+                        ZUSAETZLICHEN Kasten, in den dieser Schritt
+                        ausserdem muendet -- damit laufen Zweige wieder
+                        zusammen.
 
         Was eine Form nicht liest, darf fehlen. Ein Punkt ohne "zahl"
         bekommt keinen Balken, kein Tortenstueck und geht in keine
@@ -385,6 +561,12 @@ class Kachel(QWidget):
         """
         self.form = form if form in FORMEN else "liste"
         self.kopf = str(kopf or "")
+        # VOR _masse_setzen: Die Fahne entscheidet dort, ob die Marke
+        # gesetzt wird, und wird danach nicht mehr angefasst.
+        try:
+            self._weggelassen = max(0, int(weggelassen or 0))
+        except (TypeError, ValueError):
+            self._weggelassen = 0
         self.punkte = [self._punkt(x) for x in (punkte or [])]
         self.spalten = tuple(str(s) for s in (spalten or ()))[:2]
         self.gross = str(gross or "")
@@ -509,7 +691,11 @@ class Kachel(QWidget):
         self.breite = FORM_BREITE.get(self.form, BREITE)
         self._plan = []
         self._bau = {}
-        self._gekappt = False
+        # Nicht False, sondern: Hat der Draht schon gekuerzt? Dann ist
+        # oben etwas weggelassen worden, bevor diese Kachel den ersten
+        # Punkt gesehen hat -- und die Formen, die selbst kappen,
+        # setzen ihre Marke ohnehin ueber dieselbe Fahne.
+        self._gekappt = self._weggelassen > 0
         # Einmal messen, beide Werte merken -- die Zeilenhoehen der
         # gerechneten Formen haengen an der wirklichen Schrift, nicht an
         # einer geratenen Zahl.
@@ -536,6 +722,10 @@ class Kachel(QWidget):
             hoehe += self._torte_rechnen()
         elif self.form == "kategorien":
             hoehe += self._kategorien_rechnen()
+        elif self.form == "fluss":
+            hoehe += self._fluss_rechnen()
+        elif self.form == "ablauf":
+            hoehe += self._ablauf_rechnen()
         else:
             hoehe += len(self.punkte) * ZEILE
         if self.stand:
@@ -889,6 +1079,559 @@ class Kachel(QWidget):
                                       if z is not None and z > 0], default=0.0)}
         return hoehe
 
+    # --- Graphen: Raenge, Fluss, Ablauf -----------------------------------
+
+    @staticmethod
+    def _raenge(knoten: list, kanten: list) -> tuple:
+        """Spalte (Fluss) bzw. Zeile (Ablauf) je Knoten -- laengster Weg.
+
+        knoten ist eine Liste beliebiger Namen, kanten eine Liste von
+        Paaren (von, nach) daraus. Zurueck kommen die Raenge und die
+        Nummern der Kanten, die AUFGETRENNT werden mussten.
+
+        Gerechnet wird der laengste Weg von vorn, nicht der kuerzeste:
+        Nur so zeigt JEDE Kante nach rechts bzw. nach unten. Beim
+        kuerzesten Weg landet ein Knoten neben seinem eigenen Vorgaenger,
+        und ein Band muesste rueckwaerts laufen.
+
+        DER KREIS IST DER PUNKT DIESER FUNKTION. Ein Modell kann
+        "A -> B -> A" schicken -- kein boeser Wille, sondern zwei
+        Buchungen, die es beide gesehen hat. Eine Rangrechnung, die
+        einfach so lange entspannt, bis sich nichts mehr aendert, laeuft
+        dann bis zum Abwuergen der Anzeige. Gezaehlt werden deshalb die
+        offenen Eingaenge: Solange einer auf null faellt, geht es normal
+        weiter. Bleiben nur noch Knoten im Kreis uebrig, wird der mit den
+        wenigsten offenen Eingaengen aufgemacht und seine restlichen
+        Eingaenge werden AUFGETRENNT -- also weggelassen und vermerkt.
+
+        Warum weggelassen und nicht rueckwaerts gemalt: Ein Sankey wird
+        von links nach rechts gelesen, ein Ablauf von oben nach unten.
+        Ein Band, das gegen diese Richtung laeuft, quert im Zweifel das
+        ganze Bild und behauptet dabei eine Reihenfolge, die es nicht
+        gibt. Ein Vermerk unter dem Bild sagt stattdessen, dass hier
+        etwas nicht gezeigt werden konnte -- und dass die Rechnung
+        darueber gestolpert ist, sieht man dem Bild sonst nirgends an.
+
+        In jedem Durchgang kommt mindestens ein Knoten dazu, also endet
+        die Schleife spaetestens nach len(knoten) Durchgaengen.
+        """
+        aus = {k: [] for k in knoten}
+        ein = {k: 0 for k in knoten}
+        for nr, (a, b) in enumerate(kanten):
+            aus[a].append(nr)
+            ein[b] += 1
+
+        rang = {k: 0 for k in knoten}
+        fertig, getrennt = set(), set()
+        schlange = [k for k in knoten if ein[k] == 0]
+        while len(fertig) < len(knoten):
+            if not schlange:
+                offen = [k for k in knoten if k not in fertig]
+                naechster = min(offen, key=lambda k: (ein[k], knoten.index(k)))
+                for nr, (a, b) in enumerate(kanten):
+                    if (b == naechster and nr not in getrennt
+                            and a not in fertig):
+                        getrennt.add(nr)
+                        ein[naechster] -= 1
+                schlange.append(naechster)
+            k = schlange.pop(0)
+            if k in fertig:
+                continue
+            fertig.add(k)
+            for nr in aus[k]:
+                if nr in getrennt:
+                    continue
+                b = kanten[nr][1]
+                rang[b] = max(rang[b], rang[k] + 1)
+                ein[b] -= 1
+                if ein[b] <= 0 and b not in fertig:
+                    schlange.append(b)
+        return rang, getrennt
+
+    def _fluss_rechnen(self) -> float:
+        """Aus Kanten Knoten, aus Wegen Spalten, aus Betraegen Baender.
+
+        Alles hier haengt nur an den Daten und wird deshalb einmal
+        gerechnet, samt der fertigen QPainterPath je Band: Ein Sankey
+        aus zwanzig Baendern hat vierzig Bezierkurven, und die
+        dreissigmal je Sekunde neu aufzubauen waere die teuerste Zeile
+        des ganzen Moduls.
+
+        DAS SCHWIERIGE IST DIE STAPELREIHENFOLGE, nicht die Spalte. Die
+        Baender an einem Knoten muessen in derselben Ordnung liegen wie
+        die Knoten, an denen ihr anderes Ende haengt -- sonst kreuzen
+        sie sich INNERHALB des Knotens, und das ist der Fehler, den man
+        nicht ausrechnen, sondern nur ansehen kann: Die Betraege stimmen
+        weiterhin. Deshalb zwei getrennte Schritte:
+
+          Erst die Reihenfolge der KNOTEN je Spalte, ueber den
+          Schwerpunkt ihrer Nachbarn und vier Durchgaenge hin und
+          zurueck. Das ist die uebliche Heuristik und reicht: Sie
+          minimiert Kreuzungen ZWISCHEN den Spalten, und mehr als eine
+          Heuristik ist hier nicht zu holen (das Problem ist NP-schwer).
+
+          Dann, wenn die Knoten liegen, die Reihenfolge der BAENDER an
+          jedem Knoten: ausgehende nach der Hoehe ihres Ziels, eingehende
+          nach der Hoehe ihrer Quelle. Das ist keine Heuristik, sondern
+          eine Sortierung -- und sie schliesst Kreuzungen im Knoten aus.
+
+        UNGLEICHE SUMMEN sind der Normalfall, nicht der Fehler: Von 3.400
+        Euro Einnahmen gehen 1.098 nach Wohnen, der Rest ist einfach
+        nicht aufgeschluesselt. Der Knoten ist deshalb so hoch wie das
+        GROESSERE von Ein- und Ausgang, und die Baender stapeln sich auf
+        beiden Seiten von oben. Was nicht weitergereicht wird, bleibt als
+        unbebaenderter Balkenrest unten stehen -- sichtbar, ohne dass
+        jemand es behaupten muesste. Die Zahl neben dem Knoten ist dieses
+        Groessere, also die Summe, die durch ihn hindurchgeht.
+
+        NEGATIVE UND FEHLENDE BETRAEGE bekommen kein Band, dieselbe
+        Ueberlegung wie bei der Torte: Die Dicke ist der Betrag, und ein
+        negativer Betrag hat keine Dicke. Ihn als Betrag zu malen hiesse,
+        einen Fluss zu zeigen, den es nicht gibt.
+
+        GERADE STRECKE: WARUM DIE BESCHRIFTUNG EINE EIGENE SPUR HAT
+        -----------------------------------------------------------
+        Die erste Fassung schrieb die Knotennamen in den Zwischenraum
+        zwischen zwei Spalten, also mitten in die Baender, und verliess
+        sich auf den dunklen Saum aus _beschriften. Angesehen war das
+        unbrauchbar: Ueber einem dicken, hellen Band steht helle Schrift
+        auf hellem Grund, und der Saum ist ein Saum, keine Platte.
+        "Wohnen 1.098" war auf seinem eigenen hervorgehobenen Band
+        praktisch nicht zu lesen.
+
+        Eine eigene Spur schien zuerst unmoeglich, und zwar aus einem
+        Grund, der stimmt: Ein Band haengt an zwei Balken, also gehoert
+        ALLES zwischen ihnen dem Band. Ein reservierter Streifen dazwischen
+        wuerde das Band zerschneiden.
+
+        Der Ausweg ist nicht, den Streifen freizuhalten, sondern die
+        Baender darin GERADE laufen zu lassen. Auf einer waagerechten
+        Strecke liegt jedes Band genau auf der Hoehe seines Quellknotens
+        -- es hat seine Hoehe noch nicht gewechselt. Damit gilt in der
+        Spur hinter einem Balken:
+
+            Es liegen dort NUR die abgehenden Baender dieses einen
+            Knotens, gestapelt auf genau seiner Hoehe. Fremde Baender
+            koennen nicht hinein, denn die liegen auf der Hoehe IHRES
+            Knotens, und die Knoten einer Spalte ueberlappen sich nicht.
+
+        Erst hinter der Spur beginnt der Bogen, und erst dort mischen
+        sich die Baender. Der Nutzen ist nicht bloss optisch: Unter einer
+        Beschriftung liegt jetzt eine BEKANNTE Farbe -- entweder der
+        eigene Ton des Knotens oder der Kachelgrund. Damit laesst sich
+        die Schriftfarbe ausrechnen statt raten, und genau das tut
+        _fluss_malen ueber _schrift_auf().
+
+        Bezahlt wird das mit Breite: 111 Punkte je Spalte, die vorher
+        die Baender hatten. Bei drei Spalten sind das 532 statt 382 --
+        gut ein Drittel mehr und immer noch weit unter den 800, die zur
+        Verfuegung stehen. Bei sechs Spalten ginge es nicht mehr auf,
+        deshalb steht der Deckel jetzt bei fuenf.
+        """
+        # Ohne Bild keine Breite: Die Obergrenze aus FORM_BREITE gilt fuer
+        # sechs Spalten, und 739 Rasterpunkte, in denen nichts steht als
+        # eine Kopfzeile, sehen nicht nach "keine Daten" aus, sondern nach
+        # einem Fenster, das nicht fertig geworden ist.
+        self.breite = BREITE
+        if not self.punkte:
+            return 0.0
+
+        mass = QFontMetrics(self._schrift_klein())
+        marken = [MARKE_DECKEL] if self._weggelassen else []
+
+        # --- 1. Was ist ueberhaupt eine Kante?
+        kanten, unklar = [], False
+        for i, punkt in enumerate(self.punkte):
+            von, nach = punkt["von"].strip(), punkt["nach"].strip()
+            zahl = punkt["zahl"]
+            if (not von or not nach or von == nach
+                    or not isinstance(zahl, float) or zahl <= 0):
+                unklar = True
+                continue
+            kanten.append({"punkt": i, "von": von, "nach": nach, "wert": zahl})
+
+        def aufgeben() -> float:
+            """Nichts zu malen -- aber sagen, dass etwas da war."""
+            self._plan = []
+            self._bau = {"marken": marken, "knoten": [], "flaeche": 0.0}
+            return len(marken) * self._zh
+
+        if unklar:
+            marken.append(MARKE_KANTEN)
+        if not kanten:
+            return aufgeben()
+
+        # --- 2. Knoten in der Reihenfolge des ersten Auftretens
+        namen = []
+        for kante in kanten:
+            for name in (kante["von"], kante["nach"]):
+                if name not in namen:
+                    namen.append(name)
+
+        # --- 3. Spalten, Kreise auftrennen
+        rang, getrennt = self._raenge(
+            namen, [(k["von"], k["nach"]) for k in kanten])
+        if getrennt:
+            marken.append(MARKE_KREIS)
+            kanten = [k for nr, k in enumerate(kanten) if nr not in getrennt]
+
+        # --- 4. Zu tief? Dann faellt der Rest weg, aber nicht stumm.
+        if any(rang[n] >= F_SPALTEN for n in namen):
+            marken.append(MARKE_TIEF)
+            namen = [n for n in namen if rang[n] < F_SPALTEN]
+            bleibt = set(namen)
+            kanten = [k for k in kanten
+                      if k["von"] in bleibt and k["nach"] in bleibt]
+        if not kanten or not namen:
+            return aufgeben()
+
+        spalten = [[] for _ in range(max(rang[n] for n in namen) + 1)]
+        for name in namen:
+            spalten[rang[name]].append(name)
+
+        # --- 5. Reihenfolge der Knoten je Spalte (Schwerpunkt)
+        vorher = {n: [] for n in namen}
+        nachher = {n: [] for n in namen}
+        for kante in kanten:
+            vorher[kante["nach"]].append(kante["von"])
+            nachher[kante["von"]].append(kante["nach"])
+
+        ort = {}
+
+        def orte_merken():
+            for spalte in spalten:
+                for platz, name in enumerate(spalte):
+                    ort[name] = platz
+
+        def schwerpunkt(spalte, nachbarn):
+            def mitte(name):
+                weit = [ort[m] for m in nachbarn[name] if m in ort]
+                return sum(weit) / len(weit) if weit else ort[name]
+            # sorted ist stabil: Knoten ohne Nachbarn behalten ihren Platz.
+            return sorted(spalte, key=mitte)
+
+        orte_merken()
+        for _ in range(4):
+            for c in range(1, len(spalten)):
+                spalten[c] = schwerpunkt(spalten[c], vorher)
+                orte_merken()
+            for c in range(len(spalten) - 2, -1, -1):
+                spalten[c] = schwerpunkt(spalten[c], nachher)
+                orte_merken()
+
+        # --- 6. Wie hoch ist ein Knoten?
+        ein = {n: 0.0 for n in namen}
+        aus = {n: 0.0 for n in namen}
+        for kante in kanten:
+            aus[kante["von"]] += kante["wert"]
+            ein[kante["nach"]] += kante["wert"]
+        durch = {n: max(ein[n], aus[n]) for n in namen}
+
+        luft = self._zh
+        breiteste = max(len(s) for s in spalten)
+        flaeche = float(max(F_HOCH, (breiteste - 1) * luft + F_BALKEN_MIN))
+        # Der Massstab ist der KLEINSTE, den irgendeine Spalte vertraegt:
+        # Ein Massstab je Spalte waere bequemer und eine Luege -- dann
+        # waere ein Band rechts dicker als sein eigener Zufluss links.
+        moeglich = [(flaeche - (len(s) - 1) * luft) / sum(durch[n] for n in s)
+                    for s in spalten if s and sum(durch[n] for n in s) > 0]
+        massstab = min(moeglich) if moeglich else 0.0
+
+        # --- 7a. Wie breit sind Namensspur und Schwung?
+        #
+        # Die Spur bekommt, was sie braucht (F_NAME), der Schwung den
+        # Rest -- gedeckelt bei F_KURVE, damit ein Zweispalter nicht
+        # halb aus Bogen besteht. Reicht es fuer beides nicht, gibt der
+        # Schwung bis F_KURVE_MIN nach und erst dann die Spur: Ein
+        # flacherer Bogen ist immer noch ein Bogen, ein abgeschnittener
+        # Name ist keine Auskunft mehr.
+        wieviel = len(spalten)
+        rest = FORM_BREITE["fluss"] - 2 * RAND - wieviel * F_KNOTEN
+        spur = float(F_NAME)
+        schwung = 0.0
+        if wieviel > 1:
+            schwung = min(float(F_KURVE),
+                          (rest - wieviel * spur) / (wieviel - 1))
+            if schwung < F_KURVE_MIN:
+                schwung = float(F_KURVE_MIN)
+                spur = (rest - (wieviel - 1) * schwung) / wieviel
+        namensbreite = spur - F_NAME_RAND - F_WERT - 8
+
+        # --- 7b. Wo liegt ein Knoten?
+        knoten, nummer = [], {}
+        for c, spalte in enumerate(spalten):
+            stapel = (sum(durch[n] for n in spalte) * massstab
+                      + luft * max(0, len(spalte) - 1))
+            y = (flaeche - stapel) / 2.0
+            for platz, name in enumerate(spalte):
+                hoch = durch[name] * massstab
+                nummer[name] = len(knoten)
+                knoten.append({
+                    "name": name, "spalte": c, "platz": platz,
+                    "anzahl": max(2, len(spalte)),
+                    "x": float(RAND + c * (F_KNOTEN + spur + schwung)),
+                    "y": y, "hoehe": hoch,
+                    "kurz": mass.elidedText(name, Qt.ElideRight,
+                                            namensbreite),
+                    "betrag": self._zahl_deutsch(durch[name]),
+                    # Wie weit die eigenen Baender den Knoten von oben
+                    # her belegen. Das Malen braucht es, um zu wissen,
+                    # was unter der Beschriftung liegt -- siehe dort.
+                    "aus": aus[name] * massstab,
+                })
+                y += hoch + luft
+
+        # --- 8. Stapelreihenfolge an jedem Knoten
+        for name in namen:
+            k = knoten[nummer[name]]
+            hinaus = sorted([e for e in kanten if e["von"] == name],
+                            key=lambda e: knoten[nummer[e["nach"]]]["y"]
+                            + knoten[nummer[e["nach"]]]["hoehe"] / 2.0)
+            y = k["y"]
+            for kante in hinaus:
+                kante["y0"] = y
+                y += kante["wert"] * massstab
+            herein = sorted([e for e in kanten if e["nach"] == name],
+                            key=lambda e: knoten[nummer[e["von"]]]["y"]
+                            + knoten[nummer[e["von"]]]["hoehe"] / 2.0)
+            y = k["y"]
+            for kante in herein:
+                kante["y1"] = y
+                y += kante["wert"] * massstab
+
+        # --- 9. Die Baender
+        self._plan = []
+        for kante in kanten:
+            a = knoten[nummer[kante["von"]]]
+            b = knoten[nummer[kante["nach"]]]
+            x0 = a["x"] + F_KNOTEN
+            xg = x0 + spur              # hier hoert die Spur auf
+            x1 = b["x"]
+            xm = (xg + x1) / 2.0
+            dick = kante["wert"] * massstab
+            y0, y1 = kante["y0"], kante["y1"]
+            # Erst gerade durch die Namensspur, dann der Bogen. Die
+            # gerade Strecke ist nicht Zierde, sie ist der Grund, warum
+            # die Spur ueberhaupt eine Spur ist -- siehe Docstring.
+            pfad = QPainterPath(QPointF(x0, y0))
+            pfad.lineTo(xg, y0)
+            pfad.cubicTo(xm, y0, xm, y1, x1, y1)
+            pfad.lineTo(x1, y1 + dick)
+            pfad.cubicTo(xm, y1 + dick, xm, y0 + dick, xg, y0 + dick)
+            pfad.lineTo(x0, y0 + dick)
+            pfad.closeSubpath()
+            self._plan.append({
+                "punkt": kante["punkt"], "pfad": pfad,
+                # Ein Band traegt die Farbe seiner QUELLE. Damit hat
+                # alles, was aus einem Knoten kommt, einen Ton -- und
+                # was in ihn hineinlaeuft, mehrere. So folgt das Auge
+                # dem Weg und nicht der Spalte.
+                "stufe": (a["platz"], a["anzahl"]),
+                "von": nummer[kante["von"]], "nach": nummer[kante["nach"]],
+            })
+
+        self._gekappt = bool(marken)
+        self._bau = {"knoten": knoten, "flaeche": flaeche, "marken": marken,
+                     "massstab": massstab, "spur": spur, "schwung": schwung,
+                     "name": namensbreite}
+        # Die Breite haengt an der Zahl der Spalten -- siehe FORM_BREITE.
+        # Sie wird nicht gedeckelt, sondern IST der Deckel, sobald spur
+        # und schwung ihn ausreizen; die Rechnung oben kann ihn nicht
+        # ueberschreiten.
+        self.breite = round(2 * RAND + wieviel * F_KNOTEN + wieviel * spur
+                            + (wieviel - 1) * schwung)
+        return flaeche + len(marken) * self._zh
+
+    def _ablauf_rechnen(self) -> float:
+        """Kaesten in Zeilen, Pfeile dazwischen -- einmal ausgerechnet.
+
+        Ein Punkt ist hier ein KASTEN, kein Pfeil. Der Grund steht im
+        Modulkopf: Leuchten soll der Kasten, und die gerade Kette ist der
+        Regelfall. "von" darf deshalb fehlen und meint dann den vorigen
+        Punkt -- eine Kette aus fuenf Schritten ist fuenf Texte, sonst
+        nichts.
+
+        Nennt "von" einen Namen, den es nicht gibt, gilt ebenfalls der
+        vorige Punkt. Das ist eine Entscheidung gegen die Alternative,
+        nicht fuer die Bequemlichkeit: Ein Kasten ohne Vorgaenger stuende
+        als zweiter Anfang neben dem Ablauf, und ein Ablauf mit zwei
+        Anfaengen sieht kaputt aus, obwohl nur ein Name falsch
+        geschrieben war. Die Reihenfolge der Liste ist ohnehin eine
+        Angabe des Aufrufers, keine Erfindung der Kachel.
+
+        ZUSAMMENLAUFENDE ZWEIGE gehen ueber "nach", und nur darueber: Der
+        Baum aus "von" ist das Geruest, an dem die Zeilen haengen; jedes
+        "nach" ist eine ZUSAETZLICHE Kante daran. Beide zusammen gehen
+        durch _raenge, und deshalb rutscht ein Kasten, in den zwei Zweige
+        muenden, von selbst unter den tieferen der beiden -- sonst
+        zeigte einer der beiden Pfeile zur Seite statt nach unten.
+
+        Was dabei ENTSTEHT und beachtet werden muss: Ein Pfeil kann jetzt
+        eine Zeile ueberspringen. Der laeuft nicht quer durch die
+        Kaesten dazwischen, sondern durch eine Gasse am rechten Rand.
+        Ohne die waere genau das der Fehler, den man bei jedem vierten
+        Graphen sieht -- ein Pfeil, der durch einen Kasten geht.
+        """
+        # Siehe _fluss_rechnen: ohne Kaesten keine Breite.
+        self.breite = BREITE
+        if not self.punkte:
+            return 0.0
+
+        anzahl = len(self.punkte)
+        marken = [MARKE_DECKEL] if self._weggelassen else []
+
+        # Namen -> erster Punkt mit diesem Namen. Der erste, nicht der
+        # letzte: Wer zweimal "fertig" schickt, meint beim Verweisen das
+        # erste -- alles andere waere geraten.
+        wo = {}
+        for i, punkt in enumerate(self.punkte):
+            text = punkt["text"].strip()
+            if text and text not in wo:
+                wo[text] = i
+
+        kanten, aufschrift = [], {}
+        for i, punkt in enumerate(self.punkte):
+            eltern = wo.get(punkt["von"].strip(), i - 1 if i else None)
+            if eltern is not None and eltern != i:
+                kanten.append((eltern, i))
+                if punkt["wert"]:
+                    aufschrift[(eltern, i)] = punkt["wert"]
+        for i, punkt in enumerate(self.punkte):
+            ziel = wo.get(punkt["nach"].strip())
+            if (ziel is not None and ziel != i and (i, ziel) not in kanten):
+                kanten.append((i, ziel))
+
+        rang, getrennt = self._raenge(list(range(anzahl)), kanten)
+        if getrennt:
+            marken.append(MARKE_KREIS)
+            kanten = [k for nr, k in enumerate(kanten) if nr not in getrennt]
+
+        zeilen = [[] for _ in range(max(rang.values()) + 1)]
+        for i in range(anzahl):
+            zeilen[rang[i]].append(i)
+        breiteste = max(len(z) for z in zeilen)
+
+        # Braucht ueberhaupt ein Pfeil die Gasse? Nur dann kostet sie
+        # Breite -- eine leere Spur am Rand waere ein schiefes Bild.
+        gasse = any(rang[b] - rang[a] > 1 for a, b in kanten)
+        rand_gasse = A_GASSE if gasse else 0
+
+        # Kaesten werden SCHMALER, nicht weggelassen: Ein Ablauf, dem der
+        # vierte Zweig fehlt, ist ein anderer Ablauf. Ein schmaler Kasten
+        # mit gekuerztem Text ist immer noch derselbe.
+        #
+        # Die Fuge schrumpft mit, und zwar nie ueber die Haelfte des
+        # Platzes hinaus. Ohne diese Schranke faende sich eine Zahl von
+        # Zweigen, bei der die Fugen allein schon breiter waeren als die
+        # Kachel -- und dann stuenden die Kaesten ausserhalb. Mit ihr
+        # bleibt fuer sie immer mindestens die halbe Innenbreite uebrig,
+        # und die Summe unten kann A_MAX gar nicht ueberschreiten.
+        platz = A_MAX - 2 * RAND - rand_gasse
+        luft = min(A_LUFT, platz / (2.0 * breiteste))
+        kasten_breit = min(A_KASTEN,
+                           (platz - (breiteste - 1) * luft) / breiteste)
+        self.breite = round(max(
+            BREITE, 2 * RAND + rand_gasse + breiteste * kasten_breit
+            + (breiteste - 1) * luft))
+
+        mass = QFontMetrics(self._schrift_klein())
+        innen = max(1.0, kasten_breit - 2 * A_RAND)
+        texte = []
+        for punkt in self.punkte:
+            umbruch = self._umbrechen(mass, punkt["text"], innen) or [""]
+            if len(umbruch) > A_ZEILEN:
+                rest = " ".join(umbruch[A_ZEILEN - 1:])
+                umbruch = umbruch[:A_ZEILEN - 1] + [
+                    mass.elidedText(rest, Qt.ElideRight, innen)]
+            texte.append(umbruch)
+
+        # --- Lage der Kaesten, von oben nach unten
+        lage, y, gekappt = {}, 0.0, False
+        zone = self.breite - 2 * RAND - rand_gasse
+        for r, reihe in enumerate(zeilen):
+            hoch = max(len(texte[i]) for i in reihe) * self._zh + 2 * A_RAND
+            if r and y + A_PFEIL + hoch > A_HOEHE:
+                gekappt = True
+                break
+            if r:
+                y += A_PFEIL
+            gesamt = len(reihe) * kasten_breit + (len(reihe) - 1) * luft
+            x = RAND + (zone - gesamt) / 2.0
+            for i in reihe:
+                lage[i] = QRectF(x, y, kasten_breit, hoch)
+                x += kasten_breit + luft
+            y += hoch
+        if gekappt:
+            marken.append(MARKE)
+
+        # --- Pfeile
+        self._plan = []
+        spur = 0
+        for a, b in kanten:
+            if a not in lage or b not in lage:
+                continue
+            oben, unten = lage[a], lage[b]
+            sx, sy = oben.center().x(), oben.bottom()
+            tx, ty = unten.center().x(), unten.top()
+
+            def neben(hoehe: float) -> QRectF:
+                """Beschriftung rechts neben dem senkrechten Stueck.
+
+                Sie sitzt auf derselben Hoehe wie die Beschriftung der
+                geknickten Geschwister, naemlich unter dem Querstrich --
+                und das ist der Grund, warum sie ueberhaupt dorthin muss:
+                Ein Kasten mit drei Ausgaengen hat einen geraden Pfeil
+                in der Mitte und zwei geknickte daneben. Stuende sein
+                Wort weiter oben, laege es genau auf dem Querstrich der
+                beiden anderen. Gemessen: "unklar" lag quer ueber der
+                Klammer von "ok" und "nein".
+                """
+                return QRectF(sx + 4, hoehe,
+                              min(kasten_breit / 2.0,
+                                  self.breite - RAND - sx - 4), self._zf)
+
+            if rang[b] - rang[a] > 1:
+                # Ueber die Gasse aussen herum. Zwei Spuren nebeneinander
+                # reichen: Bei zehn Schritten gibt es nicht mehr
+                # ueberspringende Pfeile, die gleichzeitig auf derselben
+                # Hoehe laufen.
+                gx = self.breite - RAND - 5 - (spur % 2) * 6
+                spur += 1
+                ecken = [(sx, sy), (sx, sy + 8), (gx, sy + 8),
+                         (gx, ty - 8), (tx, ty - 8), (tx, ty)]
+                schrift = neben(sy + 9)
+                lage_aus = Qt.AlignLeft
+            elif abs(sx - tx) < 0.6:
+                ecken = [(sx, sy), (tx, ty)]
+                schrift = neben(sy + A_PFEIL / 2.0 + 1)
+                lage_aus = Qt.AlignLeft
+            else:
+                quer = sy + A_PFEIL / 2.0
+                ecken = [(sx, sy), (sx, quer), (tx, quer), (tx, ty)]
+                # Die Beschriftung sitzt UNTER dem Querstueck, nicht
+                # darueber: Darueber stiesse sie bei A_PFEIL = 24 an die
+                # Unterkante des Kastens, aus dem der Pfeil kommt.
+                schrift = QRectF(min(sx, tx), quer + 1, abs(tx - sx), self._zf)
+                lage_aus = Qt.AlignHCenter
+            self._plan.append({
+                "art": "pfeil",
+                "linie": QPolygonF([QPointF(*e) for e in ecken]),
+                "spitze": QPolygonF([QPointF(tx - A_KOPF, ty - 5.0),
+                                     QPointF(tx + A_KOPF, ty - 5.0),
+                                     QPointF(tx, ty)]),
+                "text": aufschrift.get((a, b), ""),
+                "schrift": schrift, "aus": lage_aus,
+            })
+        for i in sorted(lage):
+            self._plan.append({"art": "kasten", "punkt": i,
+                               "kasten": lage[i], "zeilen": texte[i]})
+        for text in marken:
+            self._plan.append({"art": "marke", "text": text})
+
+        self._gekappt = bool(marken)
+        self._bau = {"hoehe": y, "marken": marken}
+        return y + len(marken) * self._zh
+
     @staticmethod
     def _prozent(anteil: float) -> str:
         """0.1412 -> "14 %". Genauer nur da, wo es noetig ist.
@@ -907,6 +1650,71 @@ class Kachel(QWidget):
         if p < 10:
             return f"{p:.1f}".replace(".", ",") + " %"
         return f"{p:.0f} %"
+
+    @staticmethod
+    def _leuchtdichte(c: QColor) -> float:
+        """Relative Helligkeit nach WCAG -- fuer Kontrastrechnungen.
+
+        Nicht (r+g+b)/3: Gruen traegt zur empfundenen Helligkeit gut
+        siebenmal so viel bei wie Blau. Ein Mittelwert wuerde ausgerechnet
+        die beiden Kachelfarben falsch einschaetzen, weil die eine
+        orange und die andere gruen ist.
+        """
+        def kanal(v: float) -> float:
+            v = v / 255.0
+            return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+        return (0.2126 * kanal(c.red()) + 0.7152 * kanal(c.green())
+                + 0.0722 * kanal(c.blue()))
+
+    @staticmethod
+    def _ueber_grund(ton: QColor, deckung: float) -> QColor:
+        """Was man wirklich sieht, wenn ton mit dieser Deckung liegt.
+
+        Ein Band ist halbdurchsichtig; seine Farbe allein sagt nichts
+        darueber, wie hell die Stelle am Ende ist. Gerechnet wird gegen
+        den Kachelgrund, nicht gegen den Schreibtisch dahinter: Der
+        Grund deckt zu rund neunzig Prozent, der Rest faellt gegenueber
+        dem Unterschied zwischen heller und dunkler Schrift nicht ins
+        Gewicht.
+        """
+        g = QColor(8, 13, 20)
+        rest = 1.0 - deckung
+        return QColor(round(ton.red() * deckung + g.red() * rest),
+                      round(ton.green() * deckung + g.green() * rest),
+                      round(ton.blue() * deckung + g.blue() * rest))
+
+    @classmethod
+    def _schrift_auf(cls, grund: QColor, kerze: QColor) -> QColor:
+        """Welche Schrift auf DIESEM Grund noch zu lesen ist.
+
+        Die Kachelfarbe bleibt, solange sie traegt -- eine Kachel, in der
+        die Beschriftung mal orange und mal weiss ist, sieht aus wie zwei
+        Kacheln. Erst wenn sie MESSBAR nicht mehr traegt, wird gewechselt,
+        und dann auf das, was auf diesem Grund am besten steht: dunkle
+        Tinte auf hellem Band, fast weiss auf mittlerem.
+
+        Die Schwelle ist die 4,5:1 aus WCAG fuer normalen Fliesstext,
+        nicht die 3,0:1 fuer grosse Schrift: Hier steht Segoe UI 7, und
+        das ist das Gegenteil von grosser Schrift.
+
+        Warum ueberhaupt gerechnet und nicht wie im Tortenstueck an einer
+        Helligkeitsschwelle festgemacht: Dort liegt die Zahl auf einer
+        fast deckenden Flaeche, hier auf einem Band mit 0,38 oder 0,80
+        Deckung ueber dem Kachelgrund. Dieselbe Bandfarbe ergibt je nach
+        Deckung einen ganz anderen Untergrund -- und genau daran ist die
+        erste Fassung gescheitert.
+        """
+        hell = cls._leuchtdichte(grund)
+
+        def kontrast(c: QColor) -> float:
+            dort = cls._leuchtdichte(c)
+            return (max(hell, dort) + 0.05) / (min(hell, dort) + 0.05)
+
+        if kontrast(kerze) >= 4.5:
+            return QColor(kerze)
+        dunkel = QColor(8, 13, 20)
+        weiss = QColor(245, 248, 252)
+        return dunkel if kontrast(dunkel) >= kontrast(weiss) else weiss
 
     @staticmethod
     def _stufe(farbe: QColor, i: int, anzahl: int) -> QColor:
@@ -1088,6 +1896,10 @@ class Kachel(QWidget):
             y = self._torte_malen(p, farbe, y)
         elif self.form == "kategorien":
             y = self._kategorien_malen(p, farbe, y)
+        elif self.form == "fluss":
+            y = self._fluss_malen(p, farbe, y)
+        elif self.form == "ablauf":
+            y = self._ablauf_malen(p, farbe, y)
         else:
             y = self._datenzeilen(p, farbe, y)
         if self.stand:
@@ -1730,6 +2542,201 @@ class Kachel(QWidget):
                               ZEILE - 1),
                     Qt.AlignRight, punkt["wert"], c)
             y += ZEILE
+        return y
+
+    # --- Fluss ---------------------------------------------------------------
+
+    def _fluss_malen(self, p, farbe, y: float) -> float:
+        """Baender hinten, Balken darauf, Beschriftung zuletzt.
+
+        Die Reihenfolge ist die ganze Lesbarkeit: Ein Band, das ueber
+        seinen eigenen Knotenbalken laeuft, verschluckt dessen Kante, und
+        eine Beschriftung unter einem Band ist keine.
+
+        Ein Band ist halbdurchsichtig, ein Balken nicht. Das ist kein
+        Geschmack: Zwei Baender, die sich kreuzen, muessen als zwei
+        Baender lesbar bleiben -- deckend waere das obere einfach vorn
+        und das untere weg. Der Balken dagegen ist die Marke, an der
+        abgelesen wird, und die darf nicht durchscheinen.
+
+        DIE BESCHRIFTUNG STEHT IN IHRER EIGENEN SPUR rechts neben dem
+        Balken -- warum das geht, steht bei _fluss_rechnen unter GERADE
+        STRECKE. Hier zaehlt die Folge daraus: Unter einer Beschriftung
+        liegt genau eine von zwei bekannten Farben, naemlich der eigene
+        Ton des Knotens (wenn seine abgehenden Baender die Zeile
+        ausfuellen) oder der Kachelgrund (wenn nicht -- letzte Spalte,
+        oder ein Knoten, der mehr aufnimmt als er weitergibt).
+
+        Beide sind ausrechenbar, und deshalb wird die Schriftfarbe hier
+        ausgerechnet und nicht gesetzt: _ueber_grund mischt die wirkliche
+        Farbe unter der Zeile, _schrift_auf waehlt zwischen der
+        Kachelfarbe und der dunklen Tinte, was darauf besser steht. Das
+        ist der Fall, der die erste Fassung erledigt hat: Ein
+        hervorgehobenes Band steht auf 0,80 Deckung, und darauf ist die
+        helle Kachelfarbe nicht mehr zu lesen -- dort schreibt die
+        Kachel jetzt dunkel.
+        """
+        knoten = self._bau.get("knoten") or []
+        marken = self._bau.get("marken") or []
+        flaeche = self._bau.get("flaeche", 0.0)
+        if not knoten and not marken:
+            return y
+
+        p.save()
+        p.translate(0.0, y)
+
+        leuchtend = None
+        for band in self._plan:
+            leuchtet = (band["punkt"] == self.hervor)
+            if leuchtet:
+                leuchtend = band
+            c = self._stufe(farbe, band["stufe"][0], band["stufe"][1])
+            c.setAlphaF(0.80 if leuchtet else 0.38)
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawPath(band["pfad"])
+        if leuchtend is not None:
+            # Wie ueberall in dieser Kachel: ein Rahmen, keine Nuance.
+            # Ein Band, das nur heller ist, verschwindet zwischen seinen
+            # Nachbarn, sobald es duenn ist -- und duenn ist es meistens.
+            rand = QColor(farbe)
+            rand.setAlphaF(0.85)
+            p.setPen(QPen(rand, 1.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(leuchtend["pfad"])
+
+        p.setFont(self._schrift_klein())
+        for nr, k in enumerate(knoten):
+            c = self._stufe(farbe, k["platz"], k["anzahl"])
+            c.setAlphaF(0.95)
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawRect(QRectF(k["x"], k["y"], F_KNOTEN,
+                              max(k["hoehe"], F_STRICH)))
+
+            x_text = k["x"] + F_KNOTEN + F_NAME_RAND
+            # Bei sehr duennen Knoten haengt die mittig gesetzte
+            # Beschriftung sonst oben oder unten aus der Flaeche heraus.
+            y_text = max(0.0, min(flaeche - self._zh,
+                                  k["y"] + k["hoehe"] / 2.0 - self._zh / 2.0))
+
+            # Was liegt unter dieser Zeile? Die abgehenden Baender des
+            # Knotens fuellen ihn von oben her auf k["aus"] Punkte auf --
+            # deckt das mehr als die halbe Zeile, ist der Bandton der
+            # Grund, sonst der Kachelgrund. Gemessen wird die wirkliche
+            # Ueberlappung und nicht "hat der Knoten Ausgaenge": Ein
+            # Knoten, der 1.098 aufnimmt und 820 weitergibt, hat unter
+            # seiner Zeile noch Band, unter seinem Fuss aber nicht mehr.
+            ueber = max(0.0, (min(y_text + self._zh, k["y"] + k["aus"])
+                              - max(y_text, k["y"])))
+            leuchtet = (leuchtend is not None
+                        and nr in (leuchtend["von"], leuchtend["nach"]))
+            if ueber >= self._zh / 2.0:
+                deckung = 0.80 if (leuchtend is not None
+                                   and leuchtend["von"] == nr) else 0.38
+                grund = self._ueber_grund(
+                    self._stufe(farbe, k["platz"], k["anzahl"]), deckung)
+            else:
+                grund = QColor(8, 13, 20)
+            # Deckend, anders als in den Listenformen: Dort ist die
+            # Deckkraft eine Abstufung zwischen wichtig und weniger
+            # wichtig, hier waere sie ein Abzug von genau dem Kontrast,
+            # der eben ausgerechnet wurde.
+            tinte = self._schrift_auf(grund, farbe)
+            self._beschriften(
+                p, QRectF(x_text, y_text, self._bau["name"], self._zh),
+                Qt.AlignLeft | Qt.AlignVCenter, k["kurz"], tinte)
+            self._beschriften(
+                p, QRectF(x_text + self._bau["name"] + 4, y_text, F_WERT,
+                          self._zh),
+                Qt.AlignRight | Qt.AlignVCenter, k["betrag"], tinte)
+
+            if leuchtet:
+                rand = QColor(farbe)
+                rand.setAlphaF(0.70)
+                p.setPen(QPen(rand, 1.0))
+                p.setBrush(Qt.NoBrush)
+                p.drawRect(QRectF(k["x"] - 1.5, k["y"] - 1.5, F_KNOTEN + 3,
+                                  max(k["hoehe"], F_STRICH) + 3))
+        p.restore()
+
+        y += flaeche
+        blass = QColor(farbe)
+        blass.setAlphaF(0.45)
+        p.setFont(self._schrift_klein())
+        for text in marken:
+            self._beschriften(p, QRectF(RAND, y, self.breite - 2 * RAND,
+                                        self._zh),
+                              Qt.AlignHCenter, text, blass)
+            y += self._zh
+        return y
+
+    # --- Ablauf --------------------------------------------------------------
+
+    def _ablauf_malen(self, p, farbe, y: float) -> float:
+        """Pfeile zuerst, Kaesten darueber.
+
+        Die Pfeilspitze endet genau auf der Oberkante ihres Kastens; der
+        Kasten wird danach gemalt und deckt sie deshalb nicht zu, sondern
+        schliesst an sie an. Andersherum saehe jeder Pfeil aus, als
+        stiesse er einen Punkt zu weit.
+        """
+        p.save()
+        p.translate(0.0, y)
+        for stueck in self._plan:
+            if stueck["art"] == "pfeil":
+                strich = QColor(farbe)
+                strich.setAlphaF(0.55)
+                p.setPen(QPen(strich, 1.0))
+                p.setBrush(Qt.NoBrush)
+                p.drawPolyline(stueck["linie"])
+                p.setPen(Qt.NoPen)
+                p.setBrush(strich)
+                p.drawPolygon(stueck["spitze"])
+                if stueck["text"]:
+                    p.setFont(self._schrift_fuss())
+                    c = QColor(farbe)
+                    c.setAlphaF(0.72)
+                    self._beschriften(p, stueck["schrift"], stueck["aus"],
+                                      stueck["text"], c)
+                continue
+            if stueck["art"] != "kasten":
+                continue
+
+            leuchtet = (stueck["punkt"] == self.hervor)
+            kasten = stueck["kasten"]
+            grund = QColor(farbe)
+            grund.setAlphaF(0.30 if leuchtet else 0.12)
+            kante = QColor(farbe)
+            kante.setAlphaF(0.95 if leuchtet else 0.50)
+            p.setPen(QPen(kante, 1.6 if leuchtet else 1.0))
+            p.setBrush(grund)
+            p.drawRoundedRect(kasten.adjusted(0.5, 0.5, -0.5, -0.5),
+                              A_ECKE, A_ECKE)
+
+            p.setFont(self._schrift_klein())
+            c = QColor(farbe)
+            c.setAlphaF(1.0 if leuchtet else 0.86)
+            zy = kasten.top() + A_RAND
+            for zeile in stueck["zeilen"]:
+                self._beschriften(
+                    p, QRectF(kasten.left() + A_RAND, zy,
+                              kasten.width() - 2 * A_RAND, self._zh),
+                    Qt.AlignHCenter | Qt.AlignVCenter, zeile, c)
+                zy += self._zh
+        p.restore()
+
+        y += self._bau.get("hoehe", 0.0)
+        blass = QColor(farbe)
+        blass.setAlphaF(0.45)
+        p.setFont(self._schrift_klein())
+        for stueck in self._plan:
+            if stueck["art"] != "marke":
+                continue
+            self._beschriften(p, QRectF(RAND, y, self.breite - 2 * RAND,
+                                        self._zh),
+                              Qt.AlignHCenter, stueck["text"], blass)
+            y += self._zh
         return y
 
     def _fusszeile(self, p, farbe, y: float) -> None:
