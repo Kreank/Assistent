@@ -188,11 +188,31 @@ WARTESAETZE = (
 # sofort, und ein Assistent, der beim Wecken erst nachdenkt, wirkt
 # ohnehin traege. Wird beim Start einmal ausgesprochen und liegt dann
 # fertig da.
+# Sie muessen KURZ bleiben, und das ist keine Geschmacksfrage: Sie sind
+# die Antwort auf das Weckwort, und ihr ganzer Zweck ist, sofort da zu
+# sein. Ein epischer Dreizeiler waere hier genau das Gegenteil von dem,
+# was er sein soll -- man wartet dann eben auf die Ansage statt auf die
+# Antwort.
+#
+# Vierzehn statt vier, weil vier bei taeglicher Benutzung nach einer
+# Woche wie eine einzige klingen. Sie werden ALLE beim Start einmal
+# gesprochen und liegen dann fertig da (main._gruss_vorbereiten); das
+# laeuft nebenher und kostet nichts, was man merkt.
 WECKANTWORTEN = [
     "Ja?",
     "Ich höre.",
-    "Was kann ich tun?",
+    "Sag an.",
     "Bin da.",
+    "Zu Diensten.",
+    "Leg los.",
+    "Ich bin ganz Ohr.",
+    "Was brauchst du?",
+    "Bereit.",
+    "Immer noch wach.",
+    "Schieß los.",
+    "Hier bin ich.",
+    "Was liegt an?",
+    "Ich bin dran.",
 ]
 
 # --- Ohren ----------------------------------------------------------------

@@ -60,7 +60,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         "Werkzeug oder aus dem Gespräch. Schick ihn NICHT auf eine "
         "Webseite und lass ihn sich NICHT anmelden für etwas, das du ihm "
         "gerade vorgelesen hast. Sag den Inhalt trotzdem — die Kachel "
-        "ersetzt die Antwort nicht, sie zeigt sie.",
+        "ersetzt die Antwort nicht, sie zeigt sie.\n"
+        "Wähle die Form nach dem Inhalt: Nachrichten und Mails als "
+        "'blasen', zwei Zeiträume nebeneinander als 'vergleich', eine "
+        "Zusammenfassung als 'text', alles Übrige als 'liste'.",
         {
             "type": "object",
             "properties": {
@@ -70,6 +73,24 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                    "Wörter: 'Ausgaben im August', "
                                    "'Chat mit Niko', 'Termine heute'.",
                 },
+                "form": {
+                    "type": "string",
+                    "enum": ["liste", "blasen", "vergleich", "text"],
+                    "description": "liste: Zeilen mit Wert und Balken "
+                                   "(Vorgabe). blasen: ein Gesprächsverlauf, "
+                                   "Telegram oder Mail. vergleich: zwei "
+                                   "Zeiträume nebeneinander, die Differenz "
+                                   "rechnet die Kachel selbst. text: ein "
+                                   "Fließtext, Zusammenfassung oder Auszug.",
+                },
+                "spalten": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Nur bei form=vergleich: die zwei "
+                                   "Spaltennamen, z. B. ['August', 'Juli']. "
+                                   "Die erste gehört zu wert, die zweite zu "
+                                   "wert2.",
+                },
                 "punkte": {
                     "type": "array",
                     "description": "Die Zeilen, höchstens zwölf.",
@@ -77,15 +98,34 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                         "type": "object",
                         "properties": {
                             "text": {"type": "string",
-                                     "description": "Links, das Wesentliche."},
+                                     "description": "Links das Wesentliche — "
+                                                    "bei blasen die Nachricht "
+                                                    "selbst, bei text ein "
+                                                    "Absatz."},
                             "wert": {"type": "string",
                                      "description": "Rechts: Betrag, "
-                                                    "Uhrzeit, Datum, Anzahl."},
+                                                    "Uhrzeit, Datum, Anzahl. "
+                                                    "Bei blasen die Zeit."},
                             "zahl": {"type": "number",
                                      "description": "Der rohe Wert, wenn es "
                                                     "einer ist — daraus wird "
                                                     "ein Balken. Bei Geld der "
                                                     "Betrag ohne Vorzeichen."},
+                            "wert2": {"type": "string",
+                                      "description": "Nur bei vergleich: der "
+                                                     "Wert der zweiten "
+                                                     "Spalte."},
+                            "zahl2": {"type": "number",
+                                      "description": "Nur bei vergleich: die "
+                                                     "rohe Zahl dazu. Fehlt "
+                                                     "sie, bleibt die "
+                                                     "Differenz leer statt "
+                                                     "erfunden."},
+                            "von_mir": {"type": "boolean",
+                                        "description": "Nur bei blasen: hat "
+                                                       "der Nutzer das "
+                                                       "geschrieben? Dann "
+                                                       "rechts."},
                         },
                         "required": ["text"],
                     },
@@ -135,6 +175,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             sorte=ZUSTAND if bleibt else ANTWORT,
             gross=str(args.get("gross") or ""),
             stand=stand,
+            form=str(args.get("form") or "liste"),
+            spalten=args.get("spalten") or (),
         )
         if leuchten:
             leuchten("Gedächtnis")

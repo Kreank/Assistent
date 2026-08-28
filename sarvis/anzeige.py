@@ -124,7 +124,8 @@ class Anzeige:
         self._senden(art="browser_zu")
 
     def kachel(self, name: str, kopf: str, punkte, sorte: str = "antwort",
-               gross: str = "", stand: str = "", sekunden: float = 0.0) -> None:
+               gross: str = "", stand: str = "", sekunden: float = 0.0,
+               form: str = "liste", spalten=()) -> None:
         """Eine Kachel neben der Engine zeigen -- oder ihren Inhalt ersetzen.
 
         name ist die Identitaet, nicht die Ueberschrift: Zweimal "finanzen"
@@ -146,6 +147,13 @@ class Anzeige:
                      # gelesen, nicht studiert -- und der Deckel haelt
                      # nebenbei das Datagramm klein.
                      punkte=list(punkte or [])[:12],
+                     # Die Form entscheidet, WIE gemalt wird -- Liste,
+                     # Gespraechsblasen, zwei Spalten mit Differenz oder
+                     # Fliesstext. Die Spaltennamen sind Inhalt, keine
+                     # Gestaltung: Welcher Monat rechts steht, weiss nur
+                     # der Aufrufer.
+                     form=str(form or "liste"),
+                     spalten=[str(x) for x in (spalten or [])][:2],
                      sekunden=round(float(sekunden), 1))
 
     def kachel_weg(self, name: str) -> None:

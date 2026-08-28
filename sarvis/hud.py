@@ -512,6 +512,8 @@ class Hud(QWidget):
             gross=m.get("gross") or "",
             stand=m.get("stand") or "",
             sekunden=float(m.get("sekunden") or 0.0),
+            form=m.get("form") or "liste",
+            spalten=tuple(m.get("spalten") or ()),
         )
         # Erst jetzt anordnen: Die Hoehe steht erst fest, wenn der Inhalt
         # drin ist, und danach richtet sich der Stapel darunter.
