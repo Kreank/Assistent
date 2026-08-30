@@ -529,7 +529,7 @@ class Sarvis:
 
     async def _antwort_hoeren(self) -> None:
         """Aufnahme als Antwort auf eine offene Rueckfrage auswerten."""
-        proben = self.aufnehmer.stop()
+        proben = await asyncio.to_thread(self.aufnehmer.stop)
         dauer = len(proben) / config.ABTASTRATE
         if dauer < config.MIN_AUFNAHME_SEK:
             # Der Parallelfall in _durchgang druckt hier, dieser nicht --
@@ -898,7 +898,7 @@ class Sarvis:
             self.anzeige.nachhoeren(config.NACHHOEREN_SEK)
 
     async def _durchgang(self) -> None:
-        proben = self.aufnehmer.stop()
+        proben = await asyncio.to_thread(self.aufnehmer.stop)
         t_los = time.perf_counter()
         dauer = len(proben) / config.ABTASTRATE
 
@@ -1062,7 +1062,7 @@ class Sarvis:
                     # Waehrend der Tastenaufnahme muss der Horcher nicht
                     # mitrechnen -- und soll nicht zweimal dasselbe hoeren.
                     self.horcher.pause(True)
-                    self.aufnehmer.start()
+                    await asyncio.to_thread(self.aufnehmer.start)
                     self.anzeige.zustand(HOERT)
                     print("\n  * hoert zu ...")
 

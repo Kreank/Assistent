@@ -276,6 +276,17 @@ SPRACHE = "de"
 # sie beim Diktieren zuverlaessiger.
 HOTWORDS = "Sarvis"
 
+# --- Woher der Klang kommt ------------------------------------------------
+# "lokal" -- Mikrofon und Lautsprecher dieses Rechners (sounddevice).
+# "netz"  -- Sprache kommt von aussen und geht nach aussen zurueck.
+#
+# Auf dem Server gibt es kein Mikrofon und keine Lautsprecher; er bekommt
+# Sprache geschickt und schickt seine Antwort zurueck. Der Vertrag
+# zwischen beiden Fassungen steht in klang.py. Die Netzfassung ist noch
+# nicht gebaut -- "netz" sagt das beim Start deutlich, statt still etwas
+# anderes zu tun.
+KLANG_QUELLE = "lokal"
+
 # --- Aufnahme -------------------------------------------------------------
 ABTASTRATE = 16000  # was Whisper erwartet
 MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen

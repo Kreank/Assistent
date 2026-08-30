@@ -13,9 +13,11 @@ import numpy as np
 import sounddevice as sd
 
 from . import config
+from .klang import AUSKLANG  # noqa: F401
 
 HOP = 0.025       # Sekunden je Pegelwert
-AUSKLANG = 0.30   # Sekunden Stille hinter jeder Aeusserung
+# AUSKLANG steht in klang.py -- es gehoert zum Vertrag zwischen
+# Schleife und Klangquelle, nicht zu dieser einen Umsetzung.
 
 
 def gong(rate: int = 22050) -> tuple[np.ndarray, int]:
@@ -83,7 +85,16 @@ class Aufnehmer:
         )
         self._strom.start()
 
-    def stop(self) -> np.ndarray:
+    def pegel_an(self, melden) -> None:
+        """Wohin der Ausschlag gemeldet wird -- auch None ist erlaubt."""
+        self.melden = melden
+
+    def stop(self, frist: float = 2.0) -> np.ndarray:
+        """frist wird lokal nicht gebraucht: Es gibt keine Rahmen, die
+        noch unterwegs waeren. Der Parameter steht im Vertrag
+        (klang.Aufnehmer), damit die Netzfassung ihn spaeter fuellen
+        kann, ohne dass ein Aufrufer sich aendert."""
+        del frist
         if self._strom is None:
             return np.zeros(0, dtype="float32")
         self._strom.stop()
@@ -202,7 +213,15 @@ class Lautsprecher:
             self.leer.clear()
             self._schlange.put((proben, rate, self._runde))
 
-    def abbrechen(self) -> None:
+    @property
+    def runde(self) -> int:
+        """Welche Wiedergaberunde gerade gilt (klang.Lautsprecher)."""
+        return self._runde
+
+    def pegel_an(self, melden) -> None:
+        self.melden = melden
+
+    def abbrechen(self) -> int:
         """Sofort still sein -- mitten im Wort, wenn es sein muss.
 
         Reihenfolge zaehlt: erst die Warteschlange leeren, dann den Ton
@@ -221,6 +240,17 @@ class Lautsprecher:
         sd.stop()
         if self.melden is not None:
             self.melden(0.0)
+        # Die neue Runde zurueck: Der Aufrufer kann daran festmachen,
+        # was ab jetzt gilt, ohne in den Lautsprecher hineinzusehen.
+        # Ueber Netz ist genau diese Zahl das, was mitgehen muss.
+        return self._runde
 
-    def warten(self) -> None:
-        self.leer.wait()
+    def warten(self, frist: float | None = None) -> bool:
+        """True, wenn wirklich verklungen; False bei abgelaufener Frist.
+
+        Lokal kann nur True herauskommen -- leer wird immer gesetzt,
+        notfalls von abbrechen(). Die Frist steht im Vertrag fuer die
+        Netzfassung: Ohne sie haengt Sarvis bei einem Verbindungsabbruch
+        fuer immer in diesem Aufruf, und die Schleife nimmt keinen Zuruf
+        mehr an."""
+        return self.leer.wait(timeout=frist)
