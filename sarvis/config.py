@@ -568,8 +568,21 @@ def _env_werte() -> dict:
     Eine Stelle fuer alle Zugaenge: Vorher las telegram_zugang() die
     Datei selbst, und der naechste Zugang haette dieselben zehn Zeilen
     noch einmal gebraucht.
+
+    GESUCHT WIRD ZUERST IM DATENORDNER, dann neben dem Quelltext.
+
+    Auf Windows gab es nur einen Ort -- Programm und Daten lagen im
+    selben Verzeichnis. Auf dem Server sind sie getrennt, und Zugaenge
+    gehoeren zu den Daten: Sie ueberleben ein "git checkout", sie liegen
+    auf der Platte, die gesichert wird, und sie kommen beim Deploy nicht
+    versehentlich mit.
+
+    Der zweite Ort bleibt als Rueckfall, damit ein Windows-Checkout
+    unveraendert weiterlaeuft.
     """
-    datei = WURZEL / ".env"
+    datei = DATEN / ".env"
+    if not datei.exists():
+        datei = WURZEL / ".env"
     if not datei.exists():
         return {}
     werte = {}

@@ -37,9 +37,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 #
 #   git             Sarvis' Hintergrund-Arbeiter legt Zweige an und
 #                   committet. Ohne git kein Arbeiter.
-#   ffmpeg          faster-whisper laesst Audio darueber dekodieren;
-#                   av (ElevenLabs-MP3) bringt seine eigenen Bibliotheken
-#                   mit, ffmpeg ist der Weg fuer alles Uebrige.
 #   libsndfile1     soundfile/scipy beim Lesen von WAV.
 #   libportaudio2   sounddevice. Es gibt hier kein Audiogeraet, aber
 #                   audio.py importiert sounddevice auf Modulebene --
@@ -52,9 +49,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   libgomp1        OpenMP -- ctranslate2 rechnet damit auf der CPU
 #                   (der Rueckfallpfad in ohren.py, wenn CUDA fehlt).
 #   curl, xz-utils  nur zum Holen von Node, siehe unten.
+#
+# KEIN ffmpeg, und das ist kein Vergessen: Kein einziges .py ruft
+# ffmpeg oder ffprobe auf (nachgesehen, nicht vermutet), und
+# faster-whisper dekodiert seit 1.1 ueber av (PyAV) -- das bringt seine
+# libav*-Bibliotheken im Rad selbst mit. Das apt-Paket zoege unter
+# Trixie mesa und Vulkan hinterher und wuchse das Image um rund ein
+# Gigabyte, ohne dass irgendjemand es aufriefe. Gemessen ist danach
+# sowohl eine WAV- als auch eine Opus-Datei (.oga) transkribiert
+# worden.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates curl xz-utils \
-        ffmpeg libsndfile1 libportaudio2 espeak-ng libgomp1 \
+        libsndfile1 libportaudio2 espeak-ng libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Node und die Claude-Code-CLI ----------------------------------------
