@@ -42,6 +42,11 @@ from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
 MELDUNG_GEDULD_SEK = 120.0
 
 
+def _fehlt(pfad, rat: str) -> str:
+    """Warum eine Werkzeuggruppe nicht gebaut wurde, in einem Satz."""
+    return f"nicht angemeldet ({pfad.name} fehlt) -- {rat}"
+
+
 def _taste_aufloesen(name: str):
     name = name.strip().lower()
     if hasattr(keyboard.Key, name):
@@ -923,9 +928,23 @@ class Sarvis:
         print(f"  Claude bereit nach {time.perf_counter() - t:.1f}s")
         for hinweis in self.hirn.hinweise:
             print(f"  Gedaechtnis: {hinweis}")
-        # Abgelaufener Google-Zugang faellt sonst erst auf, wenn man ihn
-        # braucht -- und dann steht man mitten im Satz.
+        # Was von den 77 Werkzeugen wirklich gebaut wurde -- und warum
+        # nicht.
+        #
+        # Drei Gruppen werden nur zugeschaltet, wenn ihre Zugaenge da
+        # sind: Finanzen (14), Google (23), Telegram (5). Fehlt eine
+        # Datei, fehlen die Werkzeuge, und zwar STILL: Sarvis sieht sie
+        # dann einfach nicht und antwortet "das kann ich nicht" statt
+        # "mein Zugang fehlt". Im schlimmsten Fall sind es 35 statt 77,
+        # und zwei der drei Ausfaelle standen nirgends.
+        #
+        # Beim ersten Start im Container debuggt man das sonst im
+        # Blindflug. Deshalb eine Zeile je Gruppe.
+        print(f"  Werkzeuge  : {len(self.werkzeugnamen)} gebaut")
         print(f"  Google     : {google.zustand()}")
+        print(f"  Telegram   : {'angemeldet' if config.telegram_bereit() else _fehlt(config.TELEGRAM_SITZUNG, 'telegram_anmelden.py ausfuehren')}")
+        print(f"  Finanzen   : {'Schlüssel da' if config.finanz_schluessel() else 'kein FD_API_SCHLUESSEL in der .env -- 14 Werkzeuge fehlen'}")
+        print(f"  Daten      : {config.DATEN}{'' if config.DATEN.is_dir() else '   FEHLT -- Gedaechtnis, Timer und Zugaenge liegen dort'}")
 
         print("  Warmlaufen ...")
         await asyncio.to_thread(self.ohren.aufwaermen)
