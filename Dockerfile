@@ -54,10 +54,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ffmpeg oder ffprobe auf (nachgesehen, nicht vermutet), und
 # faster-whisper dekodiert seit 1.1 ueber av (PyAV) -- das bringt seine
 # libav*-Bibliotheken im Rad selbst mit. Das apt-Paket zoege unter
-# Trixie mesa und Vulkan hinterher und wuchse das Image um rund ein
-# Gigabyte, ohne dass irgendjemand es aufriefe. Gemessen ist danach
-# sowohl eine WAV- als auch eine Opus-Datei (.oga) transkribiert
-# worden.
+# Trixie mesa und Vulkan hinterher; gemessen kostete es 0,6 GB Image
+# (6,77 GB mit, 6,18 GB ohne), ohne dass irgendjemand es aufriefe.
+#
+# Nachgewiesen, nicht gehofft: Im Image OHNE ffmpeg wurden eine WAV
+# (15,5 s -> 0,58 s) und eine Opus-Datei .oga (82,1 s -> 1,29 s)
+# fehlerfrei transkribiert. Wer hier spaeter doch ffmpeg braucht,
+# merkt es also an einem Dekodierfehler, nicht an Stille.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates curl xz-utils \
         libsndfile1 libportaudio2 espeak-ng libgomp1 \

@@ -40,6 +40,17 @@ services:
     network_mode: host
 
     environment:
+      # --- Betriebsart ---
+      # "netz" statt "lokal": Auf dem Server gibt es kein Mikrofon, keine
+      # Lautsprecher und keinen Bildschirm. Sarvis bekommt Sprache
+      # geschickt und schickt seine Antwort zurueck.
+      #
+      # Das entscheidet mehr als es aussieht: Bei "lokal" laedt main.py
+      # pynput (braucht X11), audio.py sounddevice (braucht ein
+      # Audiogeraet) und startet das Qt-Overlay -- alle drei scheitern
+      # hier schon beim IMPORT, nicht erst beim Benutzen.
+      SARVIS_KLANG: netz
+
       # --- Orte (orte.py liest sie) ---
       SARVIS_DATEN: /srv/data/sarvis
       SARVIS_PRIVAT: /home/server3070

@@ -1094,20 +1094,37 @@ class Sarvis:
         # Anzeige abschaltet, verliert sonst die einzige Moeglichkeit, Sarvis
         # mitten im Satz zu stoppen -- und merkt es erst, wenn er sie braucht.
         schalter = None
-        tasten = {config.TASTE_STOPP: self._stopp_taste} if not self.im_netz else {}
-        if config.ANZEIGE:
+        tasten = {} if self.im_netz else {config.TASTE_STOPP: self._stopp_taste}
+        if config.ANZEIGE and not self.im_netz:
             tasten[config.TASTE_VERSCHIEBEN] = self._verschieben_umschalten
-        try:
-            schalter = keyboard.GlobalHotKeys(tasten)
-            schalter.start()
-        except Exception as e:
-            print(f"  (Tastenkombinationen gingen nicht: {e})")
+        # Im Netzbetrieb gibt es keine Tastatur, an die sich ein Haken
+        # haengen liesse -- pynput ist gar nicht erst geladen. Ohne diese
+        # Bedingung meldete der Start "'NoneType' object has no attribute
+        # 'GlobalHotKeys'". Kein Schaden, aber eine Fehlermeldung, die
+        # nichts bedeutet, kostet beim naechsten echten Fehler
+        # Aufmerksamkeit -- man liest sie irgendwann nicht mehr.
+        if tasten:
+            try:
+                schalter = keyboard.GlobalHotKeys(tasten)
+                schalter.start()
+            except Exception as e:
+                print(f"  (Tastenkombinationen gingen nicht: {e})")
 
         print("\n" + "=" * 62)
-        print(f"  Sarvis laeuft.  [{config.TASTE.upper()}] halten, reden, loslassen.")
-        if config.ANZEIGE:
-            print(f"  Anzeige verschieben: {config.TASTE_VERSCHIEBEN}")
-        print(f"  Sofort still: {config.TASTE_STOPP}")
+        if self.im_netz:
+            # Was hier steht, muss stimmen. Eine Startzeile, die zum
+            # Tastendruck auffordert, wo es keine Tastatur gibt, ist der
+            # Anfang davon, dass niemand mehr hinsieht.
+            print(f"  Sarvis laeuft.  Erreichbar ueber den Draht auf "
+                  f"127.0.0.1:{config.NETZ_HAFEN}.")
+            print("  Bedient wird er von aussen -- Weboberflaeche, App, "
+                  "Telegram.")
+        else:
+            print(f"  Sarvis laeuft.  [{config.TASTE.upper()}] halten, "
+                  f"reden, loslassen.")
+            if config.ANZEIGE:
+                print(f"  Anzeige verschieben: {config.TASTE_VERSCHIEBEN}")
+            print(f"  Sofort still: {config.TASTE_STOPP}")
         print("  Strg+C zum Beenden.")
         print("=" * 62)
 

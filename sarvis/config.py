@@ -9,6 +9,7 @@ oder config.PROJEKT_ORTE schreiben kann.
 Was hier bleibt, ist Politik statt Topologie: Schwellwerte,
 Werkzeugstufen, Befehlsmuster, der Systemprompt.
 """
+import os
 from pathlib import Path  # noqa: F401  -- von unten noch gebraucht
 
 from .orte import (ABLAGE, DATEN, ENTWICKLUNG_ORTE, FRAGEN_TROTZ_FREI,
@@ -267,7 +268,17 @@ WECKANTWORTEN = [
 # --- Ohren ----------------------------------------------------------------
 WHISPER_MODELL = "large-v3-turbo"
 WHISPER_GERAET = "cuda"        # bei Ärger: "cpu"
-WHISPER_GENAUIGKEIT = "float16"  # bei "cpu": "int8"
+WHISPER_GENAUIGKEIT = "int8_float16"  # bei "cpu": "int8"
+# Gemessen auf der RTX 3070 dieses Servers, large-v3-turbo, 4-s-Zuruf:
+#
+#   float16        2.289 MiB VRAM   0,228 s
+#   int8_float16   1.297 MiB VRAM   0,205 s
+#   int8           1.297 MiB VRAM   0,215 s
+#
+# Also die Haelfte des Speichers und nicht langsamer. Auf der 3080 des
+# Dev-PCs war float16 die richtige Wahl -- dort lag nichts anderes auf
+# der Karte. Hier teilt Whisper sie sich mit dem Haupt-LLM, und von
+# 8 GB bleiben neben qwen3.5:9b keine 2,3 GB uebrig.
 SPRACHE = "de"
 
 # Woerter, die Whisper erwarten soll. Ohne das schreibt es "Sarvis" als
@@ -285,7 +296,7 @@ HOTWORDS = "Sarvis"
 # zwischen beiden Fassungen steht in klang.py. Die Netzfassung ist noch
 # nicht gebaut -- "netz" sagt das beim Start deutlich, statt still etwas
 # anderes zu tun.
-KLANG_QUELLE = "lokal"
+KLANG_QUELLE = os.environ.get("SARVIS_KLANG", "lokal").strip() or "lokal"
 
 # Wo der Endpunkt lauscht, wenn KLANG_QUELLE = "netz".
 #

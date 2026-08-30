@@ -29,6 +29,12 @@ scipy
 # STIMME_DIENST = "elevenlabs", ab Werk aus).
 av
 
+# --- Der Endpunkt ---------------------------------------------------------
+# Liefert die Oberflaeche aus und traegt den WebSocket. Fehlte hier, weil
+# die Liste mit ast erhoben wurde, als sarvis/netz/ noch nicht stand --
+# der erste Containerbau starb an ModuleNotFoundError.
+aiohttp
+
 # --- Werkzeuge ------------------------------------------------------------
 numpy
 httpx                       # finanzen.py, eleven.py
