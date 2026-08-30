@@ -121,6 +121,7 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 | `browser_zu` | — | dito |
 | `horchen` | `an` | Dauerstrom jetzt schicken oder nicht |
 | `befehl` | `befehl`, plus Felder je nach Art | etwas auf dem Gerät TUN |
+| `web_bild` | `daten`, `adresse`, `titel`, `breite`, `hoehe` | ein Blick auf Sarvis' eigenen Browser |
 | `verschieben` | `an` | dito |
 
 <!-- /draht:herein -->
@@ -207,6 +208,32 @@ vorher ging es nur auf dem einen Rechner, jetzt auf jedem, an dem eine
 App läuft. Vom Handy aus „mach Musik an" zu sagen, ging vorher gar nicht.
 
 Wer `kann_rechner` nicht meldet, bekommt diese Art nie zu sehen.
+
+### `web_bild` — zusehen, was Sarvis im Browser tut
+
+Sarvis hat einen eigenen Browser auf dem Server. Damit liest er Seiten,
+füllt Formulare aus und klickt — unsichtbar. `web_bild` ist der Blick
+darauf:
+
+```json
+{ "art": "web_bild", "daten": "<base64-WebP>", "adresse": "https://…",
+  "titel": "…", "breite": 1280, "hoehe": 900 }
+```
+
+`daten` ist **ohne** `data:`-Präfix; wer es anzeigen will, setzt
+`data:image/webp;base64,` davor.
+
+Es kommt **nicht automatisch** nach jedem Klick — das wäre ein Screencast
+durch die Hintertür und würde bei jeder Aktion Bandbreite kosten. Es ist
+ein Werkzeug, das Sarvis benutzt, wenn es etwas zu sehen gibt, oder auf
+Zuruf („zeig mal, was du da machst").
+
+Gemessen: eine schlichte Seite 12 KB, ein Wikipedia-Artikel 107 KB. Weit
+unter den 4 MB des Drahts.
+
+Nicht zu verwechseln mit `browser`: Das schickt eine **Adresse**, damit
+der Nutzer die Seite in SEINEM Browser öffnet. `web_bild` zeigt, was in
+Sarvis' eigenem steht.
 
 ### `hintergrund`
 

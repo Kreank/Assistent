@@ -181,6 +181,51 @@ RUN set -eux; \
 # ohren._cuda_dlls_finden; das hier ist die Linux-Entsprechung).
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib
 
+# --- Der Browser ohne Kopf ------------------------------------------------
+#
+# Sarvis braucht einen eigenen Browser, um selbst eine Seite zu lesen,
+# ein Formular auszufuellen oder einen Preis nachzuschlagen. Auf dem
+# Dev-PC war das QWebEngineView im Overlay; hier ist es ein headless
+# Chrome, gesteuert ueber CDP (sarvis/netz/browser_kopf.py).
+#
+# WARUM DAS ECHTE CHROME UND KEIN PLAYWRIGHT-CHROMIUM: Playwright braucht
+# sein Rad, seinen Node-Treiber (rund 130 MB) UND ein eigenes Chromium.
+# Gebraucht wird davon nichts -- browser_kopf.py spricht CDP direkt und
+# hat ausser der Standardbibliothek keine Abhaengigkeit. Es bleibt also
+# nur der Browser selbst.
+#
+# GEMESSEN: /opt/google/chrome sind 403 MB, mit den mitgezogenen
+# Bibliotheken und Schriften landet das Image bei rund 6,7 statt 6,18 GB.
+# Das ist der Preis, und es gibt keinen billigeren: Debians chromium
+# kostet praktisch dasselbe.
+#
+# Die Schriften sind nicht Zierde. Ohne sie rendert Chrome jede Seite in
+# Kaestchen -- egal beim reinen Textlesen, aber web_ansehen schickt ein
+# BILD an den Nutzer, und ein Bild aus Kaestchen ist wertlos.
+# fonts-noto-cjk und fonts-noto-color-emoji sind mit Absicht dabei:
+# Emoji stehen heute in jeder zweiten Ueberschrift.
+#
+# Der Schluessel kommt in /etc/apt/keyrings und wird mit signed-by an
+# genau diese eine Quelle gebunden -- nicht in den globalen Bund, wo er
+# jedem anderen Repository die Unterschrift abnehmen koennte.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gnupg; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg; \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] \
+http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        google-chrome-stable \
+        fonts-liberation fonts-dejavu-core fonts-noto-core \
+        fonts-noto-cjk fonts-noto-color-emoji; \
+    apt-get purge -y --auto-remove gnupg; \
+    rm -rf /var/lib/apt/lists/*; \
+    google-chrome --version
+
 # --- Wer hier arbeitet ----------------------------------------------------
 #
 # Nicht root. Sarvis schreibt in /srv/data/sarvis und -- wenn er an

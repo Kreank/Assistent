@@ -74,3 +74,15 @@ pynput
 #                        5.226 Zeilen Qt und werden durch die PWA
 #                        ersetzt. Ein Server hat keinen Bildschirm.
 #   pywin32, win11toast  siehe requirements-windows.txt
+#
+#   playwright           Der Nachfolger des eingebauten Browsers
+#                        (netz/browser_kopf.py) spricht CDP direkt ueber
+#                        eine Pipe zu dem Chrome, das ohnehin im Image
+#                        liegt -- reine Standardbibliothek, KEINE neue
+#                        Zeile noetig. Playwright haette Rad plus
+#                        Node-Treiber (rund 130 MB) mitgebracht und ohne
+#                        executable_path noch ein zweites Chromium (rund
+#                        300 MB), fuer Faehigkeiten, die dieser Browser
+#                        nicht braucht: Er macht alles ueber
+#                        ausgewertetes JavaScript, es gibt keinen
+#                        Selektor und kein auto-waiting.

@@ -81,7 +81,8 @@ def aus_anzeige() -> dict[str, set[str]]:
 # Module, die am Traeger vorbei senden koennen. Jedes neue gehoert
 # hierher -- sonst meldet die Pruefung eine Art als "steht in der Doku,
 # der Code sendet sie nicht", und man sucht den Fehler in der Doku.
-SENDER = ("netz/klang_netz.py", "netz/horch_netz.py")
+SENDER = ("netz/klang_netz.py", "netz/horch_netz.py",
+          "werkzeuge/programme.py")
 
 
 def aus_ton() -> dict[str, set[str]]:
@@ -92,6 +93,8 @@ def aus_ton() -> dict[str, set[str]]:
         if not pfad.is_file():
             continue
         quelle = pfad.read_text("utf-8")
+        # Zwei Schreibweisen: der Traeger nimmt ein Verzeichnis,
+        # Anzeige._senden nimmt Schluesselwoerter. Beide kommen vor.
         for treffer in re.finditer(r'\.traeger\.senden\(\{(.*?)\}\)', quelle,
                                    re.S):
             block = treffer.group(1)
@@ -99,6 +102,10 @@ def aus_ton() -> dict[str, set[str]]:
             if not art:
                 continue
             raus[art.group(1)] = set(re.findall(r'"(\w+)":', block))
+        for treffer in re.finditer(
+                r'_senden\(\s*art\s*=\s*"(\w+)"(.*?)\)\n', quelle, re.S):
+            art, rest = treffer.group(1), treffer.group(2)
+            raus[art] = set(re.findall(r'(\w+)\s*=', rest)) | {"art"}
     return raus
 
 

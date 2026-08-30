@@ -698,7 +698,9 @@ class Kopfbrowser:
         """Aufhoeren, wenn eine Weile nichts mehr kam. Siehe Modulkopf."""
         try:
             while True:
-                await asyncio.sleep(30.0)
+                # Nicht haeufiger nachsehen als noetig -- und bei einer
+                # kurz gestellten Ruhe (Test) nicht seltener als sie.
+                await asyncio.sleep(max(1.0, min(30.0, RUHE / 4)))
                 if not self._draht.laeuft():
                     return
                 if time.monotonic() - self._zuletzt > RUHE:
@@ -793,7 +795,13 @@ class Kopfbrowser:
         noch laedt, hat den Text laengst.
         """
         async with self._schloss:
-            await self._sicherstellen()
+            try:
+                await self._sicherstellen()
+            except Exception as e:
+                # Kein Chrome, kein Start, kein Profil: alles drei ist ein
+                # Satz, den man vorlesen kann, und keine Ausnahme, die
+                # oben als Werkzeugabsturz ankommt.
+                return {"ok": False, "grund": str(e)}
             self._waechter_wecken()
             if not self.offen:
                 return {"ok": False, "grund": "Der Browser ist nicht da."}
