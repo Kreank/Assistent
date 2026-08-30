@@ -1,8 +1,20 @@
-"""Einstellungen. Alles, was man drehen will, steht hier."""
-from pathlib import Path
+"""Einstellungen. Alles, was man drehen will, steht hier.
 
-WURZEL = Path(__file__).resolve().parent.parent
-GEDAECHTNIS = WURZEL / "gedaechtnis"
+Die PFADE stehen nicht hier, sondern in orte.py -- sie waren das
+Einzige, was sich beim Umzug von Windows auf den Server wirklich
+aendert, und sie lagen ueber diese ganze Datei verteilt. Von dort
+werden sie zurueckgeholt, damit jeder Aufrufer weiter config.FREI_LESEN
+oder config.PROJEKT_ORTE schreiben kann.
+
+Was hier bleibt, ist Politik statt Topologie: Schwellwerte,
+Werkzeugstufen, Befehlsmuster, der Systemprompt.
+"""
+from pathlib import Path  # noqa: F401  -- von unten noch gebraucht
+
+from .orte import (ABLAGE, DATEN, ENTWICKLUNG_ORTE, FRAGEN_TROTZ_FREI,
+                   FREI_DURCHSUCHEN, FREI_LESEN, FREI_SCHREIBEN, GEDAECHTNIS,
+                   PROJEKTE, PROJEKT_ORTE, PROJEKT_ORT_NAMEN, VERKNUEPFUNG,
+                   VERLAUF_ORDNER, WURZEL)  # noqa: F401  -- Re-Export
 
 # Wie viele Eintraege die IMMER geladene Schicht hoechstens traegt.
 #
@@ -18,7 +30,7 @@ GEDAECHTNIS = WURZEL / "gedaechtnis"
 # gedaechtnis_nachschlagen auffindbar.
 GEDAECHTNIS_MAX_EINTRAEGE = 60
 # Laufende Timer, damit sie einen Neustart ueberleben.
-TIMER_DATEI = WURZEL / "timer.json"
+TIMER_DATEI = DATEN / "timer.json"
 
 # Wie alt ein verpasster Timer hoechstens sein darf, damit er beim Start
 # noch angesagt wird. Was laenger her ist, wird still weggeraeumt.
@@ -34,8 +46,8 @@ TIMER_NACHMELDEN_STUNDEN = 6
 # Zugangsdaten aus der Cloud Console (Desktop-App) und das Token, das die
 # einmalige Anmeldung erzeugt. Beide stehen in der .gitignore -- das Token
 # ist so viel wert wie der Zugang zu Kalender, Postfach und Drive.
-GOOGLE_ZUGANG = WURZEL / "google_zugang.json"
-GOOGLE_TOKEN = WURZEL / "google_token.json"
+GOOGLE_ZUGANG = DATEN / "google_zugang.json"
+GOOGLE_TOKEN = DATEN / "google_token.json"
 
 # --- Auslöser -------------------------------------------------------------
 # Push-to-talk: Taste halten, reden, loslassen.
@@ -316,7 +328,7 @@ ELEVENLABS_ZEITGRENZE = 20.0
 # Rueckfrage, lange Aufzaehlung). Die groessere Datei kostet Rechenzeit:
 # bei langen Saetzen 1330 statt 637 Millisekunden -- das ist die
 # Wartezeit vor dem ersten Ton, und sie war es wert.
-STIMME = WURZEL / "stimmen" / "de_DE-thorsten-high.onnx"
+STIMME = DATEN / "stimmen" / "de_DE-thorsten-high.onnx"
 
 # Manche Stimmen bringen mehrere Sprecher mit. Bei
 # de_DE-thorsten_emotional-medium sind das Stimmungen:
@@ -528,7 +540,7 @@ def finanz_schluessel():
 # --- Telegram -------------------------------------------------------------
 # Zugangsdaten stehen in .env, nicht hier. Die Sitzungsdatei ist so viel
 # wert wie das Konto selbst -- beide stehen in der .gitignore.
-TELEGRAM_SITZUNG = WURZEL / "sarvis.session"
+TELEGRAM_SITZUNG = DATEN / "sarvis.session"
 
 
 def _env_werte() -> dict:
@@ -569,11 +581,11 @@ def telegram_bereit() -> bool:
 # --- Projekte -------------------------------------------------------------
 # Der Sandkasten. Bewusst NEBEN Privat, Mitra und Wissen, nicht darin:
 # Der Ordner ist die Grenze, nicht die Vernunft des Modells.
-PROJEKTE = Path("D:/Projekte")
+# PROJEKTE, ABLAGE, PROJEKT_ORTE und PROJEKT_ORT_NAMEN: siehe orte.py
 
 # Wo Sarvis ablegt, was beim Antworten entsteht -- Berichte, Auswertungen,
 # Zwischenstaende. Siehe FREI_SCHREIBEN weiter unten.
-ABLAGE = WURZEL / "ablage"
+
 
 # Wohin ein neues Projekt darf. Der Schluessel ist das Wort, das Sarvis
 # versteht; der Wert der Ordner.
@@ -586,18 +598,8 @@ ABLAGE = WURZEL / "ablage"
 # Angelegt wird trotzdem nie ungefragt: projekt_anlegen steht auf
 # "fragen", und die Rueckfrage nennt den Ort. Wer "privat" hoert, wo er
 # "Arbeit" gemeint hat, sagt nein.
-PROJEKT_ORTE = {
-    "privat":     Path("D:/Privat"),
-    "arbeit":     Path("D:/Mitra"),
-    "sandkasten": PROJEKTE,
-}
 
 # Wie die Orte vorgelesen werden -- "Mitra" sagt beim Zuhoeren zu wenig.
-PROJEKT_ORT_NAMEN = {
-    "privat":     "deinen privaten Projekten",
-    "arbeit":     "den Arbeitsprojekten unter Mitra",
-    "sandkasten": "dem Sandkasten unter D Doppelpunkt Projekte",
-}
 # --- Kontext: wie viel Gespraech Sarvis mit sich herumtraegt -------------
 # Jeder Zuruf schickt den GANZEN bisherigen Verlauf mit. Das ist kein
 # Fehler, sondern der Grund, warum Sarvis auf "was hatte ich vorhin
@@ -656,8 +658,8 @@ KONTEXT_VERDICHTET_SATZ = (
 # zwar VOLLSTAENDIG: Auch was verdichtet wurde, steht dort weiter.
 # Geprueft an einer Sitzung nach "/compact" -- die drei Zurufe von vor
 # der Verdichtung standen unveraendert in der Datei.
-VERLAUF_ORDNER = (Path.home() / ".claude" / "projects"
-                  / "D--Privat-Sarvis")
+# VERLAUF_ORDNER: siehe orte.py -- der Ordnername wird dort aus WURZEL
+# gerechnet statt geraten, weil er im Container anders heisst.
 
 # Woran Sarvis' eigene Sitzungen zu erkennen sind. Im selben Ordner
 # liegen auch die Sitzungen von Claude Code am Projekt -- die gehen ihn
@@ -665,13 +667,13 @@ VERLAUF_ORDNER = (Path.home() / ".claude" / "projects"
 # Code "cli".
 VERLAUF_MARKE = "sdk-py"
 
-AUFTRAG_DATEI = WURZEL / "auftraege.json"
+AUFTRAG_DATEI = DATEN / "auftraege.json"
 
 # Das Fortschritts-Journal. Nur ANHAENGEN, nie ueberschreiben: Ein
 # Absturz kostet dann hoechstens die letzte Zeile, nie die Historie.
 # auftraege.json ist der bequeme Momentanstand, dieses Journal der
 # Verlauf -- und der Rettungsanker, wenn die JSON zerrissen ist.
-AUFTRAG_JOURNAL = WURZEL / "fortschritt.jsonl"
+AUFTRAG_JOURNAL = DATEN / "fortschritt.jsonl"
 
 # Wie oft ein laufender Arbeiter "ich lebe noch" ins Journal schreibt.
 # Haeufiger bringt nichts: Es geht darum, nach einem Absturz sagen zu
@@ -694,32 +696,11 @@ AUFTRAG_ZUEGE = 120
 # Rueckfrage aus -- bei einem Laufwerk, auf dem ohnehin nur eigene
 # Sachen liegen, ist das kein Schutz, sondern Laerm. Wer bei jedem
 # Blick gefragt wird, hoert irgendwann weg.
-FREI_LESEN = [
-    Path("D:/"),
-    Path("E:/"),        # Dokumente
-    Path("A:/"),
-]
 
 # Schreiben bleibt eng. Das ist keine Inkonsequenz, sondern der
 # Unterschied, um den es geht: Ein Blick ist zurueckzunehmen, indem man
 # ihn vergisst. Eine geaenderte Datei nicht. Ueberall sonst darf Sarvis
 # auch schreiben -- er fragt vorher.
-FREI_SCHREIBEN = [
-    PROJEKTE,
-    # Sarvis' eigener Werktisch. Hier legt er ab, was beim Antworten
-    # entsteht: Berichte als Seite, Auswertungen, Zwischenstaende.
-    #
-    # Warum still und nicht mit Rueckfrage: Gemessen hat er sich schon
-    # ohne diesen Ordner beholfen -- "Soll ich chat-niko.html anlegen?
-    # Der Ordner tmp entsteht dabei in Sarvis im Ordner Privat." Die
-    # Absicht war richtig, der Ort war falsch, und die Rueckfrage stellte
-    # die falsche Frage: Sie fragte nach dem ORDNER, waehrend es um die
-    # Darstellung ging. Mit einem festen Platz faellt beides weg.
-    #
-    # Der Ordner steht in der .gitignore. Was hier entsteht, ist
-    # Arbeitsergebnis und kein Quelltext.
-    ABLAGE,
-]
 
 # Wo ganze Ordner still DURCHSUCHT werden duerfen.
 #
@@ -734,9 +715,6 @@ FREI_SCHREIBEN = [
 # Also andersherum: Durchsucht wird still nur dort, wo ohnehin
 # gearbeitet wird. Ueberall sonst fragt er einmal -- und wer laenger
 # sucht, sagt "ja, und frag die naechste halbe Stunde nicht mehr".
-FREI_DURCHSUCHEN = [
-    PROJEKTE,
-]
 
 # Orte, an denen trotz Freiliste gefragt wird.
 #
@@ -744,9 +722,6 @@ FREI_DURCHSUCHEN = [
 # DARF dort hinsehen, wenn er es sagen soll. Er tut es nur nicht still
 # nebenbei, weil hier Zugangsdaten liegen und ein Passwort, das einmal
 # durch ein Sprachmodell gelaufen ist, nicht wieder unbekannt wird.
-FRAGEN_TROTZ_FREI = [
-    Path("D:/Strato Server"),
-]
 
 # --- Arbeit am eigenen Projekt --------------------------------------------
 # Ein Assistent, der beim Starten des eigenen Projekts siebenmal fragt,
@@ -770,11 +745,6 @@ FRAGEN_TROTZ_FREI = [
 # nicht pruefbar, WO ein pfadloser Befehl laeuft, und eine Freigabe fuer
 # ein Projekt wuerde Befehle decken, die woanders laufen.
 
-ENTWICKLUNG_ORTE = [
-    Path("D:/Mitra"),      # Arbeitsprojekte
-    Path("D:/Privat"),     # private Projekte, Sarvis selbst
-    PROJEKTE,              # der Sandkasten
-]
 
 # Was als Arbeit am eigenen Projekt gilt.
 #
@@ -1143,8 +1113,7 @@ GONG = True
 # war sonst nie da. Einmalige Anmeldung: python einrichten.py
 TOAST = True
 SYMBOL = WURZEL / "sarvis.ico"
-VERKNUEPFUNG = (Path.home() / "AppData/Roaming/Microsoft/Windows"
-                / "Start Menu/Programs/Sarvis.lnk")
+# VERKNUEPFUNG: siehe orte.py (Windows-Rest)
 
 # --- Anzeige --------------------------------------------------------------
 ANZEIGE = True   # Sci-Fi-Overlay mitstarten
@@ -1184,7 +1153,7 @@ TASTE_VERSCHIEBEN = "<ctrl>+<alt>+v"
 TASTE_STOPP = "<ctrl>+<alt>+s"
 
 # Gemerkte Position der Anzeige (wird beim Verschieben geschrieben).
-ANZEIGE_DATEI = WURZEL / "anzeige.json"
+ANZEIGE_DATEI = DATEN / "anzeige.json"
 
 # --- Browser in der Engine ------------------------------------------------
 # Es gibt Dinge, die eine handgemalte Kachel nie so gut zeigen wird wie das
@@ -1203,7 +1172,7 @@ BROWSER_HOEHE = 780
 
 # Profil und Zwischenspeicher. Gehoert NICHT ins Repository -- hier liegen
 # Anmeldungen.
-BROWSER_PROFIL = WURZEL / "browser"
+BROWSER_PROFIL = DATEN / "browser-profil"
 
 # Werkzeugkranz rund um den Ring. Reihenfolge = Anordnung im Kreis,
 # beginnend oben, im Uhrzeigersinn.

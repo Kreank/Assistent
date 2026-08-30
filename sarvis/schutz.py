@@ -51,8 +51,9 @@ HEIKEL = (
 # Abschaffung des Fragens. Eine Vollmacht, die sich selbst aendern darf,
 # ist keine.
 #
-# Es sind alle sechs, nicht nur die naheliegenden zwei:
-#   config.py     die Werkzeugstufen und die Freilisten
+# Es sind alle sieben, nicht nur die naheliegenden zwei:
+#   config.py     die Werkzeugstufen und die Befehlsmuster
+#   orte.py       die Freilisten -- WO er ohne Rueckfrage hinlangen darf
 #   schutz.py     diese Datei
 #   hirn.py       darf_ich() -- die Pruefung selbst
 #   rueckfrage.py deuten() -- wer das aendert, macht aus jedem Nein ein Ja
@@ -63,11 +64,41 @@ HEIKEL = (
 # nicht in FREI_SCHREIBEN.
 NIE_SCHREIBEN = (
     r"[/\\]sarvis[/\\]"
-    r"(config|schutz|hirn|rueckfrage|freigabe|main)\.py$",
+    r"(config|orte|schutz|hirn|rueckfrage|freigabe|main)\.py$",
 )
+
+# Das Muster haengt am ORDNERNAMEN "sarvis", nicht am wirklichen Ort.
+# Auf Windows war das gleichgueltig -- das Paket lag immer in
+# D:\Privat\Sarvis\sarvis. Auf dem Server ist es eine Bedingung an das
+# Bereitstellungsverzeichnis: Gemessen faellt
+# /opt/sarvis-assistent/.env auf "fragen" zurueck statt auf "nie", weil
+# der Ordner anders heisst.
+#
+# Deshalb kommen zu den Namensmustern die WIRKLICHEN Orte dazu. Beides,
+# nicht nur das eine: Die Namensmuster fangen auch eine Kopie an einem
+# fremden Ort ab, die Ortspruefung auch einen umbenannten Ordner.
 NIE_LESEN = (
     r"[/\\]sarvis\.session$",
-    r"[/\\]Sarvis[/\\]\.env$",
+    r"[/\\][Ss]arvis[/\\]\.env$",
+)
+
+# Dazu die WIRKLICHEN Orte, als Muster gebaut statt getippt. Sie gehen
+# in dieselbe Liste, damit alle sechs Pruefstellen sie mitnehmen -- eine
+# zweite Liste haette an jeder davon einzeln angebunden werden muessen,
+# und eine davon haette man vergessen.
+#
+# sarvis.session ist Telegram, google_token.json der Google-Zugang:
+# Zugaenge zu Konten, nicht bloss Einstellungen. Wer sie lesen kann,
+# kann in Saschas Namen schreiben.
+NIE_LESEN += tuple(
+    re.escape(str(pfad).replace("\\", "/")) + r"$"
+    for pfad in (
+        config.DATEN / "sarvis.session",
+        config.DATEN / "google_token.json",
+        config.DATEN / "google_zugang.json",
+        config.WURZEL / ".env",
+        config.DATEN / ".env",
+    )
 )
 
 # Shell-Befehle, die nicht mit einem gesprochenen "ja" beantwortbar sind.
@@ -98,7 +129,12 @@ NIE_BEFEHL = (
     r">\s*/dev/(sd|nvme|vd|hd)",              # dasselbe per Umleitung
     r"\b(chmod|chown)\b[^|]*\s-R\b[^|]*\s/\s*$",   # Rechte ab Wurzel
     r"\bsystemctl\b[^|]*\b(stop|disable|mask)\b",   # Dienste abschalten
-    r"\b(userdel|usermod|passwd)\b",          # Benutzer und Passwoerter
+    # Kein Schraegstrich und kein Wortzeichen davor: "passwd" ist ein
+    # Befehl, "/etc/passwd" ist eine Datei. Gemessen fiel
+    # 'cat /etc/passwd' sonst auf "nie" -- und "nie" ist die Stufe, die
+    # sich nicht mit einem Ja aufheben laesst. Eine Sperre, die das
+    # Falsche trifft, verliert genau dort ihre Glaubwuerdigkeit.
+    r"(?<![/\w.])(userdel|usermod|passwd)\b",
     r"\biptables\b[^|]*\s-F\b", r"\bufw\s+disable\b",   # Firewall
     r"\bdocker\s+system\s+prune\b",         # raeumt fremde Container weg
     r"\bgit\s+push\b[^|]*--force",           # fremde Historie ueberschreiben
