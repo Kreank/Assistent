@@ -10,10 +10,13 @@ Zwei Wege fuehren hier hinein:
 WAS UEBER DEN DRAHT GEHT
 
     Server -> Oberflaeche   die zwoelf Anzeige-Arten aus anzeige.py,
-                            dazu "ton" mit gesprochenem Audio
+                            dazu "ton" mit gesprochenem Audio und
+                            "schirm" mit dem Bildstrom des Browsers
     Oberflaeche -> Server   "zuruf" (getippter Text), "sprache"
                             (aufgenommenes Audio), "antwort" (auf eine
                             gestellte Frage), "hier" (Lebenszeichen)
+                            sowie "schirm_an", "klick", "taste",
+                            "rollen" -- die Fernsteuerung des Browsers
 
 DIE REIHENFOLGE BEIM ANMELDEN IST NICHT BELIEBIG
 
@@ -48,6 +51,7 @@ from aiohttp import WSMsgType, web
 
 from .. import config
 from . import geraete
+from .fernsicht import Fernsicht
 from .traeger import NetzTraeger, Oberflaeche, als_text
 
 log = logging.getLogger("sarvis.netz")
@@ -88,6 +92,9 @@ class Endpunkt:
         self.strom_an = strom_an
         self.weg_an = weg_an
         self.traeger: NetzTraeger | None = None
+        # Wer Sarvis' Browser gerade zusieht und darin klickt. Der
+        # Endpunkt haelt das Buch nicht selbst -- siehe fernsicht.py.
+        self.fernsicht = Fernsicht()
 
     # --- HTTP ------------------------------------------------------------
 
@@ -125,6 +132,14 @@ class Endpunkt:
         finally:
             sender.cancel()
             self.traeger.weg(oberflaeche)
+            # Vor allem anderen: Sieht niemand mehr zu, hoert der
+            # Bildstrom auf. Eine geschlossene Verbindung ist der
+            # haeufigste Weg, wie ein Zuschauer verschwindet -- haeufiger
+            # als das Umlegen des Schalters.
+            try:
+                await self.fernsicht.weg(oberflaeche)
+            except Exception:
+                pass
             if self.weg_an is not None:
                 # Damit der Weckwort-Strom nicht auf eine Quelle wartet,
                 # die es nicht mehr gibt.
@@ -226,6 +241,30 @@ class Endpunkt:
 
         elif art == "hier":
             pass  # Lebenszeichen, aiohttp haelt die Verbindung selbst wach
+
+        # --- Die Fernsicht ------------------------------------------------
+        # Alles ab hier erreicht nur, wer angemeldet ist: _anmelden()
+        # laeuft VOR _empfangen(), und wer dort durchfaellt, bekommt die
+        # Verbindung geschlossen und kommt nie in diese Methode. Ein
+        # "klick" von einer unangemeldeten Verbindung ist damit nicht
+        # unwahrscheinlich, sondern unmoeglich.
+        #
+        # Warum hier trotzdem NICHT nachgefragt wird, obwohl Sarvis' eigene
+        # Klicks eine Rueckfrage ausloesen: siehe fernsicht.py, der lange
+        # Block ueber klick(). Kurz -- die Rueckfrage schuetzt vor Sarvis,
+        # nicht vor dem Menschen.
+
+        elif art == "schirm_an":
+            await self.fernsicht.schalten(o, bool(m.get("an")))
+
+        elif art == "klick":
+            await self.fernsicht.klick(o, m)
+
+        elif art == "taste":
+            await self.fernsicht.taste(o, m)
+
+        elif art == "rollen":
+            await self.fernsicht.rollen(o, m)
 
     # --- Aufbau ----------------------------------------------------------
 

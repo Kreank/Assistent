@@ -153,6 +153,24 @@ BILD_GUETE_NOTFALL = 40    # zweiter Versuch, wenn das erste Bild zu gross war
 # base64-Fassung ist um ein Drittel groesser als das Bild selbst.
 BILD_GRENZE = 2_500_000
 
+# --- Der Bildstrom fuer die Fernsicht --------------------------------------
+# Anders als bild() ist das Bewegtbild. JPEG und nicht WebP: Beim
+# Einzelbild zaehlt die Groesse, beim Strom zaehlt die Zeit zum Kodieren,
+# und JPEG ist darin deutlich schneller. Der Unterschied in der Schaerfe
+# ist bei Guete 60 belanglos -- bei acht Bildern je Sekunde sieht ihn
+# niemand.
+#
+# ACHT BILDER JE SEKUNDE, GUETE 60. Beides gemessen, die Datenrate steht
+# bei schirm_starten(). Muss es sparsamer werden, sinkt die RATE und
+# nicht die GUETE: Ein ruckelndes Bild bleibt lesbar, ein unscharfes
+# nicht -- und hier wird gelesen, nicht Film geschaut.
+SCHIRM_FPS = 8.0
+SCHIRM_GUETE = 60
+
+# Wie viel Text eine einzelne Tastennachricht tragen darf. Wer mehr
+# schickt, tippt nicht, sondern probiert etwas aus.
+SCHIRM_TEXT_MAX = 2000
+
 # Wohin Downloads gehen. Ein eigener Ordner, damit an EINER Stelle
 # nachzusehen (und aufzuraeumen) ist, was von fremden Seiten auf der
 # Platte gelandet ist. Unter DATEN und nicht unter WURZEL: Der Quelltext
@@ -383,6 +401,25 @@ class _Draht:
             if not zukunft.done():
                 zukunft.set_exception(ConnectionError("Browser ist weg."))
         self._offen.clear()
+        # Auch die Horcher. Sie hingen an einer Leitung, die es nicht
+        # mehr gibt -- und der naechste _hochfahren() meldet seine
+        # wieder an.
+        #
+        # GEMESSEN, und es war lange unsichtbar: _sicherstellen()
+        # versucht Chrome erst MIT Sandkasten und dann ohne. Im Container
+        # scheitert der erste Versuch immer, und zwar erst NACH
+        # bei_ereignis(self._ereignis). Ohne diese zwei Zeilen stand der
+        # Dauerhorcher danach zweimal in der Liste, und JEDES Ereignis
+        # von Chrome wurde doppelt verarbeitet: doppelte Bilder im
+        # Bildstrom (gemessen 16 statt 8 je Sekunde, doppelte Datenrate),
+        # jeder fertige Download zweimal in der Liste. Nichts davon sieht
+        # nach einem Fehler aus -- es sieht nach "der Server ist halt
+        # langsam" aus.
+        for zukunft in [z for _, z in self._horcher]:
+            if not zukunft.done():
+                zukunft.cancel()
+        del self._horcher[:]
+        del self._laufend[:]
 
     # --- Lesen und Schreiben ---------------------------------------------
 
@@ -531,6 +568,15 @@ class Kopfbrowser:
         self._zuletzt = 0.0
         self._waechter = None
         self._sandkasten = True   # beim ersten Fehlschlag auf False
+        # --- Fernsicht (siehe schirm_starten) ---
+        self._schirm_an = False
+        self._schirm_rahmen_an = None   # Rueckruf(daten, breite, hoehe)
+        self._schirm_zu_an = None       # Rueckruf(), wenn der Browser weggeht
+        self._schirm_naechst = 0.0      # fruehester Zeitpunkt fuers naechste Bild
+        self._schirm_takt = asyncio.Lock()   # eine Bestaetigung zur Zeit
+        self._schirm_bytes = 0          # gesendet, seit der Strom laeuft
+        self._schirm_zahl = 0
+        self._schirm_seit = 0.0
 
     # --- Leben ------------------------------------------------------------
 
@@ -540,6 +586,16 @@ class Kopfbrowser:
 
     def _anfassen(self) -> None:
         self._zuletzt = time.monotonic()
+
+    def wach_halten(self) -> None:
+        """Den Ruhe-Waechter zurueckstellen, ohne etwas zu tun.
+
+        Fuer die Fernsicht: Wer eine stehende Seite ansieht, erzeugt
+        keine Bilder (Chrome schickt nur bei Veraenderung) und faende
+        den Browser nach zehn Minuten geschlossen vor. Zusehen IST
+        Benutzung, auch wenn sich nichts bewegt.
+        """
+        self._anfassen()
 
     async def _sicherstellen(self) -> None:
         """Chrome starten, falls er nicht (mehr) laeuft."""
@@ -654,9 +710,22 @@ class Kopfbrowser:
                 "Emulation.setUserAgentOverride",
                 {"userAgent": self._kennung, "acceptLanguage": "de-DE,de"},
                 self._sitzung)
+        # Sieht jemand zu, sieht er auch der NEUEN Seite zu. Der
+        # Bildstrom haengt an der CDP-Sitzung, und die ist hier gerade
+        # eine andere geworden (ein Popup wurde uebernommen, siehe
+        # klicken()). Ohne diese Zeile bliebe das letzte Bild der alten
+        # Seite stehen, und niemand saehe, warum nichts mehr passiert.
+        if self._schirm_an:
+            try:
+                await self._schirm_befehl()
+            except Exception:
+                pass
 
     def _ereignis(self, methode: str, params: dict, sitzung: str) -> None:
         """Was Chrome von sich aus meldet."""
+        if methode == "Page.screencastFrame":
+            self._schirm_bild(params, sitzung)
+            return
         # Unsere eigene Welt ist weg -- bei jeder Navigation. Beim
         # naechsten Skript wird eine neue angelegt, und die gelesene
         # Elementliste ist damit von selbst ungueltig (window.__sarvis…
@@ -716,12 +785,24 @@ class Kopfbrowser:
             self._waechter = asyncio.ensure_future(self._waechter_lauf())
 
     async def _abbauen(self) -> None:
+        # Erst dem Zuschauer Bescheid geben, dann abraeumen. Andersherum
+        # bliebe sein letztes Bild stehen und behauptete eine Seite, die
+        # es nicht mehr gibt.
+        zu = self._schirm_zu_an
+        self._schirm_an = False
+        self._schirm_rahmen_an = None
+        self._schirm_zu_an = None
         await self._draht.beenden()
         self._sitzung = ""
         self._ziel = ""
         self._welt = None
         self._elemente = {}
         self._neue_ziele = []
+        if zu is not None:
+            try:
+                zu()
+            except Exception:
+                pass
 
     async def schliessen(self) -> None:
         """Seite zu -- und den Browser gleich mit.
@@ -1316,6 +1397,357 @@ class Kopfbrowser:
                 "adresse": str(kopf.get("adresse") or ""),
                 "titel": str(kopf.get("titel") or ""),
                 "breite": FENSTER_BREITE, "hoehe": FENSTER_HOEHE}
+
+    # --- Fernsicht: Bilder hinaus, Klicks herein --------------------------
+    #
+    # Auf dem Dev-PC war Sarvis' Browser DER Browser: Er machte ihn auf,
+    # Sascha sah hinein, klickte selbst weiter. Auf dem Server sind es
+    # zwei -- einer hier ohne Bildschirm, einer dort ohne Zugriff.
+    #
+    # Das hier naeht sie wieder zusammen: Chrome schickt Bilder
+    # (Page.startScreencast), die Oberflaeche schickt Zeigerpunkte
+    # zurueck (Input.dispatchMouseEvent). Kein VNC, kein zweiter Dienst,
+    # kein zusaetzlicher Hafen -- alles ueber die CDP-Pipe, die ohnehin
+    # schon offen ist, und den Draht, der ohnehin schon steht.
+    #
+    # NUR AUF ANSAGE. Der Strom laeuft, solange jemand zusieht, und
+    # keine Sekunde laenger. Sonst kostete jede Websuche von Sarvis
+    # Bandbreite an ein Handy in der Hosentasche.
+
+    async def schirm_starten(self, rahmen_an, zu_an=None) -> dict:
+        """Den Bildstrom anwerfen. rahmen_an(daten, breite, hoehe).
+
+        `daten` ist base64-JPEG ohne `data:`-Praefix, `breite`/`hoehe`
+        sind Pixel -- der Empfaenger braucht sie, um einen Klick wieder
+        in Pixel umrechnen zu koennen.
+
+        `zu_an()` wird gerufen, wenn der Browser von sich aus weggeht
+        (Ruhe-Waechter, Absturz, schliessen()). Ohne diesen Rueckruf
+        bliebe beim Zuschauer das letzte Bild stehen.
+
+        GEMESSEN am 30.08.2026 im Container, je zehn Sekunden:
+
+          Seite steht still            0,0 Bilder/s,     0 KB/s
+            (Chrome schickt ueberhaupt nur bei Veraenderung -- Zusehen
+             kostet nichts, solange sich nichts bewegt)
+          schlichte Seite, gescrollt   0,9 Bilder/s,     9 KB/s
+          Wikipedia-Artikel, DAUERND
+          gescrollt (schlimmster Fall) 8,0 Bilder/s, 1.178 KB/s
+                                       = 9,6 Mbit/s, 146 KB je Bild
+
+        Der letzte Wert ist viel, aber er ist auch konstruiert: Er
+        entsteht nur, solange ohne Pause durch eine bildreiche Seite
+        gerollt wird. Das ist nicht die Benutzung -- die heisst
+        hinsehen, klicken, tippen, und dabei liegt sie bei null.
+
+        WARUM NICHT DIE GUETE GESENKT WIRD, wenn es zu viel ist. Gemessen
+        am selben Wikipedia-Bild:
+
+            JPEG 80 -> 176 KB   JPEG 60 -> 130 KB
+            JPEG 45 -> 111 KB   JPEG 30 ->  90 KB
+
+        Von 60 auf 30 spart ein knappes Drittel und macht die Schrift
+        unlesbar. Der Regler ist also die RATE, nicht die Guete -- und
+        er dreht sich von selbst: netz/fernsicht.py legt einer
+        Oberflaeche, die mehr als STAU Meldungen im Rueckstand hat, kein
+        Bild mehr ein. Auf einer schmalen Leitung sinkt die Bildzahl,
+        die Schaerfe bleibt.
+
+        Fuers Handy waere das trotzdem zu viel -- und ein 1280er Fenster
+        dort ohnehin Lupenarbeit. Deshalb bietet die Oberflaeche den
+        Schalter unter 700 Punkten Breite gar nicht erst an.
+        """
+        self._anfassen()
+        if not self.offen:
+            return {"ok": False,
+                    "grund": "Es ist gerade keine Seite offen."}
+        self._schirm_rahmen_an = rahmen_an
+        self._schirm_zu_an = zu_an
+        self._schirm_an = True
+        self._schirm_bytes = 0
+        self._schirm_zahl = 0
+        self._schirm_seit = time.monotonic()
+        self._schirm_naechst = 0.0
+        try:
+            await self._schirm_befehl()
+        except Exception as e:
+            self._schirm_an = False
+            self._schirm_rahmen_an = None
+            self._schirm_zu_an = None
+            return {"ok": False, "grund": f"Der Bildstrom ging nicht: {e}"}
+        self._waechter_wecken()
+        return {"ok": True, "breite": FENSTER_BREITE, "hoehe": FENSTER_HOEHE}
+
+    async def _schirm_befehl(self) -> None:
+        """Page.startScreencast auf der GERADE offenen Sitzung."""
+        await self._draht.senden("Page.startScreencast", {
+            "format": "jpeg",
+            "quality": SCHIRM_GUETE,
+            # Nicht kleiner rechnen lassen: Der Text auf der Seite ist
+            # das, was gelesen werden soll, und Chrome skaliert dafuer zu
+            # grob. Die Oberflaeche verkleinert selbst, mit dem Filter
+            # des Browsers.
+            "maxWidth": FENSTER_BREITE, "maxHeight": FENSTER_HOEHE,
+            "everyNthFrame": 1,
+        }, self._sitzung, 10.0)
+
+    async def schirm_stoppen(self) -> dict:
+        """Den Bildstrom abstellen. Gibt zurueck, was er gekostet hat."""
+        lief = self._schirm_an
+        self._schirm_an = False
+        self._schirm_rahmen_an = None
+        self._schirm_zu_an = None
+        dauer = max(0.001, time.monotonic() - self._schirm_seit)
+        if lief and self.offen:
+            try:
+                await self._draht.senden("Page.stopScreencast", {},
+                                         self._sitzung, 5.0)
+            except Exception:
+                pass
+        return {"bilder": self._schirm_zahl, "bytes": self._schirm_bytes,
+                "sekunden": round(dauer, 2),
+                "bytes_je_sekunde": int(self._schirm_bytes / dauer)}
+
+    def _schirm_bild(self, params: dict, sitzung: str) -> None:
+        """Ein Bild von Chrome -- weiterreichen und bestaetigen.
+
+        DIE BESTAETIGUNG IST DIE BREMSE. Chrome schickt das naechste Bild
+        erst, wenn dieses bestaetigt ist (Page.screencastFrameAck). Wer
+        sofort bestaetigt, bekommt bei einer Animation sechzig Bilder je
+        Sekunde -- und bezahlt sie in JPEG-Kodierung, die niemand sieht.
+        Also wird die Bestaetigung verzoegert, bis der naechste
+        Zeitschlitz da ist. Das kostet keine Zeile Puffer und keine
+        verworfenen Bilder: Was nicht angefordert wird, entsteht gar
+        nicht erst.
+        """
+        if not self._schirm_an or sitzung != self._sitzung:
+            return
+        # ACHTUNG, Namensgleichheit: params["sessionId"] ist NICHT die
+        # CDP-Sitzung, sondern die laufende Nummer dieses Bildes. Die
+        # CDP-Sitzung steht im Umschlag und heisst hier `sitzung`.
+        nummer = params.get("sessionId")
+        daten = str(params.get("data") or "")
+        masse = params.get("metadata") or {}
+        breite = int(masse.get("deviceWidth") or FENSTER_BREITE)
+        hoehe = int(masse.get("deviceHeight") or FENSTER_HOEHE)
+        if daten and self._schirm_rahmen_an is not None:
+            self._anfassen()
+            self._schirm_bytes += (len(daten) * 3) // 4
+            self._schirm_zahl += 1
+            try:
+                self._schirm_rahmen_an(daten, breite, hoehe)
+            except Exception:
+                pass
+        asyncio.ensure_future(self._schirm_bestaetigen(sitzung, nummer))
+
+    async def _schirm_bestaetigen(self, sitzung: str, nummer) -> None:
+        """Bestaetigen -- aber immer nur EINE zur Zeit.
+
+        GEMESSEN, und es war der ganze Unterschied: Ohne das Schloss
+        rechnet jede wartende Bestaetigung ihre Schlafzeit auf denselben
+        Zeitpunkt aus. Chrome haelt zwei bis drei Bilder vor, also warten
+        drei Aufgaben auf dieselbe Millisekunde, wachen gemeinsam auf und
+        bestaetigen im Buendel -- Chrome schickt drei neue, und das
+        wiederholt sich. Gemessen auf einer Wikipedia-Seite: 44,6 Bilder
+        je Sekunde und 6,5 MB/s statt der acht Bilder, die dastehen.
+
+        Mit dem Schloss laeuft genau eine Bestaetigung, sie setzt den
+        naechsten Zeitschlitz, und die naechste wartet auf ihn.
+        """
+        async with self._schirm_takt:
+            warten = self._schirm_naechst - time.monotonic()
+            if warten > 0:
+                await asyncio.sleep(warten)
+            self._schirm_naechst = time.monotonic() + 1.0 / SCHIRM_FPS
+            if not self._schirm_an or sitzung != self._sitzung:
+                return
+            try:
+                await self._draht.senden("Page.screencastFrameAck",
+                                         {"sessionId": nummer}, sitzung, 5.0)
+            except Exception:
+                pass
+
+    # --- Was der MENSCH tut ----------------------------------------------
+    #
+    # HIER WIRD NICHT ZURUECKGEFRAGT, UND DAS IST ABSICHT.
+    #
+    # Fuer JEDEN Klick, den SARVIS macht, holt hirn._browserstufe das
+    # Element frisch aus dem DOM und fragt nach, wenn es ein Formular
+    # abschickt -- auch bei "Abbrechen" darauf, denn das entscheidet
+    # el.form, nicht die Beschriftung.
+    #
+    # Diese Pruefung gilt fuer die drei Methoden hier NICHT. Sie schuetzt
+    # davor, dass Sarvis unbeabsichtigt etwas ausloest -- vor einem
+    # Modell, das eine Elementliste von einer fremden Seite gelesen hat
+    # und die Nummer 7 fuer harmlos haelt. Wenn der Mensch selbst auf
+    # einen Punkt im Bild klickt, gibt es nichts zu schuetzen: Er sieht,
+    # worauf er klickt, und die Rueckfrage waere "willst du wirklich
+    # klicken, worauf du gerade geklickt hast".
+    #
+    # Wer das spaeter "zur Sicherheit" nachruestet, macht die
+    # Fernsteuerung unbenutzbar und gewinnt nichts. Das FEHLEN der
+    # Pruefung ist die Funktion.
+    #
+    # Was sehr wohl gilt: Diese Methoden sind vom Draht aus nur
+    # erreichbar, nachdem sich die Verbindung mit einem Geraeteschluessel
+    # angemeldet hat (netz/server.py, _anmelden vor _empfangen), und nur
+    # fuer eine Oberflaeche, die gerade zusieht (netz/fernsicht.py).
+    # Blind klicken kann niemand.
+
+    def _punkt(self, x, y) -> tuple[float, float]:
+        """Anteil (0-1) in Pixel. Kommt von der Oberflaeche als Anteil,
+        weil die ihr Bild skaliert und ihre eigene Skalierung besser
+        kennt als wir -- sie kann auf einem 900er wie auf einem 3000er
+        Bildschirm liegen.
+        """
+        try:
+            xa = min(1.0, max(0.0, float(x)))
+            ya = min(1.0, max(0.0, float(y)))
+        except (TypeError, ValueError):
+            return -1.0, -1.0
+        return xa * FENSTER_BREITE, ya * FENSTER_HOEHE
+
+    _KNOEPFE = {"links": "left", "rechts": "right", "mitte": "middle"}
+    _MASKEN = {"left": 1, "right": 2, "middle": 4}
+
+    async def zeiger_klick(self, x, y, knopf: str = "links") -> dict:
+        """Ein Klick des Nutzers, an einem Punkt im Bild.
+
+        Nimmt das Schloss NICHT. Ein Klick soll auch durchgehen, waehrend
+        oeffnen() gerade zwanzig Sekunden auf eine Seite wartet -- genau
+        dann will man ja eingreifen. Er fasst nichts an, was das Schloss
+        schuetzt (Elementliste, Lauf-Nummer, Sitzungswechsel); er schickt
+        ein Ereignis an Chrome, mehr nicht.
+        """
+        if not self.offen:
+            return {"ok": False, "grund": "Es ist keine Seite offen."}
+        px, py = self._punkt(x, y)
+        if px < 0:
+            return {"ok": False, "grund": "Unbrauchbare Koordinaten."}
+        self._anfassen()
+        name = self._KNOEPFE.get(str(knopf or "links").lower(), "left")
+        maske = self._MASKEN[name]
+        gemein = {"x": px, "y": py, "button": name, "clickCount": 1}
+        try:
+            # Erst hinbewegen. Menues, die auf hover ausklappen, bekaemen
+            # sonst einen Klick auf einen Eintrag, den sie noch gar nicht
+            # gezeigt haben.
+            await self._draht.senden("Input.dispatchMouseEvent", {
+                "type": "mouseMoved", "x": px, "y": py,
+                "button": "none", "buttons": 0}, self._sitzung, 5.0)
+            await self._draht.senden("Input.dispatchMouseEvent", {
+                **gemein, "type": "mousePressed", "buttons": maske},
+                self._sitzung, 5.0)
+            await self._draht.senden("Input.dispatchMouseEvent", {
+                **gemein, "type": "mouseReleased", "buttons": 0},
+                self._sitzung, 5.0)
+        except Exception as e:
+            return {"ok": False, "grund": str(e)}
+        # Die Elementliste ist nach einem Menschenklick nicht mehr
+        # verlaesslich -- die Seite kann eine andere geworden sein, und
+        # Nummer 7 waere dann etwas anderes. Sie wegzuwerfen ist billig;
+        # sie stehenzulassen hiesse, die Wache aus element_frisch()
+        # gegen einen veralteten Fingerabdruck laufen zu lassen.
+        self._elemente = {}
+        return {"ok": True}
+
+    async def zeiger_rollen(self, x, y, hoch) -> dict:
+        """Scrollen an einem Punkt im Bild.
+
+        `hoch` ist, wie weit NACH OBEN gerollt wird, in Pixeln; negativ
+        heisst nach unten. Chrome will es andersherum (deltaY zaehlt nach
+        unten), also das Vorzeichen drehen.
+        """
+        if not self.offen:
+            return {"ok": False, "grund": "Es ist keine Seite offen."}
+        px, py = self._punkt(x, y)
+        if px < 0:
+            return {"ok": False, "grund": "Unbrauchbare Koordinaten."}
+        try:
+            weit = float(hoch)
+        except (TypeError, ValueError):
+            return {"ok": False, "grund": "Unbrauchbare Weite."}
+        self._anfassen()
+        try:
+            await self._draht.senden("Input.dispatchMouseEvent", {
+                "type": "mouseWheel", "x": px, "y": py,
+                "deltaX": 0.0, "deltaY": -weit,
+                "button": "none", "buttons": 0}, self._sitzung, 5.0)
+        except Exception as e:
+            return {"ok": False, "grund": str(e)}
+        return {"ok": True}
+
+    # Sondertasten mit ihrem Windows-Tastencode. Ohne den kommt bei der
+    # Seite ein keydown ohne keyCode an, und alles, was auf
+    # `e.key === 'Enter'` prueft, verpasst es.
+    _SONDER = {
+        "Enter":      (13, "Enter",      "\r"),
+        "Backspace":  (8,  "Backspace",  ""),
+        "Tab":        (9,  "Tab",        ""),
+        "Escape":     (27, "Escape",     ""),
+        "Delete":     (46, "Delete",     ""),
+        "ArrowLeft":  (37, "ArrowLeft",  ""),
+        "ArrowUp":    (38, "ArrowUp",    ""),
+        "ArrowRight": (39, "ArrowRight", ""),
+        "ArrowDown":  (40, "ArrowDown",  ""),
+        "Home":       (36, "Home",       ""),
+        "End":        (35, "End",        ""),
+        "PageUp":     (33, "PageUp",     ""),
+        "PageDown":   (34, "PageDown",   ""),
+    }
+
+    async def taste(self, text: str = "", sonder: str = "") -> dict:
+        """Tippen. Entweder Text oder EINE Sondertaste.
+
+        Text geht Zeichen fuer Zeichen als keyDown/keyUp mit `text` --
+        nicht als Input.insertText. Der Unterschied faellt erst auf
+        React-Seiten auf: insertText loest kein keydown aus, und Felder,
+        die auf Tastendruck filtern oder Vorschlaege nachladen, bleiben
+        stumm. Umgekehrt kostet keyDown je Zeichen nichts, was ins
+        Gewicht faellt -- ein Mensch tippt keine 2000 Zeichen am Stueck.
+        """
+        if not self.offen:
+            return {"ok": False, "grund": "Es ist keine Seite offen."}
+        self._anfassen()
+        try:
+            if sonder:
+                eintrag = self._SONDER.get(str(sonder))
+                if eintrag is None:
+                    return {"ok": False,
+                            "grund": f"Die Taste '{sonder}' kenne ich nicht."}
+                code, name, zeichen = eintrag
+                unten = {"type": "keyDown" if zeichen else "rawKeyDown",
+                         "key": name, "code": name,
+                         "windowsVirtualKeyCode": code,
+                         "nativeVirtualKeyCode": code}
+                if zeichen:
+                    unten["text"] = zeichen
+                    unten["unmodifiedText"] = zeichen
+                await self._draht.senden("Input.dispatchKeyEvent", unten,
+                                         self._sitzung, 5.0)
+                await self._draht.senden("Input.dispatchKeyEvent", {
+                    "type": "keyUp", "key": name, "code": name,
+                    "windowsVirtualKeyCode": code,
+                    "nativeVirtualKeyCode": code}, self._sitzung, 5.0)
+                return {"ok": True}
+
+            wort = str(text or "")[:SCHIRM_TEXT_MAX]
+            if not wort:
+                return {"ok": False, "grund": "Nichts zu tippen."}
+            for zeichen in wort:
+                code = ord(zeichen.upper()) if zeichen.isalnum() else 0
+                await self._draht.senden("Input.dispatchKeyEvent", {
+                    "type": "keyDown", "key": zeichen, "text": zeichen,
+                    "unmodifiedText": zeichen,
+                    "windowsVirtualKeyCode": code,
+                    "nativeVirtualKeyCode": code}, self._sitzung, 5.0)
+                await self._draht.senden("Input.dispatchKeyEvent", {
+                    "type": "keyUp", "key": zeichen,
+                    "windowsVirtualKeyCode": code,
+                    "nativeVirtualKeyCode": code}, self._sitzung, 5.0)
+        except Exception as e:
+            return {"ok": False, "grund": str(e)}
+        return {"ok": True}
 
     # --- Herunterladen ----------------------------------------------------
 

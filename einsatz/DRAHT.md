@@ -12,8 +12,9 @@ python einsatz/draht_pruefen.py
 ```
 
 Das vergleicht die Tabellen unten mit dem, was `sarvis/anzeige.py`,
-`sarvis/netz/server.py` und `sarvis/netz/klang_netz.py` wirklich senden
-und entgegennehmen, und meldet jede Abweichung. Es gab kurzzeitig zwei
+`sarvis/netz/server.py`, `sarvis/netz/klang_netz.py` und
+`sarvis/netz/fernsicht.py` wirklich senden und entgegennehmen, und
+meldet jede Abweichung. Es gab kurzzeitig zwei
 Papiere über dieses Protokoll; nach fünf Minuten fehlten im zweiten
 bereits drei Felder. Dagegen hilft keine Sorgfalt, sondern eine Prüfung.
 
@@ -122,6 +123,8 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 | `horchen` | `an` | Dauerstrom jetzt schicken oder nicht |
 | `befehl` | `befehl`, plus Felder je nach Art | etwas auf dem Gerät TUN |
 | `web_bild` | `daten`, `adresse`, `titel`, `breite`, `hoehe` | ein Blick auf Sarvis' eigenen Browser |
+| `schirm` | `daten`, `breite`, `hoehe` | ein Bild aus dem Live-Strom |
+| `schirm_aus` | — | der Live-Strom ist zu Ende |
 | `verschieben` | `an` | dito |
 
 <!-- /draht:herein -->
@@ -129,9 +132,13 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 `zustand` trägt zusätzlich ein `text`, das schon die Desktop-Anzeige nie
 gelesen hat — ein totes Feld am Draht. Ignorieren.
 
-Die letzten drei Arten steuerten ein Fenster auf Saschas Rechner. Für
-eine Netz-Oberfläche haben sie keine Bedeutung; sie stehen hier, damit
-niemand sie für neu hält, wenn sie auftauchen.
+`browser`, `browser_zu` und `verschieben` steuerten ein Fenster auf
+Saschas Rechner. Für eine Netz-Oberfläche haben sie keine Bedeutung; sie
+stehen hier, damit niemand sie für neu hält, wenn sie auftauchen.
+
+**`schirm` und `schirm_aus` gehen NICHT an alle.** Sie sind die einzigen
+Arten, die eine einzelne Oberfläche adressieren — die, die den Strom
+angefordert hat. Siehe unten, „Die Fernsicht".
 
 ### `strom` — wenn mehreres gleichzeitig läuft
 
@@ -235,6 +242,99 @@ Nicht zu verwechseln mit `browser`: Das schickt eine **Adresse**, damit
 der Nutzer die Seite in SEINEM Browser öffnet. `web_bild` zeigt, was in
 Sarvis' eigenem steht.
 
+### Die Fernsicht — zusehen **und** eingreifen
+
+`web_bild` ist ein Foto. Die Fernsicht ist das Fenster: ein Bildstrom
+heraus, Klicks und Tasten hinein. Damit ist Sarvis' Browser wieder das,
+was er auf dem Dev-PC war — einer, in den beide hineingreifen können.
+
+    Oberfläche → { "art": "schirm_an", "an": true }
+    Server     → { "art": "schirm", "daten": "<base64-jpeg>",
+                   "breite": 1280, "hoehe": 900 }        … achtmal je Sekunde
+    Oberfläche → { "art": "klick", "x": 0.42, "y": 0.31, "knopf": "links" }
+                 { "art": "taste", "text": "Wärmepumpe" }
+                 { "art": "taste", "sonder": "Enter" }
+                 { "art": "rollen", "x": 0.5, "y": 0.5, "hoch": -320 }
+    Oberfläche → { "art": "schirm_an", "an": false }
+    Server     → { "art": "schirm_aus" }
+
+`daten` ist **JPEG**, ohne `data:`-Präfix (`web_bild` ist WebP — beim
+Bewegtbild zählt die Zeit zum Kodieren, nicht die letzten zehn Prozent
+Größe). Davor gehört `data:image/jpeg;base64,`.
+
+**Koordinaten sind Anteile zwischen 0 und 1, keine Pixel.** Die
+Oberfläche skaliert das Bild und kennt ihre Skalierung besser als der
+Server; der rechnet mit seiner Fenstergröße (1280 × 900) in Pixel um.
+Wer mit `object-fit: contain` anzeigt, muss die schwarzen Ränder
+herausrechnen — sonst trifft jeder Klick gleichmäßig daneben.
+
+`hoch` beim Rollen zählt **nach oben**; negativ heißt nach unten. Das
+ist das umgekehrte Vorzeichen von `deltaY` im Browser.
+
+`sonder` kennt: `Enter` · `Backspace` · `Tab` · `Escape` · `Delete` ·
+`ArrowLeft/Up/Right/Down` · `Home` · `End` · `PageUp` · `PageDown`.
+Entweder `text` **oder** `sonder`, nicht beides.
+
+**Nur an die, die zusehen.** Alle anderen Arten gehen an jede verbundene
+Oberfläche. Dieser Strom nicht: Er geht ausschließlich an die, die
+`schirm_an` geschickt hat. Acht Bilder je Sekunde an ein Handy, das
+nicht hinsieht, wären reine Verschwendung. Wer nicht zusieht, kann auch
+nicht klicken — ein `klick` ohne laufenden Strom wird verworfen.
+
+**Der Strom hört von selbst auf**: wenn der letzte Zuschauer abschaltet
+oder die Verbindung verliert, und wenn Sarvis' Browser zumacht
+(Ruhezeit, Absturz, `web_schliessen`). Im letzten Fall kommt
+`schirm_aus`. Darauf zu hören ist keine Höflichkeit: Sonst steht ein
+Standbild da, das aussieht wie live, und der nächste Klick geht ins
+Leere.
+
+**Gemessen** (im Container, je zehn Sekunden, 1280 × 900, Güte 60):
+
+| Lage | Bilder/s | Datenrate |
+|---|---|---|
+| Seite steht still | 0 | 0 |
+| schlichte Seite, gescrollt | 0,9 | 9 KB/s |
+| Wikipedia-Artikel, ununterbrochen gescrollt | 8,0 | 1.178 KB/s (9,6 Mbit/s) |
+
+Chrome schickt nur bei Veränderung — Zusehen ohne Bewegung kostet
+nichts. Der letzte Wert ist der schlimmste Fall und nicht die Benutzung.
+
+Wird es zu viel, sinkt die **Rate** und nicht die Güte: Von JPEG 60 auf
+30 spart am selben Bild nur 130 → 90 KB und macht die Schrift unlesbar.
+Und die Rate sinkt von selbst: Wer mehr als sechs Meldungen im Rückstand
+hat, bekommt das nächste Bild nicht.
+
+### Die Rückfrage gilt hier **nicht** — mit Absicht
+
+Vor jedem Klick, den **Sarvis** macht, holt `hirn._browserstufe` das
+Element frisch aus dem DOM und fragt gesprochen nach, wenn es ein
+Formular abschickt — auch wenn „Abbrechen" darauf steht, denn das
+entscheidet `el.form`, nicht die Beschriftung.
+
+Für `klick`, `taste` und `rollen` gilt das nicht. Die Prüfung schützt
+davor, dass **Sarvis** unbeabsichtigt etwas auslöst — vor einem Modell,
+das seine Elementliste von einer fremden Seite hat. Klickt der Mensch
+selbst auf einen Punkt in einem Bild, das er ansieht, gibt es nichts zu
+schützen; eine Rückfrage hieße „willst du wirklich klicken, worauf du
+gerade geklickt hast".
+
+**Wer das später „zur Sicherheit" nachrüstet, macht die Fernsteuerung
+unbenutzbar und gewinnt nichts.** Das Fehlen der Prüfung ist die
+Funktion.
+
+Was diese Freiheit trägt: Der Draht ist **authentifiziert**. `_anmelden`
+läuft in `netz/server.py` vor `_empfangen`; wer keinen gültigen
+Geräteschlüssel schickt, bekommt die Verbindung mit 4401 geschlossen und
+erreicht die Verarbeitung nie. Ein `klick` von einer nicht angemeldeten
+Verbindung ist nicht unwahrscheinlich, sondern unmöglich.
+
+**Nicht fürs Handy.** Ein 1280 Punkte breites Fenster auf einem Telefon
+ist Lupenarbeit, und Zielen mit dem Finger trifft nicht den Knopf, den
+man meint. Die Weboberfläche blendet den Schalter unter 700 Punkten
+Breite ganz aus. Der bessere Weg dorthin gibt es schon: die Art
+`browser` schickt die **Adresse**, und die Seite geht im eigenen Browser
+auf.
+
 ### `hintergrund`
 
 `zeilen` sind höchstens drei, `gesamt` ist die **wirkliche** Anzahl. Der
@@ -258,6 +358,10 @@ gerade **alles** fertig geworden ist.
 | `antwort` | `nummer`, `inhalt` | Antwort auf eine Frage des Servers |
 | `strom` | `daten`, `rate` | ein Stück Dauerstrom fürs Weckwort |
 | `hier` | — | Lebenszeichen, optional |
+| `schirm_an` | `an` | Bildstrom von Sarvis' Browser an/aus |
+| `klick` | `x`, `y`, `knopf` | dort hineinklicken |
+| `taste` | `text`, `sonder` | dort tippen |
+| `rollen` | `x`, `y`, `hoch` | dort scrollen |
 
 <!-- /draht:hinaus -->
 

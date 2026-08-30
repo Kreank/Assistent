@@ -211,8 +211,52 @@ body{display:flex;flex-direction:column;
   border:1px solid rgba(0,229,255,.28);overflow:hidden;
   animation:auf .18s ease-out}
 #blick[hidden]{display:none}
-#blickbild{flex:1 1 auto;min-height:0;width:100%;object-fit:contain;
-  object-position:top;background:#0b1017}
+/* Der Bildplatz trägt das Bild UND den Klickring darüber. Er muss
+   position:relative sein, sonst läge der Ring relativ zur Bühne und
+   damit ein paar hundert Punkte daneben. */
+#blick .bildplatz{flex:1 1 auto;min-height:0;position:relative;display:flex;
+  outline:none}
+#blickbild{flex:1 1 auto;min-width:0;min-height:0;width:100%;
+  object-fit:contain;object-position:top;background:#0b1017}
+/* Ohne Quelle gar nicht erst da. Sonst steht ein leerer schwarzer
+   Block unter der Meldung „Sarvis hat gerade keine Seite offen" und
+   sieht aus, als lade gleich noch etwas. */
+#blickbild:not([src]){display:none}
+
+/* --- Live: derselbe Kasten, nur bedienbar ---------------------------
+   Im Live-Betrieb sitzt das Bild mittig (nicht oben): Es füllt den
+   Kasten nie ganz, und ein zentriertes Bild sieht aus wie ein Fenster,
+   ein oben klebendes wie ein abgeschnittenes. */
+#blick.live #blickbild{object-position:center;cursor:crosshair}
+#blick.live{border-color:rgba(0,229,255,.55)}
+#liveperle{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;color:#04080f;background:#00e5ff;
+  border-radius:5px;padding:3px 7px}
+#liveperle[hidden]{display:none}
+#liveperle.pause{background:rgba(255,255,255,.22);color:rgba(232,241,253,.75)}
+
+/* Der Mauszeiger fehlt im Bild -- Chrome zeichnet ihn nicht mit. Ohne
+   irgendeine Rückmeldung weiß niemand, ob sein Klick angekommen ist,
+   und klickt ein zweites Mal; bei einem Absende-Knopf ist das genau
+   einmal zu viel. Also ein Ring, der an der Klickstelle aufgeht und
+   vergeht. Er liegt ÜBER dem Bild und ist für Zeigerereignisse
+   durchlässig, sonst schluckte er den nächsten Klick. */
+#klickring{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;
+  border:2px solid rgba(0,229,255,.95);border-radius:50%;
+  pointer-events:none;animation:klickauf .45s ease-out forwards}
+#klickring[hidden]{display:none}
+@keyframes klickauf{
+  from{transform:scale(.35);opacity:1}
+  to{transform:scale(1.5);opacity:0}
+}
+
+#fernsicht{background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.12);border-radius:11px;
+  color:rgba(232,241,253,.75);padding:10px 14px;font-size:13px;
+  font-weight:600;text-align:center}
+#fernsicht.an{background:rgba(0,229,255,.16);border-color:rgba(0,229,255,.5);
+  color:rgba(0,229,255,.95)}
+#fernsicht:disabled{opacity:.35}
 /* Eigener, DECKENDER Grund. Der Kasten ist leicht durchscheinend
    (damit man sieht, dass er über etwas liegt), aber hinter der Schrift
    darf nichts durchscheinen -- gemessen las man den Untertitel quer
@@ -320,7 +364,20 @@ body{display:flex;flex-direction:column;
      sieht nach Fehler aus statt nach Bild. */
   #blick{position:relative;inset:auto;margin:0 8px 6px;flex:0 0 auto;
     max-height:64%}
+  #blick .bildplatz{flex:0 1 auto;max-height:48vh}
   #blickbild{flex:0 1 auto;max-height:48vh;object-position:center}
+
+  /* KEINE Fernsicht auf dem Handy, und zwar gar nicht erst als
+     Schalter. Sarvis' Browser ist 1280 Punkte breit; auf einem hochkant
+     gehaltenen Telefon wäre das Lupenarbeit, und Zielen mit dem Finger
+     auf ein 400 Punkte breites Abbild trifft nicht den Knopf, den man
+     meint. Der bessere Weg ist dort schon da: die Art `browser` schickt
+     die ADRESSE, und die Seite geht im eigenen Browser auf -- lesbar,
+     scrollbar, mit richtiger Tastatur.
+
+     display:none und nicht nur unsichtbar: Ein Schalter, den man per
+     Tabulator trotzdem erreicht, ist kein weggelassener Schalter. */
+  #fernsicht{display:none}
 }
 </style>
 </head>
@@ -347,10 +404,18 @@ body{display:flex;flex-direction:column;
     <div class="was"><div class="ort"></div><div class="dazu"></div></div>
     <a class="auf" target="_blank" rel="noopener noreferrer">Öffnen</a>
   </div>
+  <!-- Derselbe Kasten für das Einzelbild UND für den Live-Strom.
+       Zwei nebeneinander hätten beide halbiert, und es ist ohnehin
+       dasselbe Ding: Sarvis' Browser, einmal stehend, einmal in
+       Bewegung. Der Strom verdrängt das Standbild, nicht umgekehrt. -->
   <div id="blick" hidden>
-    <img id="blickbild" alt="">
+    <div class="bildplatz" tabindex="-1">
+      <img id="blickbild" alt="">
+      <div id="klickring" hidden></div>
+    </div>
     <div class="leiste">
       <div class="was"><div class="titel"></div><div class="ort"></div></div>
+      <span id="liveperle" hidden>live</span>
       <button id="blickzu" type="button">Schließen</button>
     </div>
   </div>
@@ -363,6 +428,11 @@ body{display:flex;flex-direction:column;
     <input type="checkbox" id="horchen"> „Hey Sarvis" mithören
   </label>
   <select id="mikro" title="Mikrofon"></select>
+  <!-- Nur am Rechner (siehe die Media-Query unten). Auf dem Handy wäre
+       ein 1280 Punkte breites Browserfenster Lupenarbeit, und der
+       bessere Weg dorthin gibt es schon: Sarvis schickt die Adresse,
+       und sie geht im EIGENEN Browser auf. -->
+  <button id="fernsicht" type="button">Browser mitsehen</button>
   <form id="tippen">
     <input id="zeile" placeholder="… oder tippen" autocomplete="off"
            enterkeyhint="send">

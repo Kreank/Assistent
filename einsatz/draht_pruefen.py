@@ -109,6 +109,37 @@ def aus_ton() -> dict[str, set[str]]:
     return raus
 
 
+# Module, die einer EINZELNEN Oberflaeche etwas einlegen, statt ueber
+# den Traeger an alle zu senden. Bisher genau eines: Der Bildstrom der
+# Fernsicht geht nur an die Oberflaechen, die ihn angefordert haben --
+# acht Bilder je Sekunde an ein Handy, das nicht hinsieht, waeren reine
+# Verschwendung.
+#
+# Sie brauchen einen eigenen Leser, weil dort o.einlegen({...}) steht
+# und nicht traeger.senden({...}). Ohne ihn meldete die Pruefung
+# "'schirm' steht in DRAHT.md, der Code sendet sie nicht" -- und man
+# suchte den Fehler in der Doku statt in dieser Liste.
+EINLEGER = ("netz/fernsicht.py",)
+
+
+def aus_einlegern() -> dict[str, set[str]]:
+    """Was direkt in die Schlange EINER Oberflaeche gelegt wird."""
+    raus: dict[str, set[str]] = {}
+    for datei in EINLEGER:
+        pfad = WURZEL / "sarvis" / datei
+        if not pfad.is_file():
+            continue
+        quelle = pfad.read_text("utf-8")
+        for treffer in re.finditer(r'\.einlegen\(\{(.*?)\}\)', quelle, re.S):
+            block = treffer.group(1)
+            art = re.search(r'"art":\s*"(\w+)"', block)
+            if not art:
+                continue
+            raus.setdefault(art.group(1), set()).update(
+                re.findall(r'"(\w+)":', block))
+    return raus
+
+
 def aus_server() -> set[str]:
     """Was der Endpunkt von einer Oberflaeche entgegennimmt."""
     quelle = (WURZEL / "sarvis" / "netz" / "server.py").read_text("utf-8")
@@ -156,7 +187,7 @@ def aus_doku() -> tuple[dict[str, set[str]], set[str]]:
 
 
 def main() -> int:
-    code = aus_anzeige() | aus_ton()
+    code = aus_anzeige() | aus_ton() | aus_einlegern()
     doku_ein, doku_aus = aus_doku()
     server = aus_server()
     fehler: list[str] = []

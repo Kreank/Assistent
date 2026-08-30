@@ -1556,6 +1556,17 @@ function lage(text, an) {
   document.getElementById('ampel').classList.toggle('an', !!an);
   document.getElementById('reden').disabled = !an;
   S.verbunden = !!an;
+  const fern = document.getElementById('fernsicht');
+  if (fern) fern.disabled = !an;
+  // Verbindung weg heißt: Es kommen keine Bilder mehr, und ein Klick
+  // ginge ins Leere. Den Live-Betrieb DANN weiterlaufen zu lassen wäre
+  // die schlimmste Variante -- ein stehendes Bild, das noch aussieht,
+  // als wäre es live. Der Server hat unterdessen ohnehin abgeschaltet
+  // (server.py ruft fernsicht.weg beim Verbindungsende).
+  //
+  // `live` steht weiter unten und ist hier trotzdem gültig: lage() wird
+  // erst aus verbinden() heraus gerufen, und das steht am Dateiende.
+  if (!an && live) fernsichtAus(true);
 }
 
 function verbinden() {
@@ -1640,6 +1651,13 @@ function empfangen(m) {
     // Nicht oeffnen, sondern anbieten -- siehe seiteZeigen().
     case 'browser':    seiteZeigen(m.adresse); break;
     case 'web_bild':   blickZeigen(m); break;
+    // Der Bildstrom. Kommt nur, solange wir ihn angefordert haben --
+    // der Server schickt ihn an niemanden sonst.
+    case 'schirm':     schirmBild(m); break;
+    // Der Server hat abgeschaltet: Browser zu, Ruhezeit abgelaufen,
+    // oder er konnte gar nicht erst anfangen. Immer ein Grund, den
+    // Schalter zurückzulegen -- sonst behauptet er "läuft".
+    case 'schirm_aus': fernsichtAus(true); break;
     case 'browser_zu': seiteZu(); break;
     case 'ton':        tonSpielen(m); break;
     case 'ton_stopp':  tonStopp(m.runde); break;
@@ -1892,6 +1910,10 @@ function blickZeigen(m) {
   const kasten = document.getElementById('blick');
   const bild = document.getElementById('blickbild');
   if (!m.daten) return;
+  // Ein Standbild verdrängt den Live-Strom nicht: Wer zusieht, will
+  // weiter zusehen, und das Einzelbild wäre nach einer Achtelsekunde
+  // ohnehin überschrieben.
+  if (live) return;
   bild.src = 'data:image/webp;base64,' + m.daten;
   bild.alt = m.titel || m.adresse || 'Seite';
   kasten.querySelector('.titel').textContent = m.titel || '(ohne Titel)';
@@ -1904,11 +1926,217 @@ function blickZeigen(m) {
 }
 
 document.getElementById('blickzu').addEventListener('click', () => {
+  if (live) { fernsichtAus(); return; }   // Zumachen heißt hier: abschalten
   const kasten = document.getElementById('blick');
   kasten.hidden = true;
   // Das Bild wirklich freigeben. Ein 1280er WebP als data-URI hängt
   // sonst im Speicher, und bei jedem Blick kommt eines dazu.
   document.getElementById('blickbild').removeAttribute('src');
+});
+
+// =====================================================================
+// Fernsicht: zusehen UND eingreifen
+// =====================================================================
+/* Auf dem alten Rechner war Sarvis' Browser DER Browser -- er machte
+ * ihn auf, man sah hinein und klickte selbst weiter, wenn er nicht
+ * weiterkam. Auf dem Server sind es zwei geworden. Das hier näht sie
+ * wieder zusammen: Bilder herein ("schirm"), Klicks und Tasten hinaus.
+ *
+ * ANTEILE, KEINE PIXEL. Was hinausgeht, sind Zahlen zwischen 0 und 1.
+ * Der Server rechnet sie mit seiner Fenstergröße in Pixel um. Andersherum
+ * müsste die Oberfläche wissen, wie groß Sarvis' Fenster ist, UND ihre
+ * eigene Skalierung dazurechnen -- die kennt aber nur sie, und sie
+ * ändert sich bei jedem Ziehen am Fensterrand.
+ *
+ * NICHT AUFS HANDY. Der Schalter steht unter 700 Punkten Breite auf
+ * display:none (index.html, mit Begründung). Dort führt der bessere Weg
+ * über die Art `browser`: Sarvis schickt die Adresse, und die Seite geht
+ * im eigenen Browser auf -- lesbar, mit richtiger Tastatur. */
+let live = false;
+
+const SONDERTASTEN = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete',
+  'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown',
+  'Home', 'End', 'PageUp', 'PageDown']);
+
+/* Getippte Zeichen werden kurz gesammelt.
+ *
+ * Wer "Wärmepumpe" tippt, löst zehn Tastendrücke aus. Zehn Nachrichten
+ * wären zehn Rahmen für zusammen zehn Zeichen -- der Draht bestünde
+ * dann fast nur aus Umschlag. 60 ms sind kürzer, als ein Mensch
+ * zwischen zwei Anschlägen braucht, und deshalb unbemerkt. Eine
+ * Sondertaste leert den Puffer SOFORT, sonst überholte "Enter" den Text
+ * davor und die Suchmaske bekäme ein leeres Feld abgeschickt. */
+let tippPuffer = '', tippUhr = null;
+
+function tippLeeren() {
+  if (tippUhr) { clearTimeout(tippUhr); tippUhr = null; }
+  if (!tippPuffer) return;
+  senden({ art: 'taste', text: tippPuffer });
+  tippPuffer = '';
+}
+
+const platz = document.querySelector('#blick .bildplatz');
+
+function fernsichtAn() {
+  if (live || !S.verbunden) return;
+  live = true;
+  const kasten = document.getElementById('blick');
+  kasten.hidden = false;
+  kasten.classList.add('live');
+  kasten.querySelector('.titel').textContent = 'Sarvis’ Browser';
+  kasten.querySelector('.ort').textContent =
+    'Klicken, tippen und scrollen wirkt dort drüben.';
+  const perle = document.getElementById('liveperle');
+  perle.hidden = false; perle.classList.add('pause');
+  perle.textContent = 'wartet';
+  const knopf = document.getElementById('fernsicht');
+  knopf.classList.add('an'); knopf.textContent = 'Mitsehen beenden';
+  document.getElementById('blickzu').textContent = 'Beenden';
+  senden({ art: 'schirm_an', an: true });
+  platz.focus();
+}
+
+function fernsichtAus(vomServer) {
+  if (!live) return;
+  live = false;
+  tippPuffer = '';
+  if (tippUhr) { clearTimeout(tippUhr); tippUhr = null; }
+  // Nur sagen, wenn WIR aufhören. Kommt das "schirm_aus" vom Server
+  // (Browser zugemacht, Ruhezeit abgelaufen), wäre die Antwort darauf
+  // ein Echo ins Leere.
+  if (!vomServer) senden({ art: 'schirm_an', an: false });
+  const kasten = document.getElementById('blick');
+  kasten.classList.remove('live');
+  const knopf = document.getElementById('fernsicht');
+  knopf.classList.remove('an'); knopf.textContent = 'Browser mitsehen';
+  document.getElementById('blickzu').textContent = 'Schließen';
+  document.getElementById('liveperle').hidden = true;
+  if (vomServer) {
+    /* Das letzte Bild bleibt stehen, ABER es ist nicht mehr bedienbar:
+     * An `live` hängt jeder Handler. Genau so herum -- wer gerade
+     * hinsah, soll sehen, wo es endete, aber nicht in ein Bild klicken,
+     * hinter dem keine Seite mehr steht.
+     *
+     * Kam nie ein Bild, ist der Grund ein anderer und die Meldung
+     * auch: Sarvis hatte gar keine Seite offen. Der Kasten bleibt dann
+     * trotzdem stehen -- ein Schalter, den man umlegt und bei dem
+     * sichtbar nichts passiert, ist die schlechteste Antwort. */
+    const hatBild = !!document.getElementById('blickbild').getAttribute('src');
+    kasten.querySelector('.titel').textContent =
+      hatBild ? 'Sarvis’ Browser' : 'Kein Bild';
+    kasten.querySelector('.ort').textContent = hatBild
+      ? 'Der Browser ist zu — das hier ist ein Standbild.'
+      : 'Sarvis hat gerade keine Seite offen. Es gibt nichts mitzusehen.';
+  } else {
+    kasten.hidden = true;
+    document.getElementById('blickbild').removeAttribute('src');
+  }
+}
+
+function schirmBild(m) {
+  if (!live || !m.daten) return;
+  document.getElementById('blickbild').src =
+    'data:image/jpeg;base64,' + m.daten;
+  const perle = document.getElementById('liveperle');
+  if (perle.classList.contains('pause')) {
+    perle.classList.remove('pause'); perle.textContent = 'live';
+  }
+}
+
+/* Wo im BILD wurde geklickt -- als Anteil.
+ *
+ * Nicht so einfach, wie es aussieht: Das Bild sitzt mit object-fit
+ * contain im Kasten und füllt ihn fast nie ganz aus. Wer nur
+ * getBoundingClientRect nimmt, rechnet die schwarzen Ränder mit und
+ * trifft je nach Seitenverhältnis um bis zu hundert Punkte daneben --
+ * und zwar gleichmäßig, was es besonders unangenehm macht: Es sieht
+ * aus, als säßen die Knöpfe der Seite woanders, nicht als läge die
+ * Rechnung falsch.
+ *
+ * Also der wirklich gemalte Ausschnitt: eine Skala für beide Achsen,
+ * die kleinere gewinnt (das IST contain), der Rest ist Rand, und der
+ * Rand liegt zu gleichen Teilen auf beiden Seiten (object-position:
+ * center, gesetzt in #blick.live). */
+function bildAnteil(ev) {
+  const bild = document.getElementById('blickbild');
+  const r = bild.getBoundingClientRect();
+  const nb = bild.naturalWidth, nh = bild.naturalHeight;
+  if (!nb || !nh || !r.width || !r.height) return null;
+  const skal = Math.min(r.width / nb, r.height / nh);
+  const bb = nb * skal, bh = nh * skal;
+  const x = (ev.clientX - (r.left + (r.width - bb) / 2)) / bb;
+  const y = (ev.clientY - (r.top + (r.height - bh) / 2)) / bh;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return null;   // auf den Rand geklickt
+  const pr = platz.getBoundingClientRect();
+  return { x, y, px: ev.clientX - pr.left, py: ev.clientY - pr.top };
+}
+
+/* Der Mauszeiger fehlt im Bild -- Chrome zeichnet ihn nicht mit. Ohne
+ * irgendeine Rückmeldung weiß niemand, ob sein Klick angekommen ist,
+ * und klickt ein zweites Mal; bei einem Absende-Knopf ist das genau
+ * einmal zu viel. Also ein Ring an der Klickstelle. */
+function klickringZeigen(px, py) {
+  const ring = document.getElementById('klickring');
+  ring.hidden = true;
+  ring.style.left = px + 'px';
+  ring.style.top = py + 'px';
+  // Erzwungenes Neuberechnen: Sonst läuft die Animation beim zweiten
+  // Klick auf dieselbe Stelle gar nicht -- der Browser sieht keine
+  // Änderung und startet sie nicht neu.
+  void ring.offsetWidth;
+  ring.hidden = false;
+}
+
+platz.addEventListener('pointerdown', ev => {
+  if (!live) return;
+  const a = bildAnteil(ev);
+  if (!a) return;
+  ev.preventDefault();
+  // Erst der Ring, dann das Senden: Die Rückmeldung soll am Finger
+  // hängen und nicht an der Netzlaufzeit.
+  klickringZeigen(a.px, a.py);
+  platz.focus();
+  senden({
+    art: 'klick', x: a.x, y: a.y,
+    knopf: ev.button === 2 ? 'rechts' : ev.button === 1 ? 'mitte' : 'links',
+  });
+});
+
+// Das Kontextmenü des EIGENEN Browsers gehört hier nicht hin: Ein
+// Rechtsklick ist für die Seite dort drüben gemeint.
+platz.addEventListener('contextmenu', ev => { if (live) ev.preventDefault(); });
+
+platz.addEventListener('wheel', ev => {
+  if (!live) return;
+  const a = bildAnteil(ev);
+  if (!a) return;
+  ev.preventDefault();
+  // `hoch` zählt nach OBEN, deltaY zählt nach unten. Das Vorzeichen
+  // dreht hier und nicht auf dem Server: Dort steht der Name, hier
+  // steht der Browser, der es andersherum meint.
+  senden({ art: 'rollen', x: a.x, y: a.y, hoch: -ev.deltaY });
+}, { passive: false });
+
+platz.addEventListener('keydown', ev => {
+  if (!live) return;
+  // Modifikatoren bleiben HIER. Strg+R soll diese Seite neu laden und
+  // nicht die dort drüben, F12 die eigenen Werkzeuge öffnen. Wer die
+  // Tastenkürzel der fremden Seite braucht, klickt sie an.
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (SONDERTASTEN.has(ev.key)) {
+    ev.preventDefault();
+    tippLeeren();                       // erst der Text, dann die Taste
+    senden({ art: 'taste', sonder: ev.key });
+    return;
+  }
+  if (ev.key.length !== 1) return;      // Shift, F5, CapsLock …
+  ev.preventDefault();
+  tippPuffer += ev.key;
+  if (!tippUhr) tippUhr = setTimeout(tippLeeren, 60);
+});
+
+document.getElementById('fernsicht').addEventListener('click', () => {
+  live ? fernsichtAus() : fernsichtAn();
 });
 
 // =====================================================================
@@ -1925,14 +2153,25 @@ const reden = document.getElementById('reden');
     reden.classList.remove('haelt'); aufnahmeStop();
   }));
 
-// Am Rechner tut die Leertaste dasselbe wie die Fläche.
+/* Am Rechner tut die Leertaste dasselbe wie die Fläche.
+ *
+ * Nicht, während in Sarvis' Browser getippt wird. Sonst hieße jedes
+ * Leerzeichen in "Wärmepumpe Vaillant" gleichzeitig: Aufnahme an. Die
+ * Bedingung ist bewusst am FOKUS und nicht an `live` -- wer den
+ * Bildstrom nur ansieht, ohne hineingeklickt zu haben, soll die
+ * Leertaste behalten. */
+const tipptDrueben = () =>
+  document.activeElement === document.querySelector('#blick .bildplatz');
+
 document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'INPUT') {
+  if (e.code === 'Space' && !e.repeat && !tipptDrueben()
+      && document.activeElement.tagName !== 'INPUT') {
     e.preventDefault(); reden.classList.add('haelt'); aufnahmeStart();
   }
 });
 document.addEventListener('keyup', e => {
-  if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
+  if (e.code === 'Space' && !tipptDrueben()
+      && document.activeElement.tagName !== 'INPUT') {
     reden.classList.remove('haelt'); aufnahmeStop();
   }
 });

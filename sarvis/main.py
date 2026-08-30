@@ -19,7 +19,7 @@ for strom in (sys.stdout, sys.stderr):
     except (AttributeError, OSError):
         pass
 
-from . import config, klang, rueckfrage, schutz  # noqa: E402
+from . import anmeldung, config, klang, rueckfrage, schutz  # noqa: E402
 from . import anzeige as anzeige_modul  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .klang import gong  # noqa: E402
@@ -941,6 +941,12 @@ class Sarvis:
             raise
         except Exception as e:
             print(f"  Fehler: {type(e).__name__}: {e}")
+            if anmeldung.klingt_nach_anmeldung(e):
+                # Nicht die englische Ausnahme vorlesen lassen. Wer
+                # gerade redet, will wissen was los ist, nicht welche
+                # Ausnahme geflogen ist.
+                print(f"    -> {anmeldung.RAT}")
+                await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
             self.arbeitet = False
@@ -955,6 +961,12 @@ class Sarvis:
             raise
         except Exception as e:
             print(f"  Fehler: {type(e).__name__}: {e}")
+            if anmeldung.klingt_nach_anmeldung(e):
+                # Nicht die englische Ausnahme vorlesen lassen. Wer
+                # gerade redet, will wissen was los ist, nicht welche
+                # Ausnahme geflogen ist.
+                print(f"    -> {anmeldung.RAT}")
+                await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
             self.arbeitet = False
@@ -972,6 +984,12 @@ class Sarvis:
             raise
         except Exception as e:
             print(f"  Fehler: {type(e).__name__}: {e}")
+            if anmeldung.klingt_nach_anmeldung(e):
+                # Nicht die englische Ausnahme vorlesen lassen. Wer
+                # gerade redet, will wissen was los ist, nicht welche
+                # Ausnahme geflogen ist.
+                print(f"    -> {anmeldung.RAT}")
+                await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
             self.arbeitet = False
@@ -1126,6 +1144,15 @@ class Sarvis:
         #
         # Beim ersten Start im Container debuggt man das sonst im
         # Blindflug. Deshalb eine Zeile je Gruppe.
+        # Ob sein Kopf ueberhaupt erreichbar ist. Ohne diese Zeile lief
+        # Sarvis am 30.08. vier Stunden lang und antwortete auf jeden
+        # Zuruf mit "Failed to authenticate" -- auf Englisch, mitten im
+        # deutschen Gespraech, und gemerkt hat es niemand bis zum
+        # Ausprobieren.
+        angemeldet, wie = await anmeldung.pruefen()
+        print(f"  Anmeldung  : {wie}")
+        if not angemeldet:
+            print(f"    -> {anmeldung.RAT}")
         print(f"  Werkzeuge  : {len(self.werkzeugnamen)} gebaut")
         print(f"  Google     : {google.zustand()}")
         print(f"  Telegram   : {'angemeldet' if config.telegram_bereit() else _fehlt(config.TELEGRAM_SITZUNG, 'telegram_anmelden.py ausfuehren')}")

@@ -39,6 +39,20 @@ from uuid import uuid4
 SCHLANGE_MAX = 200
 
 # Arten, die beim Aufraeumen NICHT weggeworfen werden. Siehe Modulkopf.
+#
+# "schirm" GEHOERT HIER AUSDRUECKLICH NICHT HIN, und das ist keine
+# Nachlaessigkeit. Der Bildstrom aus netz/fernsicht.py ist der reinste
+# Zustand, den es am Draht gibt: Ein Einzelbild von vor zwei Sekunden
+# ist wertlos, und acht davon je Sekunde fuellen die Schlange schneller
+# als alles andere. Stuende es hier, staute sich bei einer langsamen
+# Leitung ein Film alter Bilder auf und liefe hinterher ab -- der Nutzer
+# klickte auf eine Seite, die es nicht mehr gibt. So wie es ist, behaelt
+# _aufraeumen() das NEUESTE Bild und wirft die aelteren weg. Genau
+# richtig.
+#
+# "schirm_aus" braucht den Schutz ebenfalls nicht: Danach kommt kein
+# "schirm" mehr, es kann also nicht ueberholt werden, und als eigene Art
+# ueberlebt es das Eindampfen von selbst.
 WICHTIG = frozenset({"werkzeug", "kachel_weg", "verschieben"})
 
 
