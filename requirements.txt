@@ -1,11 +1,70 @@
+# Sarvis auf Linux.
+#
+# Die alte Fassung war auf Windows gewachsen und auf Linux nicht
+# installierbar: pywin32 und win11toast brechen "pip install -r" ab,
+# bevor irgendetwas anderes ankommt. Gleichzeitig fehlten acht Pakete,
+# die der Code wirklich importiert -- ein frisches venv startete also
+# auch auf Windows nicht, es fiel nur nicht auf, weil niemand eins baut.
+#
+# Erhoben mit ast ueber alle 40 .py, nicht abgeschrieben.
+# Windows-Extras stehen in requirements-windows.txt.
+
+# --- Hirn -----------------------------------------------------------------
 claude-agent-sdk
+
+# --- Ohren ----------------------------------------------------------------
 faster-whisper
-numpy
+# CUDA-Laufzeit fuer ctranslate2. Gemessen auf der RTX 3070 mit
+# large-v3-turbo, compute_type int8_float16: 1.297 MiB VRAM, 0,205 s fuer
+# einen 4-Sekunden-Zuruf -- schneller als die 3080 des Dev-PCs mit 0,32 s.
+# Whisper padded jede Aufnahme auf 30 s, die Zeit ist also konstant.
 nvidia-cublas-cu12
 nvidia-cudnn-cu12
+
+# --- Mund -----------------------------------------------------------------
 piper-tts
-pynput
-PySide6-Essentials
-pywin32
+# stimmfarbe.py: resample_poly fuer die Effektkette hinter Piper.
+scipy
+# eleven.py: MP3 der ElevenLabs-Antwort dekodieren (nur bei
+# STIMME_DIENST = "elevenlabs", ab Werk aus).
+av
+
+# --- Werkzeuge ------------------------------------------------------------
+numpy
+httpx                       # finanzen.py, eleven.py
+telethon                    # telegram.py
+google-api-python-client    # google.py -- Kalender, Mail, Tasks, Drive
+google-auth-oauthlib        # google.py -- der Anmeldefluss
+
+# --- Weckwort -------------------------------------------------------------
+# openwakeword steht hier NICHT als Weckwortmodell -- dessen Fertigmodelle
+# sind auf englische Aussprache trainiert und fuer "Hey Sarvis" gemessen
+# unbrauchbar (0,09 bis 0,13). Gebraucht wird allein openwakeword.vad.VAD,
+# also der Silero-VAD, der entscheidet, ob ueberhaupt jemand redet.
+#
+# Beide fallen weg, sobald entschieden ist, wie es mit dem Weckwort
+# weitergeht: Auf einem Server gibt es kein Mikrofon, und ueber Netz
+# dauerhaft mitzuhoeren kostet mit Opus rund 259 MB am Tag. Die
+# Alternative ist der VAD im Browser -- dann wandert diese Zeile in die PWA.
+openwakeword
+onnxruntime
+
+# --- Noch nicht entschieden ----------------------------------------------
+# sounddevice braucht ein Audiogeraet und libportaudio2. Auf dem Server
+# gibt es beides nicht; audio.py und weckwort.py importieren es aber auf
+# Modulebene. Bleibt drin, bis die Audio-Naht steht (Aufnahme und
+# Wiedergabe wandern dann in den Browser).
 sounddevice
-win11toast
+
+# pynput haengt den systemweiten Tastaturhaken fuer die Push-to-talk-Taste
+# ein. Braucht X11 oder uinput -- headless nicht verfuegbar. Bleibt drin,
+# bis der Ausloeser ueber den Endpunkt kommt statt ueber die rechte Strg.
+pynput
+
+# NICHT mehr hier, mit Absicht:
+#
+#   PySide6-Essentials   Das Overlay (hud.py, kachel.py) und der
+#                        eingebaute Browser (browser.py) sind zusammen
+#                        5.226 Zeilen Qt und werden durch die PWA
+#                        ersetzt. Ein Server hat keinen Bildschirm.
+#   pywin32, win11toast  siehe requirements-windows.txt

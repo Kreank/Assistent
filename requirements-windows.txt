@@ -1,0 +1,25 @@
+# Was Sarvis nur auf Windows braucht.
+#
+#   pip install -r requirements.txt -r requirements-windows.txt
+#
+# Getrennt, weil die beiden Pakete hier auf Linux nicht bloss nutzlos
+# sind, sondern "pip install -r" abbrechen -- und zwar bevor irgendetwas
+# anderes ankommt. Eine Liste, die auf der Zielplattform gar nicht
+# durchlaeuft, ist keine Abhaengigkeitsliste.
+#
+# Der Windows-Sarvis wird abgeschaltet; diese Datei ist der Rueckweg,
+# nicht der Weg. Wer ihn braucht, findet den Stand von damals unter dem
+# Tag windows-final.
+
+pywin32       # einrichten.py: AppUserModelID der Startmenue-Verknuepfung
+win11toast    # hinweis.py: die Benachrichtigung, wenn ein Timer faellig
+              # wird. Auf Linux schaltet hinweis.py sich ueber
+              # sys.platform still ab -- Timer und Erinnerungen verlieren
+              # damit ihren einzigen nicht-gesprochenen Kanal. Ersatz ist
+              # Web Push in der PWA.
+
+# Das Overlay und der eingebaute Browser. Auf dem Server ersetzt durch
+# die PWA; hier stehen sie, damit der Windows-Stand weiter baut.
+PySide6-Essentials
+PySide6-Addons    # QtWebEngine fuer browser.py -- fehlte bisher ganz,
+                  # obwohl browser.py es importiert
