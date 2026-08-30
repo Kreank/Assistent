@@ -243,6 +243,91 @@ class Dauerhorch(Protocol):
         ...
 
 
+class LokalHorch:
+    """Der Dauerstrom vom Mikrofon dieses Rechners.
+
+    Genau das, was frueher fest in weckwort._schleife stand -- nur
+    herausgeloest, damit eine Netzfassung danebentreten kann. Das
+    Verhalten ist unveraendert, einschliesslich der beiden Eigenheiten,
+    die dort teuer gelernt wurden:
+
+    Im Audio-Rueckruf wird NICHTS gerechnet. Was dort aufhaelt, reisst
+    genau das Loch, das die Warteschlange gerade beseitigt.
+
+    Und der Rueckstandsdeckel wirft ALTES weg, nicht neues. Ein Horcher,
+    der sechs Sekunden hinterherhinkt, hoert nicht mehr zu, er liest
+    Vergangenheit vor.
+    """
+
+    rate = 16000
+    block = 480          # Silero rechnet in Rahmen dieser Groesse
+
+    MAX_RUECKSTAND = 200   # = 6,0 Sekunden
+
+    def __init__(self):
+        import queue as _q
+        import threading as _t
+        self._eingang = _q.Queue()
+        self._uebergelaufen = _t.Event()
+        self._strom = None
+        self._samples = 0
+        self._meldung = None
+
+    def oeffnen(self) -> None:
+        import sounddevice as sd
+
+        def herein(daten, rahmen, zeit, status):
+            if status:
+                self._uebergelaufen.set()
+            self._eingang.put(daten[:, 0].copy())
+
+        self._strom = sd.InputStream(samplerate=self.rate, channels=1,
+                                     dtype="float32", blocksize=self.block,
+                                     callback=herein)
+        self._strom.start()
+
+    def bloecke(self):
+        import queue as _q
+        while True:
+            try:
+                block = self._eingang.get(timeout=0.5)
+            except _q.Empty:
+                return          # der Aufrufer sieht nach, ob er noch laeuft
+            if self._uebergelaufen.is_set():
+                self._uebergelaufen.clear()
+                self._meldung = ("Mikro meldet einen Aussetzer -- ein "
+                                 "Stueck Aufnahme fehlt")
+            rueckstand = self._eingang.qsize()
+            if rueckstand > self.MAX_RUECKSTAND:
+                while self._eingang.qsize() > self.MAX_RUECKSTAND // 2:
+                    try:
+                        self._eingang.get_nowait()
+                    except _q.Empty:
+                        break
+                self._meldung = (f"Horcher kommt nicht nach: {rueckstand} "
+                                 "Bloecke im Rueckstand, Aelteres verworfen")
+            self._samples += len(block)
+            # Stromzeit aus SAMPLES, nicht aus der Wanduhr -- siehe die
+            # Begruendung im Dauerhorch-Protokoll.
+            yield block, self._samples / self.rate
+
+    def aussetzer(self) -> str | None:
+        m, self._meldung = self._meldung, None
+        return m
+
+    def senden_pausieren(self, an: bool) -> None:
+        pass          # lokal gibt es niemanden, dem man das sagen muesste
+
+    def schliessen(self) -> None:
+        if self._strom is not None:
+            try:
+                self._strom.stop()
+                self._strom.close()
+            except Exception:
+                pass
+            self._strom = None
+
+
 def aufnehmer(melden: Callable[[float], None] | None = None) -> Aufnehmer:
     """Der Aufnehmer, den diese Fassung benutzt."""
     if config.KLANG_QUELLE == "netz":
@@ -263,3 +348,18 @@ def lautsprecher(melden: Callable[[float], None] | None = None) -> Lautsprecher:
         )
     from .audio import Lautsprecher as Lokal
     return Lokal(melden=melden)
+
+
+def dauerhorch(traeger=None) -> Dauerhorch:
+    """Die Quelle fuer den Weckwort-Strom.
+
+    Im Netzbetrieb kommen die Bloecke von einer Oberflaeche, die ihr
+    Mikrofon offenhaelt -- der Dev-PC etwa. Meldet keine, liefert der
+    Horch schlicht nichts, und der Weckwort-Faden dreht Leerlauf. Das
+    ist der Normalfall und kein Fehler: Am Handy will man das Mikrofon
+    nicht dauernd offen haben, und dann bleibt es bei Push-to-talk.
+    """
+    if config.KLANG_QUELLE == "netz":
+        from .netz.horch_netz import NetzHorch
+        return NetzHorch(traeger)
+    return LokalHorch()

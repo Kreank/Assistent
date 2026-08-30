@@ -25,7 +25,6 @@ import time
 from difflib import SequenceMatcher
 
 import numpy as np
-import sounddevice as sd
 
 from . import audio, config, rueckfrage
 from .anzeige import DENKT, FRAGT, RUHIG
@@ -155,11 +154,19 @@ def erkennen(text: str) -> str | None:
 class Horcher:
     """Hoert im Hintergrund mit und meldet, wenn das Weckwort faellt."""
 
-    def __init__(self, ohren, wecken, anzeige=None):
-        """wecken(zuruf: str) -- wird gerufen, wenn das Weckwort fiel."""
+    def __init__(self, ohren, wecken, anzeige=None, horch=None):
+        """wecken(zuruf: str) -- wird gerufen, wenn das Weckwort fiel.
+
+        horch liefert die Bloecke. Ohne Angabe das Mikrofon dieses
+        Rechners; im Netzbetrieb schickt eine Oberflaeche ihren Strom.
+        """
         self.ohren = ohren
         self.wecken = wecken
         self.anzeige = anzeige
+        if horch is None:
+            from . import klang
+            horch = klang.dauerhorch()
+        self.horch = horch
         self.vad = None
         self._strom = None
         self._faden = None
@@ -279,6 +286,16 @@ class Horcher:
         if an:
             self._melden(0.0)
             self._verwerfen()
+        # Der Quelle Bescheid sagen. Lokal folgenlos -- man ueberspringt
+        # einfach die Verarbeitung. Ueber Netz ist es der Unterschied
+        # zwischen "haelt still" und "sendet weiter, bis der Rueckstand
+        # ueberlaeuft": Wer weitersendet, waehrend Sarvis redet, laesst
+        # ihn sich selbst zuhoeren, und der Deckel wirft am Ende
+        # ausgerechnet das weg, was danach gesagt wird.
+        try:
+            self.horch.senden_pausieren(bool(an))
+        except Exception:
+            pass
 
     # --- Ablauf -------------------------------------------------------------
 
@@ -341,50 +358,35 @@ class Horcher:
         verschwinden. Am Zustand des Horchers aendert das nichts -- der
         wird weiterhin ausschliesslich hier angefasst.
         """
-        eingang: queue.Queue = queue.Queue()
-        uebergelaufen = threading.Event()
-
-        def herein(daten, rahmen, zeit, status):
-            # Laeuft im Audio-Faden. Hier wird NICHTS gerechnet und
-            # nichts gedruckt -- was hier aufhaelt, reisst genau das
-            # Loch, das diese Schleife gerade beseitigt.
-            if status:
-                uebergelaufen.set()
-            eingang.put(daten[:, 0].copy())
-
+        # Die Bloecke kommen aus der Quelle, nicht mehr direkt vom
+        # Geraet. Lokal ist das klang.LokalHorch mit demselben Code wie
+        # vorher; auf dem Server schickt eine Oberflaeche ihren
+        # Mikrofonstrom ueber den Draht.
+        #
+        # Was hier NICHT steht, ist der Grund fuer den Umbau: kein
+        # sounddevice mehr. Dieses Modul liess sich sonst auf einem
+        # Rechner ohne Audiogeraet nicht einmal importieren -- und
+        # damit war das Weckwort auf dem Server nicht "aus", sondern
+        # unerreichbar.
         try:
-            with sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
-                                blocksize=BLOCK, callback=herein) as strom:
-                self._strom = strom
-                while self._laeuft:
-                    try:
-                        block = eingang.get(timeout=0.5)
-                    except queue.Empty:
-                        continue   # nur nachsehen, ob wir noch laufen
-                    if uebergelaufen.is_set():
-                        uebergelaufen.clear()
-                        self._meckern(
-                            "ueberlauf",
-                            "  (Mikro meldet einen Aussetzer -- ein Stueck "
-                            "Aufnahme fehlt)"
-                        )
-                    rueckstand = eingang.qsize()
-                    if rueckstand > MAX_RUECKSTAND:
-                        while eingang.qsize() > MAX_RUECKSTAND // 2:
-                            try:
-                                eingang.get_nowait()
-                            except queue.Empty:
-                                break
-                        self._meckern(
-                            "rueckstand",
-                            f"  (Horcher kommt nicht nach: {rueckstand} "
-                            "Bloecke im Rueckstand, Aelteres verworfen)"
-                        )
+            self.horch.oeffnen()
+            while self._laeuft:
+                for block, stromzeit in self.horch.bloecke():
+                    if not self._laeuft:
+                        break
+                    meldung = self.horch.aussetzer()
+                    if meldung:
+                        self._meckern("strom", f"  ({meldung})")
                     if self.pausiert:
                         continue
                     self._block(block)
         except Exception as e:
             print(f"  (Weckwort-Horcher beendet: {e})")
+        finally:
+            try:
+                self.horch.schliessen()
+            except Exception:
+                pass
 
     def _block(self, block: np.ndarray) -> None:
         jetzt = time.perf_counter()

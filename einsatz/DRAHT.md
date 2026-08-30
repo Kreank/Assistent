@@ -103,6 +103,7 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 | `ton_stopp` | `runde` | sofort still sein |
 | `browser` | `adresse` | Rest aus dem Desktop-Betrieb |
 | `browser_zu` | — | dito |
+| `horchen` | `an` | Dauerstrom jetzt schicken oder nicht |
 | `verschieben` | `an` | dito |
 
 <!-- /draht:herein -->
@@ -184,6 +185,7 @@ gerade **alles** fertig geworden ist.
 | `zuruf` | `text` | eine getippte Zeile |
 | `sprache` | `daten`, `rate` | eine fertige Aufnahme |
 | `antwort` | `nummer`, `inhalt` | Antwort auf eine Frage des Servers |
+| `strom` | `daten`, `rate` | ein Stück Dauerstrom fürs Weckwort |
 | `hier` | — | Lebenszeichen, optional |
 
 <!-- /draht:hinaus -->
@@ -275,36 +277,58 @@ weg ist.
 
 ---
 
-## Was noch fehlt: der Dauerstrom
+## Der Dauerstrom: „Hey Sarvis" ohne Tastendruck
 
-Bisher schickt eine Oberfläche **fertige Aufnahmen**. Für „Hey Sarvis"
-ohne Tastendruck müsste sie blockweise senden. Die Schnittstelle dafür
-(`Dauerhorch` in `sarvis/klang.py`) ist beschrieben, aber **nicht
-gebaut**.
+Eine Oberfläche kann ihr Mikrofon offenhalten und blockweise schicken,
+was es hört. Dann läuft auf dem Server dieselbe Erkennung wie früher
+lokal: erst der Sprach-Erkenner (billig, CPU), und nur wenn wirklich
+jemand redet, Whisper.
 
-Das hat eine Folge für die Planung: **Eine Android-App hat bis dahin
-keinen Grund zu existieren.** Ihr einziger Vorteil gegenüber der
-Weboberfläche wäre das Weckwort bei gesperrtem Bildschirm — und genau
-das braucht den Dauerstrom. Ohne ihn kann sie nur fertige Aufnahmen
-schicken, und das kann die Weboberfläche auch.
+```json
+{ "art": "strom", "rate": 16000, "daten": "base64-int16" }
+```
 
-Eine Windows-App ist davon **nicht** betroffen: Der systemweite
-Tastaturhaken braucht keinen Dauerstrom.
+Dasselbe Format wie `sprache`. Gebündelt wird auf etwa eine
+Viertelsekunde (4096 Werte): Einzeln zu senden wären acht Nachrichten je
+Sekunde nur für Rahmen-Overhead, länger zu sammeln machte das Weckwort
+träge.
 
-Wenn der Dauerstrom kommt, stehen zwei Wege offen:
+Der Server antwortet mit `horchen`, wenn er den Strom gerade **nicht**
+will — während er selbst redet oder eine Rückfrage läuft. Darauf zu
+hören ist keine Höflichkeit: Wer weitersendet, während Sarvis spricht,
+lässt ihn sich selbst zuhören, und der Rückstandsdeckel wirft am Ende
+ausgerechnet das weg, was danach gesagt wird.
+
+**Nur eine Oberfläche zur Zeit** darf senden. Zwei Mikrofone in einen
+Strom zu mischen ergäbe Kauderwelsch, und der Sprach-Erkenner sähe
+dauernd Sprache. Wer zuerst sendet, hat ihn; meldet er sich ab, ist er
+wieder frei.
+
+**Die Erkennung bleibt beim Server.** Der Client liefert nur Rohton. Ob
+jemand „Hey Sarvis" gesagt hat, entscheiden Silero-VAD, Whisper und der
+Ähnlichkeitsvergleich mit seinen gemessenen Schwellen — das ist die
+Stelle, an der die Arbeit steckt, und sie soll nicht in drei Oberflächen
+dreimal existieren und dreimal auseinanderlaufen.
+
+Ob es sich lohnt, hängt vom Gerät ab:
 
 - **Am Rechner** einfach durchsenden. 16 kHz int16 sind 256 kbit/s — im
-  heimischen Netz ein halbes Promille einer Gigabit-Leitung.
-- **Am Handy** den Sprach-Erkenner (VAD) lokal laufen lassen und nur
-  senden, wenn wirklich jemand redet. Sonst wären es rund 260 MB am Tag,
-  auch wenn niemand spricht.
+  heimischen Netz ein halbes Promille einer Gigabit-Leitung, und es
+  fällt kein Volumen an. Die Weboberfläche hat dafür einen Schalter.
+- **Am Handy** besser gar nicht: rund 260 MB am Tag, auch wenn niemand
+  redet, und das Mikrofon dauerhaft offen. Dort bleibt es bei
+  Push-to-talk. Wer es trotzdem will, lässt den Sprach-Erkenner lokal
+  laufen und sendet nur, wenn wirklich jemand spricht.
 
-In beiden Fällen bleibt die **Erkennung** von „Hey Sarvis" auf dem
-Server. Sie ist gemessen und feinjustiert (sarvis 1,00 · jarvis 0,83 ·
-service 0,62 · serviert 0,57, Schwelle 0,60) und löst das, woran
-openWakeWord scheiterte: Dessen Fertigmodelle sind auf englische
+Die Schwellen der Erkennung sind gemessen und feinjustiert (sarvis 1,00 ·
+jarvis 0,83 · service 0,62 · serviert 0,57, Grenze 0,60). Sie lösen das,
+woran openWakeWord scheiterte: Dessen Fertigmodelle sind auf englische
 Aussprache trainiert und erreichten für „Hey Sarvis" von einer deutschen
 Stimme nur 0,09 bis 0,13.
+
+**Damit hat eine Android-App wieder einen Grund**: Ein Foreground Service
+darf das Mikrofon offenhalten, wenn der Bildschirm gesperrt ist — ein
+Browser im Hintergrund nicht.
 
 Blockgröße für den VAD: **genau 480 Werte** bei 16 kHz. Silero rechnet in
 Rahmen dieser Größe; eine andere Blockung verfälscht seine Vorhersage.

@@ -391,7 +391,13 @@ function empfangen(m) {
         }
       }
       break;
-    case 'pegel':    S.pegel = Math.max(0, Math.min(1, Number(m.pegel) || 0)); break;
+    case 'pegel':
+      // Solange wir selbst aufnehmen, gilt UNSER Pegel. Der Server
+      // kennt ihn nicht -- das Mikrofon steht hier. Ohne diese
+      // Bedingung überschreibt eine Meldung von dort den Ausschlag,
+      // und der Ring steht still, während man redet.
+      if (!nimmtAuf) S.pegel = Math.max(0, Math.min(1, Number(m.pegel) || 0));
+      break;
     case 'untertitel':
       if (m.strom) break;
       S.untertitel = m.text || ''; S.wer = m.wer || 'sarvis'; S.hervor = 4;
@@ -415,6 +421,13 @@ function empfangen(m) {
     case 'kachel_weg': kachelWeg(m.name); break;
     case 'ton':        tonSpielen(m); break;
     case 'ton_stopp':  tonStopp(m.runde); break;
+    case 'horchen':
+      // Während Sarvis redet oder eine Rückfrage läuft, braucht er den
+      // Strom nicht. Ohne dieses Wort sendet die Oberfläche weiter, der
+      // Rückstand läuft auf, und am Ende wirft der Deckel echte Sprache
+      // weg -- ausgerechnet die, die nach dem Reden kommt.
+      horchPause = !m.an;
+      break;
   }
 }
 
@@ -443,8 +456,10 @@ async function aufnahmeStart() {
       hoerer = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
     }
     if (hoerer.state === 'suspended') await hoerer.resume();
+    const gewaehlt = localStorage.getItem('sarvis-mikro') || '';
     const strom = await navigator.mediaDevices.getUserMedia({
       audio: {
+        ...(gewaehlt ? { deviceId: { exact: gewaehlt } } : {}),
         // Der Echo-Filter auf dem Server vergleicht TEXT, keine Wellen.
         // Was hier nicht unterdrückt wird, hört Sarvis von sich selbst.
         echoCancellation: true, noiseSuppression: true,
@@ -470,6 +485,7 @@ async function aufnahmeStart() {
     tonStopp(null);
     nimmtAuf = true;
     S.zustand = 'hoert';
+    mikrofoneListen();      // jetzt gibt es auch Namen
   } catch (e) {
     lage('kein Mikrofon', S.verbunden);
   }
@@ -483,14 +499,37 @@ function aufnahmeStop() {
 
   const gesamt = gesammelt.reduce((n, a) => n + a.length, 0);
   if (gesamt < 16000 * 0.4) { S.zustand = 'ruhig'; return; }  // zu kurz
+
   const alles = new Int16Array(gesamt);
-  let i = 0;
+  let i = 0, spitze = 0;
   for (const stueck of gesammelt)
-    for (let j = 0; j < stueck.length; j++)
-      alles[i++] = Math.max(-32768, Math.min(32767, stueck[j] * 32768));
+    for (let j = 0; j < stueck.length; j++) {
+      const w = stueck[j];
+      if (Math.abs(w) > spitze) spitze = Math.abs(w);
+      alles[i++] = Math.max(-32768, Math.min(32767, w * 32768));
+    }
   gesammelt = [];
+
+  /* Es NICHT stillschweigend hinschicken, wenn nichts drin ist.
+   *
+   * Genau das ist passiert: 60 Sekunden Aufnahme kamen beim Server an,
+   * Whisper war nach einer Zehntelsekunde fertig und verstand nichts,
+   * und auf dem Bildschirm stand -- gar nichts. Man drückt dann fester
+   * und länger, statt nachzusehen, ob das richtige Mikrofon anliegt.
+   *
+   * Die Schwelle ist bewusst niedrig: 0,01 trennt "gar kein Signal"
+   * von "leise gesprochen". Wer bei 0,02 flüstert, soll durchkommen. */
+  if (spitze < 0.01) {
+    S.zustand = 'ruhig';
+    S.wer = 'sarvis'; S.hervor = 4;
+    S.untertitel = 'Da kam kein Ton an. Ist das richtige Mikrofon '
+      + 'ausgewählt und nicht stummgeschaltet?';
+    zeigeUntertitel();
+    return;
+  }
   senden({ art: 'sprache', rate: 16000, daten: alsBase64(alles.buffer) });
   S.zustand = 'denkt';
+  S.untertitel = ''; zeigeUntertitel();
 }
 
 function alsBase64(puffer) {
@@ -546,6 +585,83 @@ function tonSpielen(m) {
 }
 
 // =====================================================================
+// Mithören: „Hey Sarvis" ohne Tastendruck
+// =====================================================================
+/* Das Mikrofon bleibt offen, und was es hört, geht blockweise zum
+ * Server. Dort läuft dieselbe Erkennung wie früher lokal: erst der
+ * Sprach-Erkenner (billig, auf der CPU), und nur wenn wirklich jemand
+ * redet, Whisper.
+ *
+ * Was hier NICHT passiert, ist die Erkennung selbst. Die Schwellen sind
+ * mühsam vermessen (sarvis 1,00 · jarvis 0,83 · service 0,62), und sie
+ * gehören an EINE Stelle — nicht in jede Oberfläche einzeln, wo sie
+ * dreimal auseinanderlaufen.
+ *
+ * Gebündelt wird auf etwa eine Viertelsekunde. Einzeln zu senden wären
+ * acht Nachrichten je Sekunde, nur für Rahmen-Overhead; länger zu
+ * sammeln würde das Weckwort träge machen. */
+let horchQuelle = null, horchKnoten = null, horcht = false;
+let horchPuffer = [], horchPause = false;
+const HORCH_BUENDEL = 4096;   // ≈ 256 ms bei 16 kHz
+
+async function horchenStart() {
+  if (horcht) return;
+  try {
+    if (!hoerer) hoerer = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    if (hoerer.state === 'suspended') await hoerer.resume();
+    const gewaehlt = localStorage.getItem('sarvis-mikro') || '';
+    const strom = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        ...(gewaehlt ? { deviceId: { exact: gewaehlt } } : {}),
+        echoCancellation: true, noiseSuppression: true, autoGainControl: false,
+      },
+    });
+    horchQuelle = hoerer.createMediaStreamSource(strom);
+    horchKnoten = hoerer.createScriptProcessor(2048, 1, 1);
+    horchPuffer = [];
+    horchKnoten.onaudioprocess = e => {
+      // Während des Push-to-talk und während Sarvis redet: nichts
+      // schicken. Sonst hört er sich selbst zu, und der Rückstand
+      // läuft auf.
+      if (nimmtAuf || horchPause) { horchPuffer = []; return; }
+      horchPuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const summe = horchPuffer.reduce((n, a) => n + a.length, 0);
+      if (summe < HORCH_BUENDEL) return;
+      const alles = new Int16Array(summe);
+      let i = 0;
+      for (const st of horchPuffer)
+        for (let k = 0; k < st.length; k++)
+          alles[i++] = Math.max(-32768, Math.min(32767, st[k] * 32768));
+      horchPuffer = [];
+      senden({ art: 'strom', rate: 16000, daten: alsBase64(alles.buffer) });
+    };
+    horchQuelle.connect(horchKnoten);
+    horchKnoten.connect(hoerer.destination);
+    horcht = true;
+    document.getElementById('mithoeren').classList.add('laeuft');
+    mikrofoneListen();
+  } catch (e) {
+    document.getElementById('horchen').checked = false;
+    lage('Mikrofon abgelehnt', S.verbunden);
+  }
+}
+
+function horchenStop() {
+  if (!horcht) return;
+  horcht = false; horchPuffer = [];
+  try {
+    horchQuelle.disconnect(); horchKnoten.disconnect();
+    horchQuelle.mediaStream.getTracks().forEach(t => t.stop());
+  } catch {}
+  document.getElementById('mithoeren').classList.remove('laeuft');
+}
+
+document.getElementById('horchen').addEventListener('change', e => {
+  localStorage.setItem('sarvis-horchen', e.target.checked ? '1' : '');
+  e.target.checked ? horchenStart() : horchenStop();
+});
+
+// =====================================================================
 // Bedienung
 // =====================================================================
 const reden = document.getElementById('reden');
@@ -592,8 +708,43 @@ document.getElementById('schluessel').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('anmelden').click();
 });
 
+/* Welche Mikrofone es gibt.
+ *
+ * Die Namen bekommt man erst NACH der ersten Erlaubnis -- vorher liefert
+ * der Browser leere Beschriftungen, aus Sorge, dass eine Seite Geräte
+ * zum Wiedererkennen benutzt. Deshalb wird die Liste nach der ersten
+ * Aufnahme noch einmal geholt. */
+async function mikrofoneListen() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let geraete;
+  try { geraete = await navigator.mediaDevices.enumerateDevices(); }
+  catch { return; }
+  const mikros = geraete.filter(g => g.kind === 'audioinput');
+  const feld = document.getElementById('mikro');
+  if (mikros.length < 2) { feld.classList.remove('zeigen'); return; }
+  const gewaehlt = localStorage.getItem('sarvis-mikro') || '';
+  feld.innerHTML = '<option value="">Mikrofon: Standard</option>'
+    + mikros.map((m, i) =>
+        `<option value="${m.deviceId}"${m.deviceId === gewaehlt ? ' selected' : ''}>`
+        + `${sicher(m.label || 'Mikrofon ' + (i + 1))}</option>`).join('');
+  feld.classList.add('zeigen');
+}
+
+document.getElementById('mikro').addEventListener('change', e => {
+  localStorage.setItem('sarvis-mikro', e.target.value);
+  // Den alten Strom fallen lassen, damit die neue Wahl beim nächsten
+  // Drücken wirklich greift.
+  if (hoerer) { try { hoerer.close(); } catch {} hoerer = null; }
+});
+
 // --- Los --------------------------------------------------------------
 messen();
+mikrofoneListen();
+if (localStorage.getItem('sarvis-horchen')) {
+  document.getElementById('horchen').checked = true;
+  // Erst nach der Verbindung -- ohne Draht ginge das Senden ins Leere.
+  setTimeout(() => { if (S.verbunden) horchenStart(); }, 1500);
+}
 requestAnimationFrame(schlag);
 if (schluessel) { document.getElementById('tor').classList.add('weg'); verbinden(); }
 if ('serviceWorker' in navigator)

@@ -75,13 +75,18 @@ class Endpunkt:
     zweite Stelle, an der man sie spaeter aendern muss.
     """
 
-    def __init__(self, zuruf_an=None, sprache_an=None):
-        """zuruf_an(text, geraet)     -- eine getippte Zeile kam an
-        sprache_an(proben, geraet) -- eine Aufnahme kam an
-        Beide werden in der Ereignisschleife von Sarvis gerufen.
+    def __init__(self, zuruf_an=None, sprache_an=None, strom_an=None,
+                 weg_an=None):
+        """zuruf_an(text, geraet)        -- eine getippte Zeile kam an
+        sprache_an(proben, geraet)    -- eine fertige Aufnahme kam an
+        strom_an(daten, rate, geraet) -- ein Stueck Dauerstrom kam an
+        weg_an(geraet)                -- eine Oberflaeche ist gegangen
+        Alle vier werden in der Ereignisschleife von Sarvis gerufen.
         """
         self.zuruf_an = zuruf_an
         self.sprache_an = sprache_an
+        self.strom_an = strom_an
+        self.weg_an = weg_an
         self.traeger: NetzTraeger | None = None
 
     # --- HTTP ------------------------------------------------------------
@@ -120,6 +125,13 @@ class Endpunkt:
         finally:
             sender.cancel()
             self.traeger.weg(oberflaeche)
+            if self.weg_an is not None:
+                # Damit der Weckwort-Strom nicht auf eine Quelle wartet,
+                # die es nicht mehr gibt.
+                try:
+                    await self.weg_an(oberflaeche.name)
+                except Exception:
+                    pass
             log.info("Oberfläche weg: %s", oberflaeche.name)
         return ws
 
@@ -192,6 +204,16 @@ class Endpunkt:
             proben = _proben_aus(m.get("daten"), int(m.get("rate") or 0))
             if proben is not None and self.sprache_an is not None:
                 await self.sprache_an(proben, o.name)
+
+        elif art == "strom":
+            # Der Dauerstrom fuers Weckwort. Bewusst NICHT dekodiert und
+            # nicht geprueft: Es kommen mehrere Buendel je Sekunde, und
+            # was davon Sprache ist, entscheidet der VAD im
+            # Weckwort-Faden. Hier waere jede Rechnung Arbeit in der
+            # Ereignisschleife, die gleichzeitig ein Gespraech traegt.
+            if self.strom_an is not None:
+                await self.strom_an(m.get("daten"),
+                                    int(m.get("rate") or 0), o.name)
 
         elif art == "antwort":
             # Die Antwort auf eine Frage, die WIR gestellt haben.

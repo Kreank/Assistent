@@ -78,17 +78,27 @@ def aus_anzeige() -> dict[str, set[str]]:
     return raus
 
 
+# Module, die am Traeger vorbei senden koennen. Jedes neue gehoert
+# hierher -- sonst meldet die Pruefung eine Art als "steht in der Doku,
+# der Code sendet sie nicht", und man sucht den Fehler in der Doku.
+SENDER = ("netz/klang_netz.py", "netz/horch_netz.py")
+
+
 def aus_ton() -> dict[str, set[str]]:
-    """Was der Netz-Lautsprecher schickt."""
-    quelle = (WURZEL / "sarvis" / "netz" / "klang_netz.py").read_text("utf-8")
+    """Was die Netz-Module direkt ueber den Traeger schicken."""
     raus: dict[str, set[str]] = {}
-    for treffer in re.finditer(r'self\.traeger\.senden\(\{(.*?)\}\)', quelle,
-                               re.S):
-        block = treffer.group(1)
-        art = re.search(r'"art":\s*"(\w+)"', block)
-        if not art:
+    for datei in SENDER:
+        pfad = WURZEL / "sarvis" / datei
+        if not pfad.is_file():
             continue
-        raus[art.group(1)] = set(re.findall(r'"(\w+)":', block))
+        quelle = pfad.read_text("utf-8")
+        for treffer in re.finditer(r'\.traeger\.senden\(\{(.*?)\}\)', quelle,
+                                   re.S):
+            block = treffer.group(1)
+            art = re.search(r'"art":\s*"(\w+)"', block)
+            if not art:
+                continue
+            raus[art.group(1)] = set(re.findall(r'"(\w+)":', block))
     return raus
 
 

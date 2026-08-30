@@ -39,10 +39,12 @@ from .hinweis import zeigen  # noqa: E402
 from .hirn import Hirn  # noqa: E402
 from .mund import Mund, Satzsammler, taste_aussprechen, tageszeit  # noqa: E402
 from .ohren import Ohren  # noqa: E402
-if config.KLANG_QUELLE == "lokal":
-    from .weckwort import Horcher  # noqa: E402
-else:
-    from .weckwort_leer import Horcher  # noqa: E402
+# Seit die Horch-Schleife ihre Bloecke aus einer Quelle bezieht statt
+# direkt von PortAudio, braucht dieses Modul kein Audiogeraet mehr --
+# es laesst sich auch headless importieren. weckwort_leer.py ist damit
+# ueberfluessig geworden; im Netzbetrieb liefert klang.dauerhorch()
+# einen Horch, der auf den Strom einer Oberflaeche wartet.
+from .weckwort import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
 from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
                         zustand_zeile)
@@ -192,8 +194,13 @@ class Sarvis:
         self.durchgang = 0
         self.verschiebt = False      # Anzeige gerade im Verschiebemodus?
         self.antwort = None          # offene Rueckfrage (Future)
+        # Woher die Weckwort-Bloecke kommen. Lokal das Mikrofon, im
+        # Netzbetrieb eine Oberflaeche, die ihres offenhaelt -- meldet
+        # sich keine, wartet er still. Der Traeger wird nachgereicht,
+        # sobald die Ereignisschleife laeuft (siehe _netz_aufbauen).
+        self.horch = klang.dauerhorch()
         self.horcher = Horcher(self.ohren, self._geweckt,
-                               anzeige=self.anzeige)
+                               anzeige=self.anzeige, horch=self.horch)
         # Was in DIESEM Zug schon abgelehnt wurde. Siehe nachfragen().
         self._abgelehnt: dict = {}
         # Wie oft am selben Ort hintereinander ja gesagt wurde.
@@ -987,8 +994,14 @@ class Sarvis:
         self.anzeige = Anzeige(True, traeger=self.traeger)
         self.lautsprecher = NetzLautsprecher(self.traeger,
                                              melden=self.anzeige.pegel)
+        # Der Horch braucht den Traeger, um dem Client zu sagen, wann er
+        # aufhoeren soll -- waehrend Sarvis redet, will niemand den
+        # Strom, und ohne dieses Wort laeuft der Rueckstand auf.
+        self.horch.traeger = self.traeger
         self.endpunkt = server.Endpunkt(zuruf_an=self._zuruf_vom_netz,
-                                        sprache_an=self._sprache_vom_netz)
+                                        sprache_an=self._sprache_vom_netz,
+                                        strom_an=self._strom_vom_netz,
+                                        weg_an=self._oberflaeche_weg)
         await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
         print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
 
@@ -1004,6 +1017,21 @@ class Sarvis:
         self.anzeige.untertitel("du", text)
         self.schlange.put_nowait(("weckwort", text))
 
+    async def _strom_vom_netz(self, daten: str, rate: int, geraet: str) -> None:
+        """Ein Stueck Dauerstrom fuers Weckwort.
+
+        Geht direkt an den Horch und nicht durch die Schleife: Es kommen
+        mehrere Buendel je Sekunde, und jedes davon durch die
+        Gespraechslogik zu schleusen waere Arbeit fuer nichts. Was
+        daraus wird, entscheidet der Weckwort-Faden -- in aller Regel
+        naemlich: nichts.
+        """
+        self.horch.hinein(daten, rate, geraet)
+
+    async def _oberflaeche_weg(self, geraet: str) -> None:
+        """Eine Oberflaeche hat sich verabschiedet."""
+        self.horch.geht(geraet)
+
     async def _sprache_vom_netz(self, proben, geraet: str) -> None:
         """Eine fertige Aufnahme von einer Oberflaeche.
 
@@ -1016,6 +1044,21 @@ class Sarvis:
         sek = len(proben) / config.ABTASTRATE
         if sek < config.MIN_AUFNAHME_SEK:
             return          # versehentlich getippt
+
+        # Wie laut war das ueberhaupt? Ohne diese Zeile sieht man bei
+        # einer stummen Aufnahme nur "Whisper 0.10s" und ein leeres
+        # Ergebnis -- und sucht den Fehler bei Whisper, obwohl er beim
+        # Mikrofon liegt. Der Spitzenwert trennt die drei Faelle
+        # zuverlaessig: 0.000 = gar kein Signal, unter 0.01 = viel zu
+        # leise (Verstaerkung, falsches Geraet), darueber = Whisper
+        # hatte wirklich nichts zu verstehen.
+        import numpy as _np
+        spitze = float(_np.max(_np.abs(proben))) if len(proben) else 0.0
+        rms = float(_np.sqrt(_np.mean(_np.square(proben)))) if len(proben) else 0.0
+        if spitze < 0.01:
+            print(f"  ({geraet}: {sek:.1f}s angekommen, aber praktisch "
+                  f"still -- Spitze {spitze:.4f}, RMS {rms:.4f}. "
+                  f"Mikrofon, Verstaerkung oder falsches Geraet?)")
         self.anzeige.zustand(DENKT)
         t = time.perf_counter()
         try:
@@ -1025,7 +1068,8 @@ class Sarvis:
             self.anzeige.zustand(RUHIG)
             return
         print(f"\n  Du ({geraet}): {gesagt}")
-        print(f"  ---- Aufnahme {sek:.1f}s | Whisper {time.perf_counter() - t:.2f}s")
+        print(f"  ---- Aufnahme {sek:.1f}s | Whisper "
+              f"{time.perf_counter() - t:.2f}s | Spitze {spitze:.3f}")
         if not gesagt.strip():
             self.anzeige.zustand(RUHIG)
             return
