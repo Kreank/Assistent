@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#04080f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/dabei/manifest.json">
+<title>Sarvis</title>
+<style>
+/* Der Sarvis-Look, uebersetzt aus hud.py. Die Zahlen sind nicht neu
+   gewaehlt, sondern uebernommen: Raster 660x548, Mitte bei 330/222,
+   Ring 58, Kranz 176. Was dort QPainter malte, malt hier dasselbe
+   Canvas -- damit es auf dem Handy nicht wie ein anderes Programm
+   aussieht. */
+:root{
+  --grund:#04080f; --saum:rgba(4,8,16,.55);
+  --schrift:#e8f1fd;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--grund);
+  color:var(--schrift);font:14px/1.4 "Segoe UI",system-ui,-apple-system,sans-serif;
+  overscroll-behavior:none}
+body{display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left)}
+
+/* --- Kopfzeile: nur was man wirklich wissen muss ------------------- */
+#kopf{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(232,241,253,.45);flex:0 0 auto}
+#ampel{width:8px;height:8px;border-radius:50%;background:#c0392b;
+  transition:background .3s}
+#ampel.an{background:#7ee2a0}
+#geraet{margin-left:auto;text-transform:none;letter-spacing:0}
+
+/* --- Die Buehne ---------------------------------------------------- */
+#buehne{flex:1 1 auto;position:relative;min-height:0}
+#ring{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* Kacheln liegen ueber der Buehne und sind NICHT anklickbar.
+   In hud.py steht dafuer Qt.WindowTransparentForInput, und der Grund
+   dahinter ist kein technischer: "kein Klick, der an der Rueckfrage
+   vorbeilaeuft". Auf einem Touchscreen ist per Vorgabe alles
+   anklickbar -- diese Sicherung verschwaende also lautlos, wenn man
+   sie nicht ausdruecklich wieder herstellt. Genau das tut die
+   naechste Zeile. */
+#kacheln{position:absolute;top:8px;right:8px;width:min(46vw,290px);
+  display:flex;flex-direction:column;gap:8px;pointer-events:none;
+  max-height:calc(100% - 16px);overflow:hidden}
+.kachel{background:rgba(8,13,20,.90);border:1px solid;border-radius:7px;
+  padding:10px 12px 11px;font-size:11px;animation:auf .22s ease-out}
+.kachel .strich{height:2px;margin:-10px -12px 9px;border-radius:7px 7px 0 0}
+.kachel h4{margin:0 0 7px;font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;opacity:.85;font-weight:600}
+.kachel .gross{font-size:22px;font-weight:600;margin:0 0 6px;
+  letter-spacing:-.01em}
+.kachel .zeile{display:flex;justify-content:space-between;gap:10px;
+  padding:2px 0;position:relative}
+.kachel .zeile .balken{position:absolute;left:-6px;top:1px;bottom:1px;
+  border-radius:2px;opacity:.13}
+.kachel .zeile span:first-child{position:relative;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;opacity:.78}
+.kachel .zeile span:last-child{position:relative;white-space:nowrap}
+.kachel .fuss{margin-top:7px;font-size:9px;letter-spacing:.13em;
+  text-transform:uppercase;opacity:.45}
+@keyframes auf{from{opacity:0;transform:translateY(-6px)}to{opacity:1}}
+
+/* --- Was im Hintergrund arbeitet ----------------------------------- */
+#hintergrund{position:absolute;top:10px;left:14px;width:min(52vw,220px);
+  font-size:10px;pointer-events:none;display:none}
+#hintergrund.an{display:block}
+#hintergrund .kopf{letter-spacing:.16em;text-transform:uppercase;
+  opacity:.95;margin-bottom:3px;font-size:9px}
+#hintergrund .zeile{opacity:.78;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;line-height:1.5}
+
+/* --- Untertitel ----------------------------------------------------- */
+#untertitel{position:absolute;left:8%;right:8%;bottom:8px;text-align:center;
+  font-size:15px;font-weight:600;line-height:1.35;pointer-events:none;
+  text-shadow:-1px 0 var(--saum),1px 0 var(--saum),0 -1px var(--saum),
+              0 1px var(--saum),1px 1px var(--saum)}
+
+/* --- Bedienung ------------------------------------------------------ */
+#bedienung{flex:0 0 auto;padding:10px 14px calc(14px + env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;gap:10px}
+#reden{height:78px;border:none;border-radius:14px;color:#04080f;
+  font:600 15px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.1em;
+  text-transform:uppercase;background:#7ea3c8;touch-action:none;
+  transition:transform .08s,background .15s;user-select:none}
+#reden:disabled{opacity:.35}
+#reden.haelt{transform:scale(.975);background:#00e5ff}
+#tippen{display:flex;gap:8px}
+#tippen input{flex:1;min-width:0;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);border-radius:11px;
+  padding:12px 14px;color:var(--schrift);font-size:15px}
+#tippen input:focus{outline:none;border-color:rgba(0,229,255,.5)}
+#tippen button{background:rgba(255,255,255,.09);border:none;border-radius:11px;
+  color:var(--schrift);padding:0 18px;font-size:15px;font-weight:600}
+
+/* --- Anmeldung ------------------------------------------------------ */
+#tor{position:fixed;inset:0;background:var(--grund);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:16px;
+  padding:24px;z-index:20;text-align:center}
+#tor h1{font-size:15px;letter-spacing:.3em;text-transform:uppercase;
+  font-weight:400;opacity:.6;margin:0}
+#tor input{width:min(100%,340px);background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.14);border-radius:11px;padding:13px 15px;
+  color:var(--schrift);font-size:15px;text-align:center}
+#tor button{background:#00e5ff;color:#04080f;border:none;border-radius:11px;
+  padding:13px 30px;font:600 15px/1 "Segoe UI",system-ui,sans-serif}
+#tor .hinweis{font-size:12px;opacity:.5;max-width:340px;line-height:1.6}
+#tor.weg{display:none}
+
+/* --- Hochkant: untereinander statt nebeneinander -------------------
+   Am Rechner ist rechts neben dem Ring Platz, und dort standen die
+   Kacheln schon in hud.py. Auf einem hochkant gehaltenen Handy gibt es
+   diesen Platz nicht: Gemessen verdeckten sie den halben Werkzeugkranz
+   (Telegram, Websuche, Gedaechtnis waren nicht mehr zu sehen).
+
+   Also teilt sich die Buehne dort: Ring oben, Kacheln darunter, und
+   wenn es mehr werden, als hineinpassen, scrollt der Kachelbereich --
+   der Ring bleibt stehen. Er ist das, worauf man schaut. */
+@media (max-width:700px){
+  #buehne{display:flex;flex-direction:column}
+  #ring{position:relative;flex:1 1 auto;min-height:0}
+  #kacheln{position:relative;top:auto;right:auto;width:auto;
+    flex:0 1 auto;max-height:44%;overflow-y:auto;padding:0 12px 4px;
+    /* Wieder anklickbar wird hier nichts: pointer-events bleibt none,
+       nur Scrollen ist erlaubt. Siehe die Begruendung oben. */
+    pointer-events:auto;touch-action:pan-y}
+  #kacheln .kachel{pointer-events:none}
+  #untertitel{position:relative;bottom:auto;flex:0 0 auto;
+    padding:6px 8% 2px}
+}
+</style>
+</head>
+<body>
+
+<div id="tor">
+  <h1>Sarvis</h1>
+  <input id="schluessel" type="password" placeholder="Geräteschlüssel" autocomplete="current-password">
+  <button id="anmelden">Verbinden</button>
+  <p class="hinweis" id="torhinweis">Der Schlüssel wird nur auf diesem Gerät
+    gespeichert und geht nie über die Adresszeile.</p>
+</div>
+
+<div id="kopf">
+  <span id="ampel"></span><span id="lage">nicht verbunden</span>
+  <span id="geraet"></span>
+</div>
+
+<div id="buehne">
+  <canvas id="ring"></canvas>
+  <div id="hintergrund"><div class="kopf"></div></div>
+  <div id="kacheln"></div>
+  <div id="untertitel"></div>
+</div>
+
+<div id="bedienung">
+  <button id="reden" disabled>Halten zum Reden</button>
+  <form id="tippen">
+    <input id="zeile" placeholder="… oder tippen" autocomplete="off"
+           enterkeyhint="send">
+    <button type="submit">Los</button>
+  </form>
+</div>
+
+<script src="/dabei/sarvis.js"></script>
+</body>
+</html>

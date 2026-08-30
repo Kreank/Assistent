@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- Derselbe Ring wie in der Anzeige, auf Symbolgroesse gebracht. -->
+  <rect width="192" height="192" rx="42" fill="#04080f"/>
+  <g fill="none" stroke="#00e5ff">
+    <circle cx="96" cy="96" r="34" stroke-width="4" opacity=".9"/>
+    <circle cx="96" cy="96" r="52" stroke-width="3" opacity=".45"
+            stroke-dasharray="52 30" stroke-linecap="round"/>
+    <circle cx="96" cy="96" r="66" stroke-width="2.5" opacity=".28"
+            stroke-dasharray="26 60" stroke-linecap="round"/>
+  </g>
+  <circle cx="96" cy="96" r="11" fill="#00e5ff" opacity=".35"/>
+  <circle cx="96" cy="96" r="5" fill="#ebf5ff"/>
+</svg>

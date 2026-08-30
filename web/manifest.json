@@ -1,0 +1,14 @@
+{
+  "name": "Sarvis",
+  "short_name": "Sarvis",
+  "description": "Persönlicher Sprachassistent",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#04080f",
+  "theme_color": "#04080f",
+  "icons": [
+    { "src": "/dabei/symbol.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
