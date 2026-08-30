@@ -119,6 +119,27 @@ from . import config
 AUSKLANG = 0.30
 
 
+def gong(rate: int = 22050) -> tuple[np.ndarray, int]:
+    """Kurzer Zweiklang vor einer Meldung.
+
+    Selbst erzeugt statt als Datei mitgeliefert -- eine Sinuswelle mit
+    Huellkurve ist weniger Code als das Einlesen einer WAV. Zweck: Ein
+    Timer, den man nur hoert, wenn man ohnehin zuhoert, ist kein Timer.
+    """
+    stuecke = []
+    for hoehe, dauer in ((880.0, 0.13), (1174.7, 0.34)):   # a'' und d'''
+        n = int(rate * dauer)
+        t = np.arange(n, dtype="float32") / rate
+        welle = np.sin(2 * np.pi * hoehe * t, dtype="float32")
+        welle += 0.3 * np.sin(2 * np.pi * hoehe * 2 * t, dtype="float32")
+        # Weicher Einsatz und Ausklang, sonst knackt es an den Raendern
+        anstieg = np.minimum(1.0, np.arange(n) / (rate * 0.012))
+        abfall = np.exp(-3.2 * t / dauer)
+        stuecke.append((welle * anstieg * abfall * 0.32).astype("float32"))
+    pause = np.zeros(int(rate * 0.045), dtype="float32")
+    return np.concatenate([stuecke[0], pause, stuecke[1]]), rate
+
+
 @runtime_checkable
 class Aufnehmer(Protocol):
     """Push-to-talk: start() sammelt, stop() liefert."""

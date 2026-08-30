@@ -287,6 +287,14 @@ HOTWORDS = "Sarvis"
 # anderes zu tun.
 KLANG_QUELLE = "lokal"
 
+# Wo der Endpunkt lauscht, wenn KLANG_QUELLE = "netz".
+#
+# Nur auf 127.0.0.1 -- nach aussen fuehrt ausschliesslich Caddy, und das
+# bringt HTTPS mit. Ueber diese Leitung geht ein Geraeteschluessel, der
+# Sarvis alles erlaubt: Mails, Buchungen, Arbeit an den Projekten. Ein
+# zweiter Weg hinein waere einer ohne Zertifikat.
+NETZ_HAFEN = 8900
+
 # --- Aufnahme -------------------------------------------------------------
 ABTASTRATE = 16000  # was Whisper erwartet
 MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen

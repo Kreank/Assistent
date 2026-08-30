@@ -1,0 +1,67 @@
+# Was NICHT mit ins Image wandert.
+#
+# Der Quelltext kommt zweimal an denselben Ort: einmal beim Bauen
+# (COPY, damit das Image auch allein lauffaehig ist) und einmal beim
+# Starten (bind mount aus /srv/storage/projects/sarvis, damit eine
+# Aenderung ohne Neubau wirkt). Was hier steht, fehlt in der ersten
+# Fassung -- die zweite bringt es ohnehin mit.
+
+# Git. Das Repository liegt zur Laufzeit als Mount an, mit vollem
+# .git -- der Hintergrund-Arbeiter braucht es dort, nicht im Image.
+.git
+.gitignore
+
+# Uebersetztes Python. Die .pyc im Baum stammen von CPython 3.14 vom
+# Dev-PC; im Image laeuft 3.12 und wuerde sie ohnehin verwerfen.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Windows-Reste. Auf dem Server ruft die niemand.
+*.bat
+requirements-windows.txt
+
+# Was Sarvis erzeugt oder mitbringt -- gehoert nach /srv/data/sarvis,
+# nicht ins Image (siehe orte.py: WURZEL gegen DATEN).
+ablage/
+aufnahmen/
+anhaenge/
+browser/
+stimmen/
+telegram/
+*.session
+*.session-journal
+anzeige.json
+anzeige.log
+auftraege.json
+fortschritt.jsonl
+timer.json
+
+# Zugaenge. Nichts davon darf in eine Image-Schicht.
+.env
+*.token
+*.secret
+client_secret*.json
+google_token.json
+google_zugang.json
+Telegram.txt
+google.txt
+finanz.tech-artist.de.txt
+
+# Persoenliches Gedaechtnis. Die Vorlage (kern.VORLAGE.md) bleibt drin,
+# der ausgefuellte Inhalt liegt unter DATEN und faellt hier heraus --
+# er ist ohnehin durch .gitignore gedeckt, aber ein Image-Bau liest
+# das Arbeitsverzeichnis, nicht das Git.
+gedaechtnis/kern.md
+gedaechtnis/gemerkt.md
+gedaechtnis/beobachtet.md
+gedaechtnis/notizen/
+gedaechtnis/personen/*.md
+!gedaechtnis/personen/BEISPIEL.md
+
+# Container-Beiwerk selbst.
+Dockerfile
+docker-compose.yml
+.dockerignore

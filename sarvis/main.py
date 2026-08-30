@@ -19,17 +19,30 @@ for strom in (sys.stdout, sys.stderr):
     except (AttributeError, OSError):
         pass
 
-from pynput import keyboard  # noqa: E402
-
-from . import config, rueckfrage, schutz  # noqa: E402
+from . import config, klang, rueckfrage, schutz  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
-from .audio import Aufnehmer, Lautsprecher, gong  # noqa: E402
+from .klang import gong  # noqa: E402
+
+# pynput haengt einen systemweiten Tastaturhaken ein und braucht dafuer
+# X11 oder uinput. Auf einem Server ohne Bildschirm gibt es beides
+# nicht, und der IMPORT allein scheitert schon -- Sarvis kaeme dort gar
+# nicht bis zur ersten Zeile.
+#
+# Im Netzbetrieb wird die Taste auch nicht gebraucht: Der Ausloeser
+# liegt auf dem Geraet, an dem jemand sitzt, nicht auf dem Server.
+# Dasselbe gilt fuer den Weckwort-Horcher, der an einem Mikrofon haengt.
+keyboard = None
+if config.KLANG_QUELLE == "lokal":
+    from pynput import keyboard  # noqa: E402,F811
 from .freigabe import Freigaben, ort as freigabe_ort  # noqa: E402
 from .hinweis import zeigen  # noqa: E402
 from .hirn import Hirn  # noqa: E402
 from .mund import Mund, Satzsammler, taste_aussprechen, tageszeit  # noqa: E402
 from .ohren import Ohren  # noqa: E402
-from .weckwort import Horcher  # noqa: E402
+if config.KLANG_QUELLE == "lokal":
+    from .weckwort import Horcher  # noqa: E402
+else:
+    from .weckwort_leer import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
 from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
                         zustand_zeile)
@@ -40,6 +53,18 @@ from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
 # Code. Ein Timer, der nie klingelt, weil das Gespraech nicht aufhoert,
 # waere schlimmer als einer, der dazwischenredet.
 MELDUNG_GEDULD_SEK = 120.0
+
+
+class _Nichts:
+    """Steht da, wo im Netzbetrieb ein Tastenlauscher stuende.
+
+    Billiger als ein "if" an jeder der vier Stellen, an denen die
+    Schleife ihn startet und stoppt -- und vor allem sieht die Schleife
+    dann in beiden Betriebsarten gleich aus.
+    """
+
+    def start(self): pass
+    def stop(self): pass
 
 
 def _fehlt(pfad, rat: str) -> str:
@@ -59,6 +84,13 @@ def _taste_aufloesen(name: str):
 def _anzeige_starten() -> subprocess.Popen | None:
     """Overlay als eigenen Prozess starten -- stirbt es, laeuft Sarvis weiter."""
     if not config.ANZEIGE:
+        return None
+    if config.KLANG_QUELLE == "netz":
+        # Das Overlay ist ein Qt-Fenster. Auf einem Server gibt es keinen
+        # Bildschirm, auf den es gehoerte, und PySide6 ist dort gar nicht
+        # installiert -- der Unterprozess wuerde beim Import sterben und
+        # eine Fehlerzeile hinterlassen, die nichts bedeutet.
+        # Die Anzeige laeuft im Netzbetrieb im Browser.
         return None
     protokoll = config.WURZEL / "anzeige.log"
     try:
@@ -92,10 +124,30 @@ def _anzeige_starten() -> subprocess.Popen | None:
 
 class Sarvis:
     def __init__(self):
-        self.taste = _taste_aufloesen(config.TASTE)
-        self.anzeige = Anzeige(config.ANZEIGE)
-        self.aufnehmer = Aufnehmer(melden=self.anzeige.pegel)
-        self.lautsprecher = Lautsprecher(melden=self.anzeige.pegel)
+        # Ohne Tastaturhaken gibt es auch keine Taste aufzuloesen.
+        self.taste = (_taste_aufloesen(config.TASTE)
+                      if config.KLANG_QUELLE == "lokal" else None)
+        self.im_netz = config.KLANG_QUELLE == "netz"
+
+        # Im Netzbetrieb wird der Anzeige-Traeger erst in laufen()
+        # gesetzt: Er braucht die Ereignisschleife, und die laeuft hier
+        # noch nicht.
+        self.anzeige = Anzeige(config.ANZEIGE and not self.im_netz)
+        self.endpunkt = None
+        self.traeger = None
+
+        # Ueber klang.py statt direkt aus audio.py: Dort steht der
+        # Vertrag, und dort tritt die Netzfassung daneben, ohne dass
+        # diese Schleife noch einmal angefasst werden muss.
+        #
+        # Aufnehmer gibt es im Netzbetrieb keinen -- Push-to-talk ist
+        # dort umgedreht: Das GERAET entscheidet, wann es aufnimmt, und
+        # schickt eine fertige Aufnahme. Das spart die Rundreise vor dem
+        # ersten Wort, in der sonst der Anfang verlorenginge.
+        self.aufnehmer = (None if self.im_netz
+                          else klang.aufnehmer(melden=self.anzeige.pegel))
+        self.lautsprecher = (None if self.im_netz
+                             else klang.lautsprecher(melden=self.anzeige.pegel))
         self.ohren = Ohren()
         self.mund = Mund()
         (self.werkzeugserver, self.werkzeugnamen, self.wecker,
@@ -920,8 +972,70 @@ class Sarvis:
         self.anzeige.untertitel("du", gesagt)
         await self._antworten(gesagt, t_los)
 
+    async def _netz_aufbauen(self) -> None:
+        """Anzeige und Stimme ans Netz haengen, Endpunkt hochfahren.
+
+        Erst hier und nicht im Konstruktor: Der Traeger braucht die
+        laufende Ereignisschleife, um aus fremden Faeden einlegen zu
+        koennen (call_soon_threadsafe).
+        """
+        from .netz import server
+        from .netz.klang_netz import NetzLautsprecher
+        from .netz.traeger import NetzTraeger
+
+        self.traeger = NetzTraeger(self.schleife)
+        self.anzeige = Anzeige(True, traeger=self.traeger)
+        self.lautsprecher = NetzLautsprecher(self.traeger,
+                                             melden=self.anzeige.pegel)
+        self.endpunkt = server.Endpunkt(zuruf_an=self._zuruf_vom_netz,
+                                        sprache_an=self._sprache_vom_netz)
+        await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
+        print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
+
+    async def _zuruf_vom_netz(self, text: str, geraet: str) -> None:
+        """Eine getippte Zeile von einer Oberflaeche.
+
+        Geht denselben Weg wie ein Weckwort-Zuruf: Der Text steht schon
+        fest, es ist nichts aufzunehmen. Damit gilt auch dieselbe Regel
+        fuers Reinreden -- wer tippt, waehrend Sarvis redet, unterbricht
+        ihn, so wie wenn er dazwischenspraeche.
+        """
+        print(f"\n  Du ({geraet}): {text}")
+        self.anzeige.untertitel("du", text)
+        self.schlange.put_nowait(("weckwort", text))
+
+    async def _sprache_vom_netz(self, proben, geraet: str) -> None:
+        """Eine fertige Aufnahme von einer Oberflaeche.
+
+        Whisper laeuft hier und nicht in der Schleife: Er braucht auf der
+        Karte rund 0,2 Sekunden, und die gehoeren in einen Faden. Was
+        dabei herauskommt, geht denselben Weg wie ein Weckwort.
+        """
+        if proben is None or not len(proben):
+            return
+        sek = len(proben) / config.ABTASTRATE
+        if sek < config.MIN_AUFNAHME_SEK:
+            return          # versehentlich getippt
+        self.anzeige.zustand(DENKT)
+        t = time.perf_counter()
+        try:
+            gesagt = await asyncio.to_thread(self.ohren.hoeren, proben)
+        except Exception as e:
+            print(f"  (Whisper: {type(e).__name__}: {e})")
+            self.anzeige.zustand(RUHIG)
+            return
+        print(f"\n  Du ({geraet}): {gesagt}")
+        print(f"  ---- Aufnahme {sek:.1f}s | Whisper {time.perf_counter() - t:.2f}s")
+        if not gesagt.strip():
+            self.anzeige.zustand(RUHIG)
+            return
+        self.anzeige.untertitel("du", gesagt)
+        self.schlange.put_nowait(("weckwort", gesagt))
+
     async def laufen(self) -> None:
         self.schleife = asyncio.get_running_loop()
+        if self.im_netz:
+            await self._netz_aufbauen()
         print("  Claude verbindet ...")
         t = time.perf_counter()
         await self.hirn.start()
@@ -967,7 +1081,8 @@ class Sarvis:
         for meldung in await self.wecker.wiederherstellen():
             await self.von_selbst_sagen(meldung)
 
-        lauscher = keyboard.Listener(on_press=self._runter, on_release=self._hoch)
+        lauscher = _Nichts() if self.im_netz else keyboard.Listener(
+            on_press=self._runter, on_release=self._hoch)
         lauscher.start()
 
         # Erste Begruessung im Voraus erzeugen, solange noch nichts los ist.
@@ -979,7 +1094,7 @@ class Sarvis:
         # Anzeige abschaltet, verliert sonst die einzige Moeglichkeit, Sarvis
         # mitten im Satz zu stoppen -- und merkt es erst, wenn er sie braucht.
         schalter = None
-        tasten = {config.TASTE_STOPP: self._stopp_taste}
+        tasten = {config.TASTE_STOPP: self._stopp_taste} if not self.im_netz else {}
         if config.ANZEIGE:
             tasten[config.TASTE_VERSCHIEBEN] = self._verschieben_umschalten
         try:

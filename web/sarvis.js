@@ -414,6 +414,7 @@ function empfangen(m) {
     case 'kachel':     kachelZeigen(m); break;
     case 'kachel_weg': kachelWeg(m.name); break;
     case 'ton':        tonSpielen(m); break;
+    case 'ton_stopp':  tonStopp(m.runde); break;
   }
 }
 
@@ -462,6 +463,11 @@ async function aufnahmeStart() {
       S.pegel = Math.min(1, Math.pow(Math.sqrt(summe / d.length) / 0.14, 0.6));
     };
     quelle.connect(knoten); knoten.connect(hoerer.destination);
+    // Wer zu reden anfängt, während Sarvis noch spricht, unterbricht
+    // ihn -- und zwar SOFORT hier, ohne auf den Server zu warten. Der
+    // schickt sein ton_stopp gleich hinterher; bis das ankommt, hätte
+    // man sich sonst selbst zugehört.
+    tonStopp(null);
     nimmtAuf = true;
     S.zustand = 'hoert';
   } catch (e) {
@@ -496,6 +502,27 @@ function alsBase64(puffer) {
 }
 
 let tonZeit = 0, tonRunde = -1;
+const laufendeToene = new Set();
+
+/* Sofort still -- der Gegenpart zum Abbruch auf dem Server.
+ *
+ * Reinreden ist bei Sarvis ausdrücklich erlaubt ("Wer einen Assistenten
+ * nicht unterbrechen kann, wartet jedes Mal eine falsche Antwort zu Ende
+ * ab"). Lokal genügte dafür ein sd.stop(): Wenn es zurückkehrt, ist es
+ * still. Über Netz gibt es diese Garantie nicht -- der Server kann nur
+ * ein Kommando absetzen, und was hier schon im AudioContext eingeplant
+ * ist, läuft ohne dieses Zutun weiter.
+ *
+ * Deshalb zweierlei: alle eingeplanten Quellen abbrechen UND die Runde
+ * hochsetzen, damit ein Satz, der beim Abbruch schon unterwegs war,
+ * beim Eintreffen verworfen wird. */
+function tonStopp(runde) {
+  if (runde != null) tonRunde = Math.max(tonRunde, runde);
+  laufendeToene.forEach(q => { try { q.stop(); } catch {} });
+  laufendeToene.clear();
+  tonZeit = hoerer ? hoerer.currentTime : 0;
+}
+
 function tonSpielen(m) {
   if (!hoerer) hoerer = new (window.AudioContext || window.webkitAudioContext)();
   // Was aus einer alten Runde stammt, ist ungültig -- der Abbruch kann
@@ -514,6 +541,8 @@ function tonSpielen(m) {
   // Nahtlos anhängen, damit zwischen zwei Sätzen keine Lücke entsteht.
   tonZeit = Math.max(tonZeit, hoerer.currentTime);
   q.start(tonZeit); tonZeit += puffer.duration;
+  laufendeToene.add(q);
+  q.onended = () => laufendeToene.delete(q);
 }
 
 // =====================================================================
