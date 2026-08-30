@@ -196,6 +196,39 @@ body{display:flex;flex-direction:column;
   text-shadow:-1px 0 var(--saum),1px 0 var(--saum),0 -1px var(--saum),
               0 1px var(--saum),1px 1px var(--saum)}
 
+/* --- Der Blick in Sarvis' eigenen Browser ---------------------------
+   Er hat einen auf dem Server, unsichtbar. Wenn er dort etwas liest
+   oder ausfüllt, kann er ein Bild schicken -- "zeig mal, was du
+   machst".
+
+   Es legt sich ÜBER die Bühne, nicht daneben: Ein Browserfenster in
+   eine 264 Punkte breite Kachel zu quetschen ergäbe einen Streifen, auf
+   dem nichts zu erkennen ist. Und es geht nicht von selbst weg, denn
+   man sieht es sich an; das unterscheidet es von einer Kachel, die im
+   Vorbeigehen gelesen wird. */
+#blick{position:absolute;inset:8px;z-index:8;display:flex;
+  flex-direction:column;background:rgba(4,8,16,.94);border-radius:10px;
+  border:1px solid rgba(0,229,255,.28);overflow:hidden;
+  animation:auf .18s ease-out}
+#blick[hidden]{display:none}
+#blickbild{flex:1 1 auto;min-height:0;width:100%;object-fit:contain;
+  object-position:top;background:#0b1017}
+/* Eigener, DECKENDER Grund. Der Kasten ist leicht durchscheinend
+   (damit man sieht, dass er über etwas liegt), aber hinter der Schrift
+   darf nichts durchscheinen -- gemessen las man den Untertitel quer
+   durch die Beschriftung hindurch. */
+#blick .leiste{flex:0 0 auto;display:flex;align-items:center;gap:10px;
+  padding:8px 10px;border-top:1px solid rgba(255,255,255,.07);
+  background:#070c14}
+#blick .was{min-width:0;flex:1 1 auto}
+#blick .titel{font-size:12px;font-weight:600;color:rgba(232,241,253,.92);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#blick .ort{font-size:10px;color:rgba(232,241,253,.45);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#blickzu{flex:0 0 auto;background:rgba(255,255,255,.09);border:none;
+  border-radius:8px;color:var(--schrift);padding:8px 14px;font-size:12px;
+  font-weight:600}
+
 /* --- Bedienung ------------------------------------------------------ */
 #bedienung{flex:0 0 auto;padding:10px 14px calc(14px + env(safe-area-inset-bottom));
   display:flex;flex-direction:column;gap:10px}
@@ -280,6 +313,14 @@ body{display:flex;flex-direction:column;
      Ueberschrift. */
   #seite{position:relative;left:auto;bottom:auto;max-width:none;
     margin:0 12px 6px;flex:0 0 auto}
+
+  /* Der Blick nimmt hochkant so viel Höhe, wie das Bild braucht --
+     nicht die ganze Bühne. Ein Querformat-Screenshot in einem hohen
+     schmalen Kasten hinterlässt sonst zwei Drittel Schwarz, und das
+     sieht nach Fehler aus statt nach Bild. */
+  #blick{position:relative;inset:auto;margin:0 8px 6px;flex:0 0 auto;
+    max-height:64%}
+  #blickbild{flex:0 1 auto;max-height:48vh;object-position:center}
 }
 </style>
 </head>
@@ -305,6 +346,13 @@ body{display:flex;flex-direction:column;
   <div id="seite">
     <div class="was"><div class="ort"></div><div class="dazu"></div></div>
     <a class="auf" target="_blank" rel="noopener noreferrer">Öffnen</a>
+  </div>
+  <div id="blick" hidden>
+    <img id="blickbild" alt="">
+    <div class="leiste">
+      <div class="was"><div class="titel"></div><div class="ort"></div></div>
+      <button id="blickzu" type="button">Schließen</button>
+    </div>
   </div>
   <div id="untertitel"></div>
 </div>

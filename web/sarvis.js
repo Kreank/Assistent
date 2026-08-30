@@ -1639,6 +1639,7 @@ function empfangen(m) {
     case 'kachel_weg': kachelWeg(m.name); break;
     // Nicht oeffnen, sondern anbieten -- siehe seiteZeigen().
     case 'browser':    seiteZeigen(m.adresse); break;
+    case 'web_bild':   blickZeigen(m); break;
     case 'browser_zu': seiteZu(); break;
     case 'ton':        tonSpielen(m); break;
     case 'ton_stopp':  tonStopp(m.runde); break;
@@ -1880,6 +1881,34 @@ function horchenStop() {
 document.getElementById('horchen').addEventListener('change', e => {
   localStorage.setItem('sarvis-horchen', e.target.checked ? '1' : '');
   e.target.checked ? horchenStart() : horchenStop();
+});
+
+/* Ein Blick in Sarvis' Browser.
+ *
+ * Bewusst ohne Zeitablauf: Eine Kachel liest man im Vorbeigehen, ein
+ * Bild sieht man sich an. Was von selbst verschwindet, während man
+ * darauf schaut, ist ärgerlicher als eines, das man wegtippen muss. */
+function blickZeigen(m) {
+  const kasten = document.getElementById('blick');
+  const bild = document.getElementById('blickbild');
+  if (!m.daten) return;
+  bild.src = 'data:image/webp;base64,' + m.daten;
+  bild.alt = m.titel || m.adresse || 'Seite';
+  kasten.querySelector('.titel').textContent = m.titel || '(ohne Titel)';
+  // Nur der Wirt, nicht die ganze Adresse: Ein Query-String mit
+  // sechzig Zeichen sagt weniger als der Name der Seite.
+  let ort = m.adresse || '';
+  try { ort = new URL(ort).host + new URL(ort).pathname; } catch {}
+  kasten.querySelector('.ort').textContent = ort.slice(0, 90);
+  kasten.hidden = false;
+}
+
+document.getElementById('blickzu').addEventListener('click', () => {
+  const kasten = document.getElementById('blick');
+  kasten.hidden = true;
+  // Das Bild wirklich freigeben. Ein 1280er WebP als data-URI hängt
+  // sonst im Speicher, und bei jedem Blick kommt eines dazu.
+  document.getElementById('blickbild').removeAttribute('src');
 });
 
 // =====================================================================
