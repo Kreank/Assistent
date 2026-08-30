@@ -1,0 +1,203 @@
+# Zugriffs-Logging fuer alle Sites (2026-07-21).
+# Hintergrund: Bei den sporadischen Domain-Ausfaellen war nicht nachweisbar, ob
+# Anfragen ausblieben — Caddy protokollierte Zugriffe gar nicht. Ein Ausfall
+# durch falsche DNS-Antworten sieht hier nicht wie ein Fehler aus, sondern wie
+# Stille: Der Traffic landet bei der falschen IP und kommt nie an.
+# Eine gemeinsame Datei, das JSON enthaelt je Zeile den Host zum Auseinandersortieren.
+(zugriffslog) {
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 20mb
+            roll_keep 10
+            roll_keep_for 720h
+        }
+        format json
+    }
+}
+
+liege.tech-artist.de {
+      import zugriffslog
+      encode gzip
+      reverse_proxy 127.0.0.1:8000
+  }
+
+n8n.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:5678
+}
+
+universe.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:4200
+}
+
+ki.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    # Auth (X-Api-Key / Bearer) prueft der Dienst selbst auf allen Endpunkten.
+    # Caddy terminiert HTTPS und erlaubt lange Recherche-Anfragen (App wartet bis 180s).
+    reverse_proxy 127.0.0.1:8090 {
+        transport http {
+            read_timeout 900s
+            write_timeout 900s
+        }
+    }
+}
+portfolio.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    root * /srv/storage/projects/portfolio/site
+    file_server
+}
+
+# CRM-Cockpit offline genommen (2026-07-14) — wird durch Saschas eigenes CRM (MCN) abgeloest.
+# Alter Block liegt in /etc/caddy/Caddyfile.crm-cockpit.bak; Domain bleibt hier, damit das
+# TLS-Zertifikat weiterlaeuft und Besucher eine klare Meldung statt eines TLS-Fehlers sehen.
+crm.tech-artist.de {
+    import zugriffslog
+    respond "CRM-Cockpit ist offline." 503
+}
+
+termine.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8200
+}
+
+# MCN — Saschas eigenes KI-First-CRM (Stack: /srv/storage/projects/mcn/deploy,
+# MCN-nginx lauscht lokal auf 8300; TLS terminiert Caddy, nginx bekommt
+# X-Forwarded-Proto durchgereicht — MCN_TRUST_FORWARDED_PROTO=1).
+mitra.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8300 {
+        transport http {
+            read_timeout 600s
+            write_timeout 600s
+        }
+    }
+}
+
+# Badplaner — Badezimmer-Konfigurator (Demo fuer Praesentation, statischer Angular-Build)
+# Quelle: /srv/storage/projects/badplaner, Build: npx ng build
+bad.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    root * /srv/storage/projects/badplaner/dist/traumbad-planer/browser
+    try_files {path} /index.html
+    file_server
+}
+# Organisation — objektbezogene Projektablage
+# Stack: /srv/storage/projects/organisation (API lauscht lokal auf 8500)
+# Uploads koennen gross sein (Videos) -> grosszuegige Zeitlimits.
+organisation.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8500 {
+        transport http {
+            read_timeout 900s
+            write_timeout 900s
+        }
+    }
+}
+# scan — Großhändler-Belege ins HERO-Projekt
+# Stack: /srv/storage/projects/scan (API lauscht lokal auf 8600)
+# OCR auf der GPU kann pro Beleg mehrere Minuten dauern (Container-Start plus
+# Modell-Ladezeit) -> großzügige Zeitlimits, sonst bricht Caddy die Anfrage ab.
+scan.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8600 {
+        transport http {
+            read_timeout 900s
+            write_timeout 900s
+        }
+    }
+}
+# companion — HERO-Zusatz (globale Suche, Vorgaenge, Monitoring)
+# Stack: /srv/storage/projects/companion — API lauscht lokal auf 127.0.0.1:8700
+#
+# Einbau:
+#   1. Block unten in /etc/caddy/Caddyfile eintragen (vorher Sicherung anlegen)
+#   2. sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   3. sudo systemctl reload caddy
+#
+# DNS: compain.tech-artist.de loest bereits auf die Server-IP auf
+# (geprueft 2026-08-12). Caddy holt das Zertifikat beim ersten Aufruf selbst.
+
+compain.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8700 {
+        transport http {
+            read_timeout 900s
+            write_timeout 900s
+        }
+    }
+}
+
+# Finanzdashboard — privates Konto-/Ausgaben-Dashboard
+# Stack: /srv/storage/projects/finanzdashboard
+#   backend         FastAPI, nur im Docker-Netz (backend:8000)
+#   frontend-react  React hinter nginx, lauscht lokal auf 127.0.0.1:8800
+#                   und reicht /api an das Backend weiter
+#
+# Die Anmeldung prueft der Dienst selbst (app/auth.py): Sitzungs-Cookie
+# fuer den Browser, Kopfzeile X-Api-Key fuer Saschas KI-Assistenten.
+# Caddy terminiert nur HTTPS -- das Cookie ist `Secure`, ohne das
+# Zertifikat hier gaebe es keine Anmeldung.
+#
+# PDF-Kontoauszuege koennen gross sein und der Import dauert -> Zeitlimits
+# wie bei scan/organisation.
+finanz.tech-artist.de {
+    import zugriffslog
+    encode gzip
+    reverse_proxy 127.0.0.1:8800 {
+        transport http {
+            read_timeout 900s
+            write_timeout 900s
+        }
+    }
+}
+
+# --------------------------------------------------------------------
+# sarvis.tech-artist.de  ->  Sarvis, der persoenliche Sprachassistent
+#
+# Ein Prozess auf 8900, der zweierlei ausliefert:
+#   GET  /        die Bedienoberflaeche (eine Seite, PWA-faehig)
+#   WS   /draht   den Ereignisstrom in beide Richtungen
+#
+# WebSockets brauchen hier keinen eigenen Block -- Caddy erkennt das
+# Upgrade selbst und reicht es durch. Was es braucht, sind LANGE
+# Zeitlimits: Der Draht steht offen, solange eine Oberflaeche verbunden
+# ist, also stundenlang. Mit den ueblichen 60 Sekunden risse er
+# staendig ab, und die Oberflaeche haenge in einer Endlosschleife aus
+# Verbinden und Verlieren.
+#
+# Der Dienst lauscht ausschliesslich auf 127.0.0.1. Nach aussen fuehrt
+# nur dieser Block -- ein zweiter Weg waere einer ohne Zertifikat, und
+# ueber diese Leitung geht ein Geraeteschluessel, der Sarvis alles
+# erlaubt: Mails, Buchungen, Arbeit an den Projekten.
+#
+# request_body: Sprache kommt als base64-PCM ueber den Draht. Dreissig
+# Sekunden bei 16 kHz sind rund 1,3 MB; 8 MB lassen Luft, ohne dass
+# jemand den Speicher vollaufen lassen kann.
+sarvis.tech-artist.de {
+    import zugriffslog
+    encode gzip
+
+    request_body {
+        max_size 8MB
+    }
+
+    reverse_proxy 127.0.0.1:8900 {
+        transport http {
+            read_timeout 86400s
+            write_timeout 86400s
+        }
+        # Damit der Dienst weiss, ueber welchen Namen er erreicht wurde.
+        header_up X-Real-IP {remote_host}
+    }
+}
