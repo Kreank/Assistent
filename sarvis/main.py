@@ -35,6 +35,13 @@ from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
                         zustand_zeile)
 
 
+# Wie lange eine Meldung auf Ruhe wartet, bevor sie trotzdem gesagt
+# wird. Vorher standen hier 120 Durchlaeufe zu einer Sekunde, mitten im
+# Code. Ein Timer, der nie klingelt, weil das Gespraech nicht aufhoert,
+# waere schlimmer als einer, der dazwischenredet.
+MELDUNG_GEDULD_SEK = 120.0
+
+
 def _taste_aufloesen(name: str):
     name = name.strip().lower()
     if hasattr(keyboard.Key, name):
@@ -107,6 +114,9 @@ class Sarvis:
                              if z),
                          freigaben=self.freigaben)
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
+        # Was Sarvis von sich aus sagen will: Timer, fertige Auftraege.
+        # Eine Schlange und EIN Sprecher -- siehe von_selbst_sagen().
+        self.meldungen: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
         self.schleife: asyncio.AbstractEventLoop | None = None
         # Bis wann die Kontextwache stillhaelt (time.monotonic).
         self._verdichtet_bis = 0.0
@@ -184,20 +194,59 @@ class Sarvis:
     # --- Ablauf ------------------------------------------------------------
 
     async def von_selbst_sagen(self, text: str, mit_gong: bool = True) -> None:
-        """Reden, ohne gefragt worden zu sein.
+        """Reden, ohne gefragt worden zu sein -- EINREIHEN, nicht sprechen.
 
         Bis Stufe 1 konnte Sarvis nur antworten. Ein Timer, der ablaeuft,
-        muss sich aber selbst melden -- und derselbe Weg traegt spaeter
-        laengere Auftraege ("...und such mir waehrenddessen die Nachrichten").
+        muss sich aber selbst melden -- und derselbe Weg traegt laengere
+        Auftraege ("...und such mir waehrenddessen die Nachrichten").
 
-        Wartet ab, wenn gerade gesprochen oder zugehoert wird: dazwischen-
-        zureden ist schlimmer als ein paar Sekunden spaeter dran zu sein.
+        Frueher stand hier die Hoeflichkeitsschleife selbst: bis zu 120
+        Sekunden warten, ob gerade geredet wird. Das hatte zwei Fehler,
+        und beide fallen im Serverbetrieb staerker ins Gewicht.
+
+        ERSTENS blockierte es den Aufrufer. auftrag._melden() steht in
+        genau diesem await, waehrend sein Auftragsfaden nicht aufraeumt.
+        Ein Auftrag, der fertig wird, waehrend Sarvis eine lange Runde
+        faehrt, haengt bis zu zwei Minuten -- und genau das soll Weg A
+        abstellen: Arbeit soll das Gespraech nicht anhalten und das
+        Gespraech nicht die Arbeit.
+
+        ZWEITENS gab es keine Reihenfolge. Zwei Timer, die zusammen
+        ablaufen, warteten unabhaengig voneinander dieselben Sekunden ab
+        und redeten dann gleichzeitig los -- in einen Lautsprecher.
+
+        Jetzt reiht das hier nur ein und kehrt sofort zurueck. Gesprochen
+        wird in _melder(), einem einzigen Faden, der wartet, bis wirklich
+        Ruhe ist, und die Meldungen der Reihe nach abarbeitet.
         """
-        for _ in range(120):  # hoechstens zwei Minuten hoeflich warten
-            if not self.arbeitet and not self.haelt:
-                break
-            await asyncio.sleep(1.0)
+        await self.meldungen.put((text, mit_gong))
 
+    async def _melder(self) -> None:
+        """Der eine Faden, der von sich aus spricht.
+
+        Wartet auf Ruhe, aber nicht ewig: Ein Timer, der nie klingelt,
+        weil das Gespraech nicht aufhoert, waere schlimmer als einer, der
+        dazwischenredet. Nach MELDUNG_GEDULD_SEK wird gesprochen -- so
+        stand es auch vorher schon, nur eben pro Meldung statt einmal
+        fuer alle.
+        """
+        while True:
+            text, mit_gong = await self.meldungen.get()
+            wartet = 0.0
+            while (self.arbeitet or self.haelt) and wartet < MELDUNG_GEDULD_SEK:
+                await asyncio.sleep(0.2)
+                wartet += 0.2
+            try:
+                await self._melden_sprechen(text, mit_gong)
+            except Exception as e:
+                # Eine misslungene Meldung darf den Melder nicht beenden,
+                # sonst schweigt Sarvis ab da fuer alle weiteren.
+                print(f"  (Meldung ging nicht raus: {e})")
+            finally:
+                self.meldungen.task_done()
+
+    async def _melden_sprechen(self, text: str, mit_gong: bool = True) -> None:
+        """Eine eingereihte Meldung wirklich sagen."""
         print(f"\n  Sarvis : {text}   (von selbst)")
         # Mit Kopfhoerern bleibt das Ohr offen (config.REINREDEN), damit
         # man ihm ins Wort fallen kann; mit Boxen schaltet spricht() ab.
@@ -929,6 +978,7 @@ class Sarvis:
         print("=" * 62)
 
         melder = asyncio.create_task(self._hintergrund_melden())
+        stimme = asyncio.create_task(self._melder())
         try:
             while True:
                 befehl = await self.schlange.get()
@@ -1010,6 +1060,7 @@ class Sarvis:
                         )
         finally:
             melder.cancel()
+            stimme.cancel()
             lauscher.stop()
             self.horcher.stopp()
             # schliessen() gab es, aufgerufen hat es nie jemand -- die

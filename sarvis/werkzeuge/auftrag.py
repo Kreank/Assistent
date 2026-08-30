@@ -976,7 +976,20 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         },
     )
     async def auftrag_geben(args):
-        auftrag, fehler = werkstatt.starten(
+        # to_thread, weil starten() zweimal git aufruft -- rev-parse mit
+        # 10 s, checkout -b mit 30 s Zeitgrenze -- und dabei die
+        # Auftragsdatei schreibt. Es laeuft INNERHALB von hirn.fragen(),
+        # also auf demselben Event-Loop wie das Gespraech: Solange es
+        # blockierte, stand alles. Keine Satzsynthese wurde angestossen,
+        # der Not-Aus aus dem Tastaturfaden wurde nicht abgeholt, die
+        # Hintergrundanzeige tickte nicht. Bei einem grossen Repository
+        # mit vielen Arbeitskopie-Aenderungen ist das hoerbar.
+        #
+        # Genau das ist der Punkt von Weg A: Ein Auftrag soll das
+        # Gespraech NICHT anhalten -- auch nicht fuer die Sekunden, die
+        # sein Losschicken kostet.
+        auftrag, fehler = await asyncio.to_thread(
+            werkstatt.starten,
             (args.get("projekt") or "").strip(),
             (args.get("was") or "").strip(),
         )
@@ -1011,12 +1024,15 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
     async def auftrag_status(args):
         nummer = args.get("nummer")
         if nummer not in (None, ""):
-            text, fehler = werkstatt.einzelstand(nummer)
+            # einzelstand() ruft stand(), und das sind bis zu vier
+            # git-Aufrufe mit je 10 s Zeitgrenze.
+            text, fehler = await asyncio.to_thread(
+                werkstatt.einzelstand, nummer)
             antwort = {"content": [{"type": "text", "text": text}]}
             if fehler:
                 antwort["is_error"] = True
             return antwort
-        zeilen = werkstatt.uebersicht()
+        zeilen = await asyncio.to_thread(werkstatt.uebersicht)
         if not zeilen:
             return {"content": [{"type": "text", "text":
                     "Es läuft kein Auftrag und es lief auch keiner."}]}
@@ -1038,7 +1054,9 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         },
     )
     async def auftrag_ergebnis(args):
-        text, fehler = werkstatt.ergebnis_von(args.get("nummer"))
+        # ergebnis_von() liest notfalls bericht.md vom Zweig -- git show.
+        text, fehler = await asyncio.to_thread(
+            werkstatt.ergebnis_von, args.get("nummer"))
         if fehler:
             return {"content": [{"type": "text", "text": text}],
                     "is_error": True}
@@ -1082,7 +1100,8 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         },
     )
     async def auftrag_fortsetzen(args):
-        a, fehler = werkstatt.fortsetzen(args.get("nummer"))
+        a, fehler = await asyncio.to_thread(
+            werkstatt.fortsetzen, args.get("nummer"))
         if a is None:
             return {"content": [{"type": "text", "text": fehler}],
                     "is_error": True}
