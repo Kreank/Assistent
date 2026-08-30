@@ -1074,6 +1074,16 @@ WERKZEUG_STUFEN = {
     # Maschine, und wer am Rechner sitzt, soll nicht ueberrascht werden.
     # Musik zu steuern dagegen ist zurueckzunehmen, indem man wieder
     # drueckt -- das darf still.
+    # Musik. Alles "still": Wer Musik anmacht, hoert sofort, ob es die
+    # richtige war, und macht sie sonst wieder aus. Eine Rueckfrage vor
+    # jedem Titel waere genau die Sorte Nachfragen, die dazu fuehrt,
+    # dass man den Assistenten nicht mehr benutzt.
+    "musik_laeuft": "still",
+    "musik_abspielen": "still",
+    "musik_steuern": "still",
+    "musik_geraete": "still",
+    "musik_suchen": "still",
+
     "programm_am_rechner": "fragen",
     "musik_am_rechner": "still",
 
@@ -1101,6 +1111,37 @@ WERKZEUG_STUFEN = {
     # damit immer ueber einen gesprochenen Satz von Sascha.
     "WebSearch": "still",
     "WebFetch": "still",
+
+    # --- Nachschlagen: Wetter, Verkehr, Nachrichten, Fachklassen ---------
+    #
+    # Sechzehn Werkzeuge, eine Begruendung: Sie fragen oeffentliche
+    # Dienste, sie aendern nichts, und sie werden fast immer genau dann
+    # gebraucht, wenn die Haende nicht frei sind -- im Auto, auf der
+    # Baustelle, mit dem Handy in der Jacke. Eine Rueckfrage vor einer
+    # Frostwarnung waere genau die Reibung, die dazu fuehrt, dass man
+    # nicht mehr fragt.
+    #
+    # Radio ist die einzige Ausnahme mit bleibender Wirkung -- und die
+    # ist zurueckzunehmen, indem man es wieder ausmacht.
+    "wetter_jetzt":       "still",
+    "wetter_vorhersage":  "still",
+    "wetter_warnungen":   "still",
+    "regen_bald":         "still",
+    "pollenflug":         "still",
+
+    "autobahn_lage":        "still",
+    "autobahn_baustellen":  "still",
+    "tanken_guenstig":      "still",
+    "tanken_preis":         "still",
+
+    "nachrichten":  "still",
+    "radio_suchen": "still",
+    "radio_an":     "still",
+    "radio_aus":    "still",
+
+    "fachklasse_suchen":      "still",
+    "fachklasse_merkmale":    "still",
+    "fachklasse_rueckfragen": "still",
 }
 
 # Wie lange Sarvis auf eine Antwort wartet. Danach: abgelehnt.

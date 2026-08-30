@@ -13,8 +13,9 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, bericht, erinnern, finanzen, google, kacheln, medien,
-               programme, projekte, rechner, telegram, verlauf, zeit)
+from . import (auftrag, bericht, erinnern, fachdaten, finanzen, google,
+               kacheln, lesen, medien, musik, programme, projekte, rechner,
+               telegram, unterwegs, verlauf, wetter, zeit)
 
 SERVER = "sarvis"
 
@@ -74,6 +75,13 @@ def bauen(sagen, leuchten=None, melden=None):
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)
+    # Die vier Nachschlagewerke. Alle lesen nur, keines braucht einen
+    # Zugang -- ausser den zwei Tank-Werkzeugen, die sich in
+    # unterwegs.werkzeuge() selbst wegbauen, wenn der Schluessel fehlt.
+    alle += wetter.werkzeuge(protokoll, leuchten)
+    alle += unterwegs.werkzeuge(protokoll, leuchten)
+    alle += lesen.werkzeuge(protokoll, leuchten)
+    alle += fachdaten.werkzeuge(protokoll, leuchten)
     # Was auf dem Rechner des Nutzers geschehen soll, nicht hier.
     alle += rechner.werkzeuge(protokoll, leuchten)
     if config.finanz_schluessel():
@@ -81,6 +89,11 @@ def bauen(sagen, leuchten=None, melden=None):
         # Zugang" sagen koennen -- das verwirrt mehr, als es nuetzt.
         alle += finanzen.werkzeuge(protokoll, leuchten)
     alle += auftrag.werkzeuge(werkstatt, protokoll, leuchten)
+    if musik.bereit():
+        # Ohne Zugang gar nicht erst bauen -- lieber keine Werkzeuge als
+        # fuenf, die nur "kein Zugang" sagen koennen. Dieselbe
+        # Entscheidung wie bei Finanzen und Google.
+        alle += musik.werkzeuge(protokoll, leuchten)
     if google.bereit():
         alle += google.werkzeuge(protokoll, leuchten)
     if config.telegram_bereit():

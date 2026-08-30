@@ -234,9 +234,57 @@ def _erster_satz(text: str, laenge: int = 70) -> str:
     return _kuerzen(roh, laenge)
 
 
+# Die eingebauten Werkzeuge des SDK heissen englisch und tragen englische
+# Feldnamen. Vorgelesen wurde daraus "Soll ich Read ausfuehren, mit file
+# path Schraegstrich srv Schraegstrich data ..." -- ein Werkzeugname, den
+# niemand kennt, und ein Pfad Zeichen fuer Zeichen. Genau die Frage, die
+# man nicht beantwortet, sondern ertraegt.
+#
+# Statt dafuer eigene Saetze zu schreiben, werden sie auf die deutschen
+# Werkzeuge abgebildet, deren Formulierungen daruntersehen schon stimmen.
+# Das bringt zwei Dinge geschenkt, die eine zweite Fassung nur wieder
+# verlieren wuerde: die Warnung vor Zugangsdaten beim Lesen, und die
+# Unterscheidung zwischen Anlegen und Ueberschreiben beim Schreiben.
+_EINGEBAUT = {
+    "Read":       ("datei_lesen",         {"pfad": "file_path"}),
+    "Write":      ("datei_schreiben",     {"pfad": "file_path"}),
+    "Glob":       ("ordner_durchsuchen",  {"pfad": "path",
+                                           "muster": "pattern"}),
+    "Grep":       ("ordner_durchsuchen",  {"pfad": "path",
+                                           "muster": "pattern"}),
+    "Bash":       ("befehl_ausfuehren",   {"befehl": "command"}),
+    "PowerShell": ("befehl_ausfuehren",   {"befehl": "command"}),
+}
+
+
+def _uebersetzen(werkzeug: str, eingabe: dict):
+    """Englisches Werkzeug -> deutsches Werkzeug samt umbenannter Felder.
+
+    Gibt (None, eingabe) zurueck, wenn es keine Entsprechung gibt -- dann
+    bleibt alles wie vorher.
+    """
+    treffer = _EINGEBAUT.get(werkzeug)
+    if treffer is None:
+        return None, eingabe
+    deutsch, felder = treffer
+    e = eingabe or {}
+    return deutsch, {ziel: e.get(quelle) for ziel, quelle in felder.items()
+                     if e.get(quelle) is not None}
+
+
 def formulieren(werkzeug: str, eingabe: dict) -> str:
     """Aus Werkzeug und Eingabe eine Frage machen, die man hören kann."""
     e = eingabe or {}
+
+    # Edit hat keine deutsche Entsprechung: datei_schreiben unterscheidet
+    # zwischen Anlegen und Ueberschreiben, Edit tut weder das eine noch
+    # das andere -- es aendert eine Stelle in einer bestehenden Datei.
+    if werkzeug == "Edit":
+        return f"Soll ich etwas in {schutz.sprechbar(e.get('file_path'))} ändern?"
+
+    deutsch, umbenannt = _uebersetzen(werkzeug, e)
+    if deutsch is not None:
+        return formulieren(deutsch, umbenannt)
 
     if werkzeug == "datei_lesen":
         pfad = e.get("pfad") or ""
@@ -495,6 +543,12 @@ def genauer(werkzeug: str, eingabe: dict) -> str | None:
     bleibt es beim NACHHAKEN.
     """
     e = eingabe or {}
+    if werkzeug == "Edit":
+        return (f"Es geht um {schutz.sprechbar(e.get('file_path'))}. "
+                "Soll ich das machen?")
+    deutsch, umbenannt = _uebersetzen(werkzeug, e)
+    if deutsch is not None:
+        return genauer(deutsch, umbenannt)
     if werkzeug == "befehl_ausfuehren":
         return (f"Er würde {schutz.absicht_lang(e.get('befehl'))}. "
                 "Soll ich?")

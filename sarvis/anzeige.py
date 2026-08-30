@@ -170,6 +170,37 @@ def aktuelle() -> "Anzeige":
     return _Weiterreicher()
 
 
+# Wem die Antwort gerade gilt -- ein Geraetename, oder None fuer "an
+# alle". main._antwort_an setzt das vor jedem Durchgang, gleichzeitig mit
+# dem Ziel des Lautsprechers.
+#
+# WARUM DAS HIER STEHT UND NICHT NUR AM LAUTSPRECHER
+#
+# Der Lautsprecher kennt es laengst -- er schickt den Ton gezielt an das
+# Geraet, das gefragt hat. Nur kommen Werkzeuge an ihn nicht heran: Sie
+# werden beim Hochfahren gebaut und bekommen die Anzeige, sonst nichts.
+#
+# Ton ist aber nicht mehr das Einzige, was auf EIN Geraet gehoert. Das
+# Radio gehoert dorthin, wo gefragt wurde, aus demselben koerperlichen
+# Grund: Wer am Rechner "mach Radio an" sagt, will es nicht aus dem Handy
+# in der Jackentasche im Flur hoeren.
+#
+# Also eine Stelle statt zweier Wege dorthin -- dieselbe Entscheidung wie
+# bei _aktuelle weiter oben.
+_ziel: str | None = None
+
+
+def zielen(geraet: str | None) -> None:
+    """Festlegen, wem das Naechste gilt. None heisst: an alle."""
+    global _ziel
+    _ziel = geraet or None
+
+
+def ziel() -> str | None:
+    """Wem gerade geantwortet wird -- None, wenn niemandem bestimmten."""
+    return _ziel
+
+
 class UdpTraeger:
     """Der Weg zur Anzeige auf demselben Rechner.
 
@@ -404,6 +435,28 @@ class Anzeige:
         traeger = self._traeger
         pruefen = getattr(traeger, "kann", None)
         return bool(pruefen(faehigkeit)) if pruefen else False
+
+    def kann_hier(self, faehigkeit: str) -> bool:
+        """Kann das Geraet, dem gerade geantwortet wird, das?
+
+        Der Unterschied zu kann() zaehlt ueberall dort, wo etwas auf EINEM
+        Geraet passieren soll statt auf allen -- beim Radio etwa. "Kann es
+        irgendwer" hiesse dort: Sarvis sagt am Rechner "laeuft", und der
+        Ton ginge im Browser auf dem Handy an. Oder nirgends.
+        """
+        traeger = self._traeger
+        pruefen = getattr(traeger, "kann_geraet", None)
+        return bool(pruefen(ziel(), faehigkeit)) if pruefen else False
+
+    def draht(self):
+        """Der Traeger, ueber den gesendet wird -- oder None.
+
+        Fuer die wenigen Faelle, die eine EIGENE Nachrichtenart gezielt
+        an ein Geraet schicken (netz/klang_netz.py fuer den Ton,
+        werkzeuge/lesen.py fuers Radio). Alles, was an alle geht, nimmt
+        die Methoden hier drueber und nicht diesen Griff.
+        """
+        return self._traeger
 
     def kachel_weg(self, name: str) -> None:
         """Eine Kachel ausblenden lassen -- der Auftrag ist fertig."""

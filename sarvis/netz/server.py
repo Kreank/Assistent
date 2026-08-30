@@ -276,6 +276,11 @@ class Endpunkt:
         app.router.add_get("/draht", self._draht)
         if WEB.is_dir():
             app.router.add_static("/dabei/", WEB, name="dabei")
+        # Die Spotify-Anmeldung. Zwei Wege ohne Geraeteschluessel --
+        # Spotify hat keinen; was stattdessen schuetzt, steht in
+        # netz/spotify.py.
+        from . import spotify
+        spotify.anmelden(app)
         return app
 
 

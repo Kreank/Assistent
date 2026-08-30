@@ -334,7 +334,16 @@ class Sarvis:
                 self.meldungen.task_done()
 
     async def _melden_sprechen(self, text: str, mit_gong: bool = True) -> None:
-        """Eine eingereihte Meldung wirklich sagen."""
+        """Eine eingereihte Meldung wirklich sagen.
+
+        An ALLE: Ein Timer, der ablaeuft, meint niemanden bestimmten. Wer
+        ihn gestellt hat, sitzt vielleicht laengst woanders -- und eine
+        Erinnerung, die im Kopfhoerer am leeren Schreibtisch klingelt,
+        waere genau die falsche.
+        """
+        if hasattr(self.lautsprecher, "ziel"):
+            self.lautsprecher.ziel = None
+        anzeige_modul.zielen(None)
         print(f"\n  Sarvis : {text}   (von selbst)")
         # Mit Kopfhoerern bleibt das Ohr offen (config.REINREDEN), damit
         # man ihm ins Wort fallen kann; mit Boxen schaltet spricht() ab.
@@ -1060,6 +1069,7 @@ class Sarvis:
         ihn, so wie wenn er dazwischenspraeche.
         """
         print(f"\n  Du ({geraet}): {text}")
+        self._antwort_an(geraet)
         self.anzeige.untertitel("du", text)
         self.schlange.put_nowait(("weckwort", text))
 
@@ -1073,6 +1083,27 @@ class Sarvis:
         naemlich: nichts.
         """
         self.horch.hinein(daten, rate, geraet)
+
+    def _antwort_an(self, geraet: str) -> None:
+        """Wem die naechste gesprochene Antwort gilt.
+
+        Sehen sollen alle dasselbe -- Zustand, Kacheln, Untertitel gehen
+        auf jeden Bildschirm, der zusieht. HOEREN nicht: Wer am Rechner
+        fragt, will die Antwort im Kopfhoerer und nicht aus dem Handy in
+        der Jacke im Flur.
+
+        Gemessen genau so passiert, und es ist mehr als unbequem: Ein
+        Assistent, der woanders antwortet als man ihn gefragt hat, ist
+        im Zweifel gar nicht zu hoeren.
+        """
+        # Der lokale Lautsprecher kennt kein Ziel -- er IST das Geraet.
+        # Nur der ueber Netz muss wissen, wohin.
+        if hasattr(self.lautsprecher, "ziel"):
+            self.lautsprecher.ziel = geraet
+        # Und dieselbe Auskunft fuer die Werkzeuge: Das Radio gehoert auf
+        # dasselbe Geraet wie die Stimme, kommt aber nicht am
+        # Lautsprecher vorbei an diese Information.
+        anzeige_modul.zielen(geraet)
 
     async def _oberflaeche_weg(self, geraet: str) -> None:
         """Eine Oberflaeche hat sich verabschiedet."""
@@ -1119,6 +1150,7 @@ class Sarvis:
         if not gesagt.strip():
             self.anzeige.zustand(RUHIG)
             return
+        self._antwort_an(geraet)
         self.anzeige.untertitel("du", gesagt)
         self.schlange.put_nowait(("weckwort", gesagt))
 

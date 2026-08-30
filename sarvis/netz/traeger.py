@@ -156,6 +156,39 @@ class NetzTraeger:
         for o in list(self.oberflaechen):
             o.einlegen(felder)
 
+    def senden_an(self, geraet: str, felder: dict) -> None:
+        """An EIN Geraet -- oder an alle, wenn es nicht mehr da ist.
+
+        Fuer den TON. Alles andere geht an alle: Zustand, Kacheln,
+        Untertitel gehoeren auf jeden Bildschirm, der zusieht. Ton nicht.
+
+        Der Grund ist nicht technisch, sondern koerperlich: Wer am
+        Rechner eine Frage stellt, will die Antwort im Kopfhoerer haben
+        und nicht aus dem Handy in der Jackentasche im Flur. Gemessen
+        genau so passiert -- Sascha sprach am PC, und das Handy
+        antwortete.
+
+        Ist das Geraet weg (Verbindung abgerissen, App geschlossen),
+        geht es doch an alle. Eine Antwort, die niemand hoert, weil der
+        Fragende inzwischen gegangen ist, waere die schlechtere
+        Alternative -- dann lieber einmal zu viel.
+        """
+        ziel = next((o for o in self.oberflaechen if o.name == geraet), None)
+        if ziel is None:
+            self._verteilen(felder)
+            return
+        ziel.einlegen(felder)
+
+    def senden_gezielt(self, geraet: str | None, felder: dict) -> None:
+        """Wie senden(), aber an ein Geraet. Aus fremden Faeden sicher."""
+        if not geraet:
+            self.senden(felder)
+            return
+        try:
+            self.schleife.call_soon_threadsafe(self.senden_an, geraet, felder)
+        except RuntimeError:
+            pass
+
     def fragen(self, felder: dict, sekunden: float) -> dict | None:
         """Eine Frage an die Oberflaeche, die einen Browser hat.
 
@@ -206,6 +239,28 @@ class NetzTraeger:
     def kann(self, faehigkeit: str) -> bool:
         """Kann irgendeine verbundene Oberflaeche das?"""
         return any(faehigkeit in o.faehigkeiten for o in self.oberflaechen)
+
+    def kann_geraet(self, geraet: str | None, faehigkeit: str) -> bool:
+        """Kann GENAU DIESES Geraet das?
+
+        Der Unterschied zu kann() ist derselbe wie der zwischen
+        senden_gezielt() und senden(): Fuer alles, was man SIEHT, genuegt
+        "irgendwer kann es" -- es geht ohnehin an alle. Fuer alles, was
+        auf einem bestimmten Geraet passieren soll, nicht.
+
+        Beim Radio faellt das sofort auf: Die Weboberflaeche kann es, die
+        Windows-App noch nicht. Ein "irgendwer kann es" hiesse dann, dass
+        Sarvis am Rechner "laeuft" sagt und der Ton im Browser auf dem
+        Handy anginge -- oder nirgends.
+
+        Ist das Geraet unbekannt oder keines genannt, gilt dieselbe
+        Ausweichregel wie bei senden_an(): Dann zaehlt, ob es irgendwer
+        kann, denn dann geht die Meldung auch an alle.
+        """
+        ziel = next((o for o in self.oberflaechen if o.name == geraet), None)
+        if ziel is None:
+            return self.kann(faehigkeit)
+        return faehigkeit in ziel.faehigkeiten
 
 
 def als_text(felder: dict) -> str:

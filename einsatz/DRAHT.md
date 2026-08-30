@@ -54,9 +54,19 @@ Bisher gibt es eine:
 | Fähigkeit | bedeutet |
 |---|---|
 | `kann_rechner` | „Ich kann Programme starten und Medientasten drücken" |
+| `kann_radio` | „Ich kann eine Stream-Adresse selbst abspielen" (siehe `radio`) |
 
-**Eine Weboberfläche meldet sie nicht** — ein Browser darf keine
-Programme starten, und das soll so bleiben. Eine native App meldet sie.
+`kann_rechner` meldet **eine Weboberfläche nicht** — ein Browser darf
+keine Programme starten, und das soll so bleiben. Eine native App meldet
+es.
+
+`kann_radio` ist andersherum: Die Weboberfläche meldet es (ein
+`<audio>`-Element hat jeder Browser), eine native App erst, wenn sie ein
+eigenes Abspielwerk gebaut hat. **Melde es nicht auf Vorrat.** Sarvis
+fragt vor jedem Sender, ob das Gerät, das gerade spricht, es kann, und
+sagt sonst „Auf diesem Gerät kann ich kein Radio abspielen". Das ist die
+ehrliche Antwort; eine App, die die Fähigkeit meldet und die Nachricht
+dann verschluckt, macht daraus ein „läuft", nach dem nichts klingt.
 
 Was hier fehlt, fehlt mit Folgen: Sarvis fragt vor jedem solchen Befehl
 nach, ob überhaupt jemand ihn ausführen könnte, und sagt sonst ehrlich,
@@ -103,6 +113,13 @@ Jede Nachricht trägt `art`. **Unbekannte Arten und unbekannte Felder
 ignorieren, nicht als Fehler behandeln.** So lässt sich das Protokoll
 erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 
+Das heißt wörtlich: **still überspringen.** Nicht loggen und abbrechen,
+nicht die Verbindung schließen, nicht mit einer Ausnahme abstürzen. Ein
+`switch` ohne `default` tut das von selbst; ein `else: throw` ist der
+Fehler. Der Server ist immer der neuere von beiden — er bekommt eine
+Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
+`radio_aus` sind genau so entstanden.
+
 <!-- draht:herein — zwischen diesen Marken liest einsatz/draht_pruefen.py -->
 
 | `art` | Felder | Bedeutung |
@@ -118,6 +135,8 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 | `kachel_weg` | `name` | Kachel ausblenden |
 | `ton` | `daten`, `rate`, `runde` | gesprochenes Audio, satzweise |
 | `ton_stopp` | `runde` | sofort still sein |
+| `radio` | `url`, `name` | diesen Sender abspielen — Adresse, kein Ton |
+| `radio_aus` | — | Radio beenden |
 | `browser` | `adresse` | Rest aus dem Desktop-Betrieb |
 | `browser_zu` | — | dito |
 | `horchen` | `an` | Dauerstrom jetzt schicken oder nicht |
@@ -429,6 +448,53 @@ Netzlaufzeit versetzt.
 
 `rate` beim Ton ist die Rate der **Piper-Stimme**, üblich 22 050 — nicht
 zu verwechseln mit den 16 000 der Aufnahme.
+
+### `radio` — Ton, den nicht Sarvis macht
+
+```json
+{ "art": "radio", "url": "https://…/stream.mp3", "name": "Deutschlandfunk" }
+{ "art": "radio_aus" }
+```
+
+**Hier kommt kein Audio über den Draht, nur eine Adresse.** Einen
+Radiostream durchzureichen hieße, dass der Server stundenlang Musik
+herunterlädt, um sie unverändert weiterzugeben — Arbeit, Bandbreite und
+Verzögerung für nichts. Der Client kann den Sender direkt anwählen.
+
+Fünf Punkte, an denen eine App sonst am Protokoll vorbeibaut:
+
+1. **Ein eigenes Abspielwerk, getrennt von der Sprachwiedergabe.** Nicht
+   in denselben Mixer, nicht in dieselbe Warteschlange wie `ton`. Sonst
+   löscht der nächste `ton_stopp` auch das Radio.
+2. **Sarvis redet über das Radio, statt es abzuwürgen.** Kommt ein `ton`,
+   Radio auf etwa **15 %** herunterblenden; ist der Ton verklungen,
+   wieder auf. Wann das ist, weiß nur der Client: Der Server meldet nicht,
+   wann sein Satz zu Ende gespielt ist — er schickt Ton, und dessen Länge
+   kennt, wer ihn eingeplant hat. In der Weboberfläche steht deshalb ein
+   Timer über die Dauer des eingeplanten Puffers plus 0,35 s Zugabe; ein
+   `ton_stopp` dreht sofort wieder auf. **Nicht pausieren** — wer nach der
+   Uhrzeit fragt, will nicht, dass die Musik aus ist.
+3. **`radio` kommt nur bei `kann_radio`** (siehe „Anmelden"). Wer es nicht
+   meldet, bekommt die Art nie zu sehen.
+4. **`radio` geht gezielt an EIN Gerät** — das, von dem gerade gesprochen
+   wird. Wie der Ton und aus demselben Grund. **`radio_aus` geht an
+   alle**, wie `ton_stopp`: Läuft irgendwo noch ein Sender, soll auch der
+   aufhören, auch wenn man inzwischen woanders sitzt.
+5. **Beim Beenden die Quelle wirklich lösen**, nicht nur pausieren. Ein
+   pausierter Stream lädt im Hintergrund weiter — unhörbar, Tag und Nacht.
+   Im Browser: `src` entfernen und `load()`.
+
+`url` ist immer **https** und nie HLS (`.m3u8`) — dafür sorgt der Server.
+Beides ist eine Browser-Rücksicht: Auf einer https-Seite verweigert der
+Browser http-Ton lautlos, und `.m3u8` spielt ein schlichtes
+Audio-Element nur in Safari. Eine native App darf beides trotzdem
+abspielen können; sie bekommt es nur nicht angeboten.
+
+`name` ist zum Anzeigen und sonst nichts — keine Identität, kein
+Schlüssel. Zweimal `radio` heißt schlicht: jetzt dieser Sender. Der
+Server kürzt ihn schon (im Verzeichnis heißt ein Sender auch mal
+„0R - COFFEE LOUNGE || Background Music, Jazz, Lounge, …"), er kann
+aber trotzdem lang sein oder fehlen.
 
 ---
 

@@ -82,7 +82,21 @@ def aus_anzeige() -> dict[str, set[str]]:
 # hierher -- sonst meldet die Pruefung eine Art als "steht in der Doku,
 # der Code sendet sie nicht", und man sucht den Fehler in der Doku.
 SENDER = ("netz/klang_netz.py", "netz/horch_netz.py",
-          "werkzeuge/programme.py")
+          "werkzeuge/programme.py", "werkzeuge/lesen.py")
+
+# Ein Aufruf, der eine fertige Meldung hinausgibt. Zwei Formen kommen
+# vor, und die zweite ist der Grund fuer diesen Ausdruck:
+#
+#   traeger.senden({"art": ...})                 an alle
+#   traeger.senden_gezielt(ziel, {"art": ...})   an ein Geraet
+#
+# Die gezielte Form wurde lange nicht gelesen. Sichtbar wurde das nicht
+# als Luecke, sondern als falscher Alarm: "Art 'ton' steht in DRAHT.md,
+# der Code sendet sie nicht" -- obwohl klang_netz.py sie seit jeher
+# schickt, nur eben gezielt. Wer dem folgt, sucht den Fehler in der Doku
+# und findet ihn nicht.
+MELDUNG = re.compile(
+    r"\.senden(?:_gezielt)?\(\s*(?:[^{},]*,\s*)?\{(.*?)\}\s*\)", re.S)
 
 
 def aus_ton() -> dict[str, set[str]]:
@@ -95,13 +109,16 @@ def aus_ton() -> dict[str, set[str]]:
         quelle = pfad.read_text("utf-8")
         # Zwei Schreibweisen: der Traeger nimmt ein Verzeichnis,
         # Anzeige._senden nimmt Schluesselwoerter. Beide kommen vor.
-        for treffer in re.finditer(r'\.traeger\.senden\(\{(.*?)\}\)', quelle,
-                                   re.S):
+        for treffer in MELDUNG.finditer(quelle):
             block = treffer.group(1)
             art = re.search(r'"art":\s*"(\w+)"', block)
             if not art:
                 continue
-            raus[art.group(1)] = set(re.findall(r'"(\w+)":', block))
+            # update statt Zuweisung: Eine Art kann an zwei Stellen
+            # geschickt werden -- an alle und gezielt. Wer hier zuweist,
+            # laesst je nach Reihenfolge im Modul Felder verschwinden.
+            raus.setdefault(art.group(1), set()).update(
+                re.findall(r'"(\w+)":', block))
         for treffer in re.finditer(
                 r'_senden\(\s*art\s*=\s*"(\w+)"(.*?)\)\n', quelle, re.S):
             art, rest = treffer.group(1), treffer.group(2)

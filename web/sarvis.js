@@ -1579,6 +1579,11 @@ function verbinden() {
     schluessel,
     // Nur ein Geraet mit grossem Bildschirm bekommt Browser-Fragen.
     kann_browser: window.innerWidth >= 900,
+    // Was diese Oberfläche über das Anzeigen hinaus kann. `kann_rechner`
+    // fehlt hier mit Absicht -- ein Browser darf keine Programme starten.
+    // Ein Audio-Element für einen Radiostream hat er sehr wohl, und
+    // Sarvis fragt danach, bevor er einen Sender losschickt.
+    kann: ['kann_radio'],
   }));
 
   draht.onmessage = e => {
@@ -1661,6 +1666,9 @@ function empfangen(m) {
     case 'browser_zu': seiteZu(); break;
     case 'ton':        tonSpielen(m); break;
     case 'ton_stopp':  tonStopp(m.runde); break;
+    // Radio: nicht der Ton selbst, nur die Adresse. Siehe radioAn().
+    case 'radio':      radioAn(m); break;
+    case 'radio_aus':  radioAus(); break;
     case 'horchen':
       // Während Sarvis redet oder eine Rückfrage läuft, braucht er den
       // Strom nicht. Ohne dieses Wort sendet die Oberfläche weiter, der
@@ -1800,6 +1808,10 @@ function tonStopp(runde) {
   laufendeToene.forEach(q => { try { q.stop(); } catch {} });
   laufendeToene.clear();
   tonZeit = hoerer ? hoerer.currentTime : 0;
+  // Sarvis ist still -- also darf das Radio sofort wieder laut werden.
+  // Auf den eingeplanten Zeitpunkt zu warten hieße, dass es nach einer
+  // Unterbrechung noch sekundenlang leise bliebe, ohne dass jemand redet.
+  radioLauter(0);
 }
 
 function tonSpielen(m) {
@@ -1822,6 +1834,102 @@ function tonSpielen(m) {
   q.start(tonZeit); tonZeit += puffer.duration;
   laufendeToene.add(q);
   q.onended = () => laufendeToene.delete(q);
+  // Das Radio duckt sich, solange gesprochen wird. Wann das ist, steht
+  // genau hier und nirgends sonst: Der Server sagt nicht, wann er zu
+  // reden aufhört -- er schickt Ton, und wie lange der dauert, weiß nur,
+  // wer ihn eingeplant hat.
+  radioDucken(tonZeit - hoerer.currentTime);
+}
+
+// =====================================================================
+// Radio: der Ton, den nicht Sarvis macht
+// =====================================================================
+/* Ein Radiostream kommt NICHT über den Draht. Der Server schickt nur die
+ * Adresse (`radio`), und das Audio-Element holt sich den Sender direkt.
+ * Alles andere hieße: Der Server lädt stundenlang Musik herunter, um sie
+ * unverändert weiterzureichen.
+ *
+ * Bewusst ein <audio> und kein AudioContext-Knoten. Der Kontext hier ist
+ * mit 16 kHz für die Aufnahme angefordert; ein Sender in 44,1 kHz müsste
+ * dafür umgetastet werden, und ein <audio> kann außerdem puffern,
+ * nachladen und eine abgerissene Verbindung überstehen.
+ *
+ * Getrennt von der Sprachwiedergabe -- das ist der eigentliche Punkt.
+ * Sarvis soll ÜBER das Radio reden können, nicht statt seiner. Also
+ * leiser drehen, solange Ton ankommt, und danach wieder auf. Abwürgen
+ * wäre einfacher und falsch: Wer nach der Uhrzeit fragt, will nicht,
+ * dass die Musik aus ist. */
+let radio = null, radioSoll = 1.0, radioHeben = null, radioBlende = null;
+const RADIO_LEISE = 0.15;
+const RADIO_ZUGABE = 0.35;   // Sekunden, bis wieder aufgedreht wird
+
+function radioAn(m) {
+  const url = String(m.url || '');
+  if (!url) return;
+  if (!radio) {
+    radio = new Audio();
+    radio.preload = 'none';
+    // Kein crossOrigin: Wir lesen die Daten nicht, wir spielen sie nur
+    // ab. Mit crossOrigin verlangte der Browser CORS-Kopfzeilen, die die
+    // wenigsten Sender schicken -- und dann liefe gar nichts.
+  }
+  radio.src = url;
+  radio.volume = laufendeToene.size ? RADIO_LEISE : radioSoll;
+  radio.play().catch(() => {
+    /* Autoplay-Sperre: Ohne eine Geste des Nutzers auf DIESER Seite gibt
+     * der Browser keinen Ton frei. Das ist kein Fehler, den man melden
+     * müsste -- es ist einer, den man nachholt. */
+    const nachholen = () => radio && radio.play().catch(() => {});
+    addEventListener('pointerdown', nachholen, { once: true });
+    addEventListener('keydown', nachholen, { once: true });
+  });
+}
+
+function radioAus() {
+  clearTimeout(radioHeben);
+  clearInterval(radioBlende);
+  if (!radio) return;
+  try { radio.pause(); } catch {}
+  // src leeren und neu laden: Sonst zieht der Browser den Stream im
+  // Hintergrund weiter -- unhörbar, aber Tag und Nacht.
+  radio.removeAttribute('src');
+  try { radio.load(); } catch {}
+}
+
+/* Leiser, solange geredet wird -- und von selbst wieder lauter.
+ *
+ * `sekunden` ist, wie lange der eingeplante Ton noch dauert. Ein Timer
+ * und keine Rückmeldung des Servers: Der weiß gar nicht, wann sein Satz
+ * hier verklungen ist. Kommt der nächste Satz früher, schiebt er den
+ * Termin einfach weiter. */
+function radioDucken(sekunden) {
+  if (!radio || radio.paused) return;
+  radioBlenden(RADIO_LEISE);
+  clearTimeout(radioHeben);
+  radioHeben = setTimeout(() => radioBlenden(radioSoll),
+    (Math.max(0, sekunden) + RADIO_ZUGABE) * 1000);
+}
+
+function radioLauter(verzoegerung) {
+  clearTimeout(radioHeben);
+  if (!radio || radio.paused) return;
+  radioHeben = setTimeout(() => radioBlenden(radioSoll), verzoegerung * 1000);
+}
+
+/* Über 200 ms blenden statt springen. Ein Sprung klingt nach Störung;
+ * ein Übergang klingt nach Absicht. HTMLMediaElement.volume kann keine
+ * Rampe, also von Hand in Schritten. */
+function radioBlenden(ziel) {
+  clearInterval(radioBlende);
+  if (!radio) return;
+  const schritte = 8, von = radio.volume, weg = ziel - von;
+  let i = 0;
+  radioBlende = setInterval(() => {
+    i++;
+    if (!radio) { clearInterval(radioBlende); return; }
+    radio.volume = Math.max(0, Math.min(1, von + weg * (i / schritte)));
+    if (i >= schritte) clearInterval(radioBlende);
+  }, 25);
 }
 
 // =====================================================================

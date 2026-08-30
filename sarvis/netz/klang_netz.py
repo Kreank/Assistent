@@ -46,6 +46,10 @@ class NetzLautsprecher:
     def __init__(self, traeger, melden=None):
         self.traeger = traeger
         self.melden = melden
+        # Wem die Antwort gilt. Wird vor jedem Durchgang gesetzt; None
+        # heisst "an alle" -- etwa bei einem Timer, der sich von selbst
+        # meldet und niemanden bestimmtes meint.
+        self.ziel: str | None = None
         self._runde = 0
         self._schloss = threading.Lock()
         # Wie viele Sekunden Ton unterwegs bzw. eingeplant sind. Daran
@@ -72,7 +76,7 @@ class NetzLautsprecher:
             runde = self._runde
             self._bis += len(ganz) / rate
             self._leer.clear()
-        self.traeger.senden({
+        self.traeger.senden_gezielt(self.ziel, {
             "art": "ton",
             "daten": base64.b64encode(klein.tobytes()).decode("ascii"),
             "rate": int(rate),
@@ -98,6 +102,9 @@ class NetzLautsprecher:
             self._bis = 0.0
             self._leer.set()
             runde = self._runde
+        # Das Stoppen geht an ALLE. Wenn ein anderes Geraet noch einen
+        # alten Satz spielt, soll auch das aufhoeren -- sonst redet
+        # Sarvis an zwei Stellen weiter, obwohl er unterbrochen wurde.
         self.traeger.senden({"art": "ton_stopp", "runde": runde})
         if self.melden is not None:
             self.melden(0.0)
