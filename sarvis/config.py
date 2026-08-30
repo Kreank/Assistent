@@ -983,6 +983,11 @@ WERKZEUG_STUFEN = {
     "web_elemente":       "still",
     "web_zoom":           "still",
     "web_downloads":      "still",
+    # Ein Bild der offenen Seite an den Bildschirm des Nutzers. Hinsehen
+    # ist keine Handlung an der Aussenwelt. Und es ist die einzige
+    # Moeglichkeit fuer den Nutzer, ueberhaupt zu sehen, was Sarvis
+    # gerade tut -- sein Browser laeuft unsichtbar auf dem Server.
+    "web_ansehen":        "still",
 
     # Klicken und Tippen NICHT. Bis vor kurzem galt "Sarvis bringt die
     # Seite, du bedienst sie" -- das trug, weil Zeigen keine Handlung

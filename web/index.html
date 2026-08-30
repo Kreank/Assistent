@@ -46,9 +46,28 @@ body{display:flex;flex-direction:column;
    anklickbar -- diese Sicherung verschwaende also lautlos, wenn man
    sie nicht ausdruecklich wieder herstellt. Genau das tut die
    naechste Zeile. */
+/* Passen mehr Kacheln, als Platz ist, wird gescrollt -- NICHT
+   abgeschnitten. Gemessen mit drei Kacheln am 1280er Bildschirm: die
+   dritte war unten weg, ohne dass irgendetwas darauf hindeutete. Das
+   ist dieselbe Sorte Fehler wie eine gekürzte Liste, die sich für
+   vollständig ausgibt.
+
+   pointer-events bleibt für die Kacheln selbst aus (siehe unten) --
+   erlaubt ist nur das Scrollen des Behälters. */
 #kacheln{position:absolute;top:8px;right:8px;width:min(46vw,290px);
-  display:flex;flex-direction:column;gap:8px;pointer-events:none;
-  max-height:calc(100% - 16px);overflow:hidden}
+  display:flex;flex-direction:column;gap:8px;pointer-events:auto;
+  touch-action:pan-y;max-height:calc(100% - 16px);overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+#kacheln > *{pointer-events:none;flex:0 0 auto}
+
+/* Ein weicher Rand unten, wenn mehr Kacheln da sind als Platz.
+   Ohne ihn endet die letzte sichtbare Kachel mitten in ihrer
+   Ueberschrift, und das sieht nach Fehler aus statt nach "hier geht es
+   weiter". mask statt eines aufgelegten Verlaufs, weil die Kacheln
+   durchscheinend sind -- ein Farbverlauf darueber wuerde den Ring
+   dahinter mit ausblenden. */
+#kacheln{mask-image:linear-gradient(to bottom,#000 calc(100% - 22px),transparent);
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 22px),transparent)}
 .kachel{background:rgba(8,13,20,.90);border:1px solid;border-radius:7px;
   padding:10px 12px 11px;font-size:11px;animation:auf .22s ease-out}
 .kachel .strich{height:2px;margin:-10px -12px 9px;border-radius:7px 7px 0 0}
@@ -133,6 +152,34 @@ body{display:flex;flex-direction:column;
   border-bottom:1px solid;padding:0 0 2px;margin:6px 0 2px}
 .kachel .grkopf:first-child{margin-top:0}
 .kachel .zeile.ein{margin-left:11px}
+
+/* --- Die angebotene Seite ------------------------------------------
+   DAS EINZIGE ANKLICKBARE STUECK UEBER DER BUEHNE, und deshalb sieht
+   es anders aus als alles daneben: Kacheln tragen die Sprechfarben
+   (orange, gruen) und sind tot; das hier traegt das Cyan der
+   Bedienelemente und hat einen Knopf. Wer den Unterschied nicht
+   erklaert bekommt, sieht ihn.
+
+   Warum ueberhaupt ein Angebot und kein window.open(): Ein Popup ohne
+   vorausgegangenen Klick blockiert jeder Browser, und man merkt es nur
+   an einem stummen Symbol in der Adresszeile. Hier geht ein ZURUF
+   voraus, kein Klick -- also muss der Klick hier entstehen. Dann geht
+   die Seite immer auf, und der Nutzer hat sie selbst geoeffnet. */
+#seite{position:absolute;left:14px;bottom:52px;max-width:min(70vw,430px);
+  display:none;align-items:center;gap:10px;pointer-events:auto;
+  background:rgba(10,17,26,.94);border:1px solid rgba(0,229,255,.38);
+  border-radius:11px;padding:8px 8px 8px 12px;
+  animation:auf .22s ease-out}
+#seite.an{display:flex}
+#seite .was{min-width:0;flex:1 1 auto}
+#seite .ort{font-size:12px;font-weight:600;color:rgba(0,229,255,.92);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#seite .dazu{font-size:11px;color:rgba(232,241,253,.62);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#seite .dazu:empty{display:none}
+#seite .auf{flex:0 0 auto;background:#00e5ff;color:#04080f;
+  border-radius:8px;padding:8px 13px;font-size:12px;font-weight:600;
+  text-decoration:none;white-space:nowrap}
 
 /* --- Was im Hintergrund arbeitet ----------------------------------- */
 #hintergrund{position:absolute;top:10px;left:14px;width:min(52vw,220px);
@@ -220,8 +267,19 @@ body{display:flex;flex-direction:column;
        nur Scrollen ist erlaubt. Siehe die Begruendung oben. */
     pointer-events:auto;touch-action:pan-y}
   #kacheln .kachel{pointer-events:none}
+  /* Hochkant reiht sich das Angebot mit ein, statt ueber dem
+     Untertitel zu schweben -- dort verdeckte es ihn. */
+  #seite{position:relative;left:auto;bottom:auto;max-width:none;
+    margin:6px 12px 0;flex:0 0 auto}
   #untertitel{position:relative;bottom:auto;flex:0 0 auto;
     padding:6px 8% 2px}
+
+  /* Die Seiten-Leiste in den Fluss statt darueber. Am Rechner schwebt
+     sie unten links ueber freier Flaeche; hochkant gibt es die nicht --
+     gemessen lag sie mitten auf der zweiten Kachel und verdeckte deren
+     Ueberschrift. */
+  #seite{position:relative;left:auto;bottom:auto;max-width:none;
+    margin:0 12px 6px;flex:0 0 auto}
 }
 </style>
 </head>
@@ -244,6 +302,10 @@ body{display:flex;flex-direction:column;
   <canvas id="ring"></canvas>
   <div id="hintergrund"><div class="kopf"></div></div>
   <div id="kacheln"></div>
+  <div id="seite">
+    <div class="was"><div class="ort"></div><div class="dazu"></div></div>
+    <a class="auf" target="_blank" rel="noopener noreferrer">Öffnen</a>
+  </div>
   <div id="untertitel"></div>
 </div>
 

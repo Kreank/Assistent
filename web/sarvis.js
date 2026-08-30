@@ -1448,6 +1448,90 @@ function kachelWeg(name) {
 const sicher = t => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// =====================================================================
+// Eine angebotene Seite
+// =====================================================================
+/* Sarvis schickt "browser", wenn er dem Nutzer eine Seite zeigen will --
+ * eine Route, ein Suchergebnis, einen Kalender. Am Rechner oeffnet hud.py
+ * dafuer ein eingebautes Fenster. Hier gibt es das nicht, und
+ * window.open() ist KEIN Ersatz: Ohne vorausgegangenen Klick blockiert
+ * jeder Browser das Popup, und zwar stumm -- Sarvis sagt dann "die Route
+ * liegt auf deinem Bildschirm", und da liegt nichts. Ein Zuruf ist kein
+ * Klick.
+ *
+ * Also wird die Seite ANGEBOTEN statt geoeffnet: eine Leiste mit einem
+ * Knopf. Der Klick entsteht dort, wo er entstehen muss, und geht immer
+ * auf. Sie ist das einzige anklickbare Stueck ueber der Buehne -- die
+ * Kacheln bleiben tot, siehe die Begruendung am #kacheln.
+ *
+ * WAS DRAUFSTEHT, ist nicht die Adresse. Eine Google-Maps-Adresse ist
+ * 120 Zeichen Query-String und sagt weniger als nichts:
+ *   maps/dir/?api=1&destination=Leipzig&travelmode=transit
+ * Draufsteht deshalb, was fuer eine Seite es ist ("Google Maps") und
+ * worum es geht ("Route nach Leipzig"). Die ganze Adresse haengt am
+ * title, fuer den Fall, dass jemand sie doch sehen will. */
+const SEITEN_NAMEN = {
+  'google.com': 'Google', 'google.de': 'Google',
+  'youtube.com': 'YouTube', 'youtu.be': 'YouTube',
+  'wikipedia.org': 'Wikipedia', 'openstreetmap.org': 'OpenStreetMap',
+  'github.com': 'GitHub', 'bahn.de': 'Deutsche Bahn',
+  'amazon.de': 'Amazon', 'ebay.de': 'eBay',
+  'hero-software.de': 'HERO', 'tech-artist.de': 'tech-artist',
+};
+
+function seiteBenennen(adresse) {
+  let u;
+  try { u = new URL(String(adresse)); } catch (e) { return { ort: String(adresse), dazu: '' }; }
+  const host = u.hostname.replace(/^www\./, '');
+  let ort = host;
+  // Von hinten aufloesen, damit auch maps.google.com und
+  // login.hero-software.de ihren Namen bekommen.
+  for (let h = host; h.includes('.'); h = h.slice(h.indexOf('.') + 1)) {
+    if (SEITEN_NAMEN[h]) { ort = SEITEN_NAMEN[h]; break; }
+  }
+  if (/(^|\.)google\.[a-z.]+$/.test(host) && u.pathname.startsWith('/maps'))
+    ort = 'Google Maps';
+
+  const q = u.searchParams;
+  const ziel = q.get('destination') || q.get('daddr');
+  const suche = q.get('q') || q.get('query') || q.get('search_query') || q.get('text');
+  let dazu = '';
+  if (ziel) dazu = 'Route nach ' + ziel;
+  else if (suche) dazu = suche;
+  else {
+    // Sonst der letzte Wegabschnitt -- aber nur, wenn er wie ein Wort
+    // aussieht. Eine Kennung wie /a7f3c1e9b2d4 ist keine Auskunft.
+    const teile = u.pathname.split('/').filter(Boolean);
+    let letzt = teile.length ? teile[teile.length - 1] : '';
+    try { letzt = decodeURIComponent(letzt); } catch (e) { /* roh lassen */ }
+    if (letzt && letzt.length <= 48 && /[a-zA-ZäöüÄÖÜß]{3}/.test(letzt)
+      && !/^[0-9a-f]{12,}$/i.test(letzt))
+      dazu = letzt.replace(/\.\w{2,5}$/, '').replace(/[-_+]/g, ' ');
+  }
+  if (dazu.length > 64) dazu = dazu.slice(0, 63) + '…';
+  return { ort, dazu };
+}
+
+function seiteZeigen(adresse) {
+  const el = document.getElementById('seite');
+  adresse = String(adresse || '');
+  // Nur, was ein Browser auch oeffnen soll. Ein javascript:-Ziel in
+  // einem href waere ein fremder Befehl an einem Knopf, den der Nutzer
+  // fuer harmlos haelt.
+  if (!/^https?:\/\//i.test(adresse)) { seiteZu(); return; }
+  const wie = seiteBenennen(adresse);
+  el.querySelector('.ort').textContent = wie.ort;
+  el.querySelector('.dazu').textContent = wie.dazu;
+  const knopf = el.querySelector('.auf');
+  knopf.href = adresse;
+  knopf.title = adresse;
+  el.classList.add('an');
+}
+
+function seiteZu() {
+  document.getElementById('seite').classList.remove('an');
+}
+
 function hintergrundZeigen() {
   const kasten = document.getElementById('hintergrund');
   if (!S.hintergrund.length && !S.hgFertig) { kasten.classList.remove('an'); return; }
@@ -1553,6 +1637,9 @@ function empfangen(m) {
       break;
     case 'kachel':     kachelZeigen(m); break;
     case 'kachel_weg': kachelWeg(m.name); break;
+    // Nicht oeffnen, sondern anbieten -- siehe seiteZeigen().
+    case 'browser':    seiteZeigen(m.adresse); break;
+    case 'browser_zu': seiteZu(); break;
     case 'ton':        tonSpielen(m); break;
     case 'ton_stopp':  tonStopp(m.runde); break;
     case 'horchen':

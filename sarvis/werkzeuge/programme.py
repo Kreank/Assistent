@@ -17,6 +17,7 @@ from claude_agent_sdk import tool
 
 from .. import config
 from .. import anzeige as anzeige_modul
+from ..netz import browser_kopf
 
 _liste: list[dict] | None = None
 _schloss = asyncio.Lock()
@@ -547,63 +548,120 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     # --- Die Seite lesen und bedienen -------------------------------------
     #
-    # Alle sechs sprechen mit dem Anzeigeprozess, in dem der Browser lebt.
-    # sicht.fragen() blockiert bis zum Zeitlimit, deshalb geht es durch
-    # einen Faden -- die Schleife darf nie auf die Optik warten muessen.
+    # Frueher sprachen diese Werkzeuge mit dem ANZEIGEPROZESS: Dort lebte
+    # der Qt-Browser, und sicht.fragen() schickte ein Datagramm hinueber
+    # und wartete auf Antwort. Auf dem Server gibt es diesen Prozess
+    # nicht -- die Oberflaeche ist eine Webseite im Browser des Nutzers,
+    # und die kann nicht in fremden Seiten lesen.
+    #
+    # Jetzt laeuft der Browser HIER, im selben Prozess: ein headless
+    # Chrome, den netz/browser_kopf.py ueber CDP steuert. Damit faellt
+    # der ganze Umweg weg -- kein Datagramm, kein Faden, kein Zeitlimit
+    # auf eine Anzeige, die vielleicht nicht laeuft.
+    #
+    # ABGRENZUNG, und die ist wichtig: web_zeigen und route_zeigen
+    # schicken eine Adresse an die Oberflaechen des Nutzers. Sie machen
+    # NICHTS in diesem Browser hier. Der Browser hier ist fuer das, was
+    # Sarvis selbst tun muss -- eine Seite lesen, ein Formular
+    # ausfuellen, einen Preis nachschlagen. Zwei Browser, zwei Zwecke,
+    # und der Nutzer sieht immer den seinen.
 
-    async def _browser_fragen(art: str, sekunden: float = 12.0, **felder):
-        antwort = await asyncio.to_thread(sicht.fragen, art, sekunden,
-                                          **felder)
-        if antwort is None:
-            return None, ("Die Anzeige antwortet nicht. Läuft sie noch?")
-        if not antwort.get("ok"):
-            return None, str(antwort.get("grund") or "Das ging nicht.")
-        return antwort, ""
+    def _browser():
+        """Der Kopfbrowser -- und beim ersten Griff auch der Rueckkanal.
+
+        rueckkanal_starten muss aus der laufenden Schleife heraus
+        geschehen (es merkt sie sich, um spaeter aus einem Faden heraus
+        Fragen hineinzureichen). werkzeuge() laeuft moeglicherweise vor
+        der Schleife, also hier und nicht dort. Mehrfach zu rufen ist
+        billig und harmlos.
+        """
+        browser_kopf.rueckkanal_starten(asyncio.get_running_loop())
+        return browser_kopf.hol()
 
     @tool(
         "web_schliessen",
-        "Macht das Browserfenster wieder zu. Für 'mach das Fenster zu', "
-        "'weg damit', 'brauch ich nicht mehr'.",
+        "Macht die Seite zu, die Sarvis gerade offen hat. Für 'mach das "
+        "zu', 'brauch ich nicht mehr'. Betrifft NICHT das, was beim "
+        "Nutzer auf dem Bildschirm steht.",
         {"type": "object", "properties": {}},
     )
     async def web_schliessen(args):
-        # Kein Rueckkanal noetig: Zumachen braucht keine Antwort, und wenn
-        # gar nichts offen war, ist der Zustand hinterher derselbe.
-        sicht.browser_zu()
-        vermerken("web_schliessen: Browserfenster zu")
+        # Zumachen heisst hier wirklich zumachen: Auf dem Dev-PC wurde
+        # nur ein Fenster versteckt und Chromium lief weiter. Hier sieht
+        # niemand ein Fenster, also gibt es keinen Grund, den Prozess zu
+        # behalten -- die 300 bis 500 MB sind damit zurueck.
+        await _browser().schliessen()
+        vermerken("web_schliessen: Browser zu")
         return {"content": [{"type": "text", "text": "Zu."}]}
 
     @tool(
         "web_lesen",
-        "Liest vor, was auf der gezeigten Seite steht. Für 'was steht da', "
-        "'lies mir das vor', 'fass die Seite zusammen'. Nur die Seite im "
-        "eigenen Fenster — in einem fremden Browser sieht Sarvis nichts.",
-        {"type": "object", "properties": {}},
+        "Liest eine Internetseite — Sarvis macht sie dafür in seinem "
+        "eigenen, unsichtbaren Browser auf. Für 'was steht auf der Seite', "
+        "'schau mal auf …', 'was kostet das dort'. MIT adresse wird die "
+        "Seite geladen und gelesen; OHNE adresse wird die zuletzt "
+        "geöffnete noch einmal gelesen (etwa nach einem Klick). Das ist "
+        "auch der Einstieg fürs Bedienen: erst hier aufmachen, dann "
+        "web_elemente.",
+        {
+            "type": "object",
+            "properties": {
+                "adresse": {
+                    "type": "string",
+                    "description": "Vollständige Adresse. Weglassen, um "
+                                   "die schon offene Seite zu lesen.",
+                },
+            },
+        },
     )
     async def web_lesen(args):
-        antwort, fehler = await _browser_fragen("web_lesen")
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
-                    "is_error": True}
+        """Eine Seite lesen -- und bei Bedarf vorher aufmachen.
+
+        Das "adresse" ist neu und musste sein. Frueher lud web_zeigen die
+        Seite in den eingebauten Browser, und web_lesen las, was dort
+        stand. web_zeigen schickt die Adresse jetzt an den Bildschirm des
+        Nutzers -- damit haette web_lesen nie wieder etwas zu lesen
+        gehabt.
+
+        Ein zweites Werkzeug "web_oeffnen" waere der naheliegende Weg
+        gewesen und der falsche: Genau diese Aufteilung gab es schon
+        einmal, und das Modell griff gemessen fuenfmal von fuenf zum
+        falschen der beiden. Also eine Tuer statt zwei -- lesen SCHLIESST
+        das Aufmachen ein.
+        """
+        browser = _browser()
+        adresse = (args.get("adresse") or "").strip()
+        if adresse:
+            ergebnis = await browser.oeffnen(adresse)
+            if not ergebnis.get("ok"):
+                return {"content": [{"type": "text", "text":
+                        ergebnis.get("grund") or "Die Seite kam nicht."}],
+                        "is_error": True}
+            vermerken(f"web_lesen: {ergebnis.get('adresse') or adresse}")
+        elif not browser.offen:
+            return {"content": [{"type": "text", "text":
+                    "Ich habe gerade keine Seite offen. Sag mir die "
+                    "Adresse, dann mache ich sie auf."}], "is_error": True}
         if leuchten:
             leuchten("Websuche")
         return {"content": [{"type": "text",
-                             "text": antwort.get("text") or "(nichts lesbar)"}]}
+                             "text": await browser.text_holen()}]}
 
     @tool(
         "web_elemente",
-        "Zählt auf, was auf der Seite anklickbar oder beschreibbar ist — "
-        "nummeriert. Diese Nummern brauchen web_klicken und web_tippen. "
-        "Vor jedem Klick einmal aufrufen: Nummern von vorhin können auf "
-        "eine andere Seite zeigen.",
+        "Zählt auf, was auf der offenen Seite anklickbar oder beschreibbar "
+        "ist — nummeriert. Diese Nummern brauchen web_klicken und "
+        "web_tippen. Vor jedem Klick einmal aufrufen: Nummern von vorhin "
+        "können auf eine andere Seite zeigen.",
         {"type": "object", "properties": {}},
     )
     async def web_elemente(args):
-        antwort, fehler = await _browser_fragen("web_elemente")
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
-                    "is_error": True}
-        elemente = antwort.get("elemente") or []
+        browser = _browser()
+        if not browser.offen:
+            return {"content": [{"type": "text", "text":
+                    "Es ist keine Seite offen — erst mit web_lesen eine "
+                    "Adresse aufmachen."}], "is_error": True}
+        elemente = await browser.elemente_holen()
         if not elemente:
             return {"content": [{"type": "text", "text":
                     "Auf der Seite ist nichts zu bedienen."}]}
@@ -625,7 +683,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     @tool(
         "web_klicken",
-        "Klickt ein Element auf der gezeigten Seite an — die Nummer kommt "
+        "Klickt ein Element auf der offenen Seite an — die Nummer kommt "
         "aus web_elemente. Vorher web_elemente aufrufen, sonst stimmt die "
         "Nummer womöglich nicht mehr.",
         {
@@ -638,12 +696,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def web_klicken(args):
-        antwort, fehler = await _browser_fragen(
-            "web_klicken", nummer_element=args.get("nummer"))
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
-                    "is_error": True}
-        e = antwort.get("ergebnis") or {}
+        e = await _browser().klicken(int(args.get("nummer") or 0))
         if not e.get("geklickt"):
             return {"content": [{"type": "text", "text":
                     e.get("grund") or "Das ging nicht."}], "is_error": True}
@@ -651,19 +704,20 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             leuchten("Websuche")
         vermerken(f"web_klicken: {e.get('text')!r}")
         satz = f"Geklickt: {e.get('text') or 'das Element'}."
-        if e.get("navigiert"):
-            satz += " Die Seite hat gewechselt."
         if e.get("neues_fenster"):
-            # Ehrlich gesagt statt verschwiegen: Der Link wollte ein neues
-            # Fenster, und das gibt es hier nicht. Sonst stuende Sarvis da
-            # und behauptete, er habe geklickt, waehrend nichts passiert.
-            satz += (" Der Link wollte ein neues Fenster aufmachen — das "
-                     "kann ich hier nicht, es ist nichts passiert.")
+            # Unter Qt stand hier "es ist nichts passiert" -- QWebEnginePage
+            # machte bei target=_blank kein zweites Fenster auf. Chrome
+            # macht es wirklich auf, und die neue Seite ist jetzt die
+            # offene. Aus einer Entschuldigung ist eine Auskunft geworden.
+            satz += (" Der Link hat eine neue Seite aufgemacht — die ist "
+                     "jetzt die offene, die alte ist zu.")
+        elif e.get("navigiert"):
+            satz += " Die Seite hat gewechselt."
         return {"content": [{"type": "text", "text": satz}]}
 
     @tool(
         "web_tippen",
-        "Schreibt Text in ein Eingabefeld der gezeigten Seite. Die Nummer "
+        "Schreibt Text in ein Eingabefeld der offenen Seite. Die Nummer "
         "kommt aus web_elemente. Abgeschickt wird dabei NICHT — dafür "
         "danach den Absende-Knopf mit web_klicken.",
         {
@@ -678,13 +732,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def web_tippen(args):
-        antwort, fehler = await _browser_fragen(
-            "web_tippen", nummer_element=args.get("nummer"),
-            text=str(args.get("text") or ""))
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
-                    "is_error": True}
-        e = antwort.get("ergebnis") or {}
+        e = await _browser().tippen(int(args.get("nummer") or 0),
+                                    str(args.get("text") or ""))
         if not e.get("getippt"):
             return {"content": [{"type": "text", "text":
                     e.get("grund") or "Das ging nicht."}], "is_error": True}
@@ -694,39 +743,57 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"Eingetragen: {e.get('wert_danach') or e.get('text')}."}]}
 
     @tool(
-        "web_zoom",
-        "Macht die gezeigte Seite größer oder kleiner. Für 'mach das "
-        "größer', 'zoom mal rein'. 1 ist die Normalgröße.",
-        {
-            "type": "object",
-            "properties": {
-                "faktor": {"type": "number",
-                           "description": "0,5 bis 3. 1 ist normal."},
-            },
-            "required": ["faktor"],
-        },
+        "web_ansehen",
+        "Schickt ein Bild der offenen Seite auf den Bildschirm des "
+        "Nutzers. Für 'zeig mal, was du da machst', 'wie sieht die Seite "
+        "aus' — und immer dann, wenn etwas hakt und der Nutzer sehen "
+        "können soll, woran. Nicht nach jedem Klick: Das wäre ein "
+        "Screencast und kostet unnötig Leitung.",
+        {"type": "object", "properties": {}},
     )
-    async def web_zoom(args):
-        antwort, fehler = await _browser_fragen(
-            "web_zoom", 6.0, faktor=args.get("faktor"))
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
+    async def web_ansehen(args):
+        """Ein Blick auf die Seite, die sonst niemand sieht.
+
+        Der Browser laeuft unsichtbar auf dem Server. Fuellt Sarvis ein
+        Formular aus oder bleibt er irgendwo haengen, steht der Nutzer
+        sonst im Dunkeln -- er kann die Seite nicht selbst aufmachen, denn
+        sein Browser ist ein anderer und ist dort nicht angemeldet.
+
+        Bewusst ein WERKZEUG und kein Automatismus. Nach jedem Klick ein
+        Bild zu schicken waere ein Screencast durch die Hintertuer: Bei
+        einem Formular mit acht Feldern sind das acht Bilder, von denen
+        sieben niemanden interessieren.
+
+        Es geht als eigene Ereignisart hinaus, nicht als Kachel: Kacheln
+        tragen Datenpunkte, keine Bilder.
+        """
+        bild = await _browser().bild()
+        if not bild.get("ok"):
+            return {"content": [{"type": "text", "text":
+                    bild.get("grund") or "Das Bild ging nicht."}],
                     "is_error": True}
+        sicht._senden(art="web_bild", daten=bild["daten"],
+                      adresse=bild.get("adresse", ""),
+                      titel=bild.get("titel", ""),
+                      breite=bild.get("breite", 0),
+                      hoehe=bild.get("hoehe", 0))
+        if leuchten:
+            leuchten("Websuche")
+        vermerken(f"web_ansehen: {bild.get('adresse')}")
+        kb = max(1, int(bild.get("bytes", 0)) // 1024)
         return {"content": [{"type": "text", "text":
-                f"Auf {antwort.get('faktor')} gestellt."}]}
+                f"Das Bild von {bild.get('titel') or 'der Seite'} liegt "
+                f"auf deinem Bildschirm ({kb} KB)."}]}
 
     @tool(
         "web_downloads",
-        "Sagt, was von den gezeigten Seiten heruntergeladen wurde und wo "
-        "es liegt. Für 'wo ist die Datei hin', 'hast du das runtergeladen'.",
+        "Sagt, was von den gelesenen Seiten heruntergeladen wurde und wo "
+        "es liegt. Für 'wo ist die Datei hin', 'hast du das "
+        "runtergeladen'.",
         {"type": "object", "properties": {}},
     )
     async def web_downloads(args):
-        antwort, fehler = await _browser_fragen("web_downloads", 6.0)
-        if fehler:
-            return {"content": [{"type": "text", "text": fehler}],
-                    "is_error": True}
-        dateien = antwort.get("dateien") or []
+        dateien = _browser().downloads()
         if not dateien:
             return {"content": [{"type": "text", "text":
                     "Von der Seite wurde nichts heruntergeladen."}]}
@@ -735,7 +802,30 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"{len(dateien)} Datei(en):\n" + "\n".join(zeilen)}]}
 
+    # WEB_ZOOM HAT KEINEN NACHFOLGER, UND ZWAR MIT ABSICHT.
+    #
+    # Zoom war eine Einstellung fuer ein AUGE. Im Overlay sass der Nutzer
+    # vor der Seite und sagte "mach das groesser"; setZoomFactor machte
+    # die Schrift groesser, und er konnte lesen.
+    #
+    # Hier sieht diese Seite niemand. Ein Zoom auf einem unsichtbaren
+    # Browser aendert nichts, was irgendwer wahrnehmen koennte -- er
+    # aendert nur, wie viel in das gedachte 1280er Fenster passt, und
+    # damit hoechstens, welche Elemente die Sichtbarkeitspruefung
+    # bestehen. Das ist keine Funktion, das ist eine Nebenwirkung.
+    #
+    # Ein Werkzeug zu bauen, das "Auf 1,5 gestellt" antwortet, ohne dass
+    # sich irgendetwas aendert, waere die schlechteste der drei
+    # Moeglichkeiten: Sarvis wuerde etwas behaupten. Also faellt es weg.
+    # Wer die Seite groesser sehen will, bekommt sie mit web_ansehen als
+    # Bild und kann darin hineinzoomen -- an seinem eigenen Bildschirm,
+    # wo Zoom auch hingehoert.
+    #
+    # Der Eintrag "web_zoom" in config.WERKZEUG_STUFEN bleibt stehen und
+    # stoert nicht: Was nicht in dieser Liste zurueckgegeben wird, sieht
+    # das Modell nicht.
+
     return [programm_starten, programm_suchen, programm_beenden,
             web_zeigen, web_schliessen, route_zeigen,
             web_lesen, web_elemente, web_klicken, web_tippen,
-            web_zoom, web_downloads]
+            web_ansehen, web_downloads]

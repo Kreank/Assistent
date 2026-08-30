@@ -339,7 +339,14 @@ class _Draht:
         os.close(w_von_chrome)
 
         schleife = asyncio.get_running_loop()
-        leser = asyncio.StreamReader()
+        # GEMESSEN, und es kostete den ersten Testlauf: StreamReader hat
+        # eine Vorgabegrenze von 64 KB, und readuntil() wirft darueber
+        # LimitOverrunError. Eine CDP-Nachricht ist regelmaessig groesser
+        # -- ein WebP-Bildschirmfoto als base64 sind schnell 200 KB, eine
+        # Elementliste auch mal 80. Der Lesefaden waere dann still
+        # gestorben und JEDE weitere Antwort ausgeblieben. Deshalb ein
+        # grosser Puffer und unten das Trennen von Hand statt readuntil.
+        leser = asyncio.StreamReader(limit=8 * 1024 * 1024)
         await schleife.connect_read_pipe(
             lambda: asyncio.StreamReaderProtocol(leser),
             os.fdopen(r_zu_uns, "rb", 0))
@@ -380,16 +387,31 @@ class _Draht:
     # --- Lesen und Schreiben ---------------------------------------------
 
     async def _lesen(self, leser: asyncio.StreamReader) -> None:
+        """Der Lesefaden: Stuecke holen, an \\0 trennen, verteilen.
+
+        Von Hand statt readuntil, weil readuntil eine Groessengrenze hat
+        und eine ueberschrittene Grenze eine Ausnahme ist -- also der
+        eine Ort, an dem ein zu grosses Bild die ganze Leitung
+        stillgelegt haette.
+        """
+        puffer = bytearray()
         try:
             while True:
-                roh = await leser.readuntil(b"\0")
-                try:
-                    nachricht = json.loads(roh[:-1].decode("utf-8"))
-                except (ValueError, UnicodeDecodeError):
-                    continue
-                self._verteilen(nachricht)
-        except (asyncio.IncompleteReadError, asyncio.CancelledError,
-                ConnectionError):
+                stueck = await leser.read(65536)
+                if not stueck:
+                    break                      # Chrome ist weg
+                puffer += stueck
+                while True:
+                    schnitt = puffer.find(b"\0")
+                    if schnitt < 0:
+                        break
+                    roh, puffer = bytes(puffer[:schnitt]), puffer[schnitt + 1:]
+                    try:
+                        nachricht = json.loads(roh.decode("utf-8"))
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    self._verteilen(nachricht)
+        except (asyncio.CancelledError, ConnectionError):
             pass
         except Exception:
             pass
@@ -425,18 +447,26 @@ class _Draht:
         """Einen Dauerhorcher anmelden: handler(methode, params, sitzung)."""
         self._laufend.append(handler)
 
+    def horchen(self, praedikat):
+        """Auf EIN Ereignis lauschen -- SOFORT angemeldet.
+
+        Gibt die Zukunft zurueck, statt schon zu warten. Der Unterschied
+        ist nicht kosmetisch: Wer erst den Befehl schickt und dann
+        anmeldet, verpasst ein Ereignis, das schneller war als er. Genau
+        das passiert bei Page.navigate auf eine Seite aus dem Zwischen-
+        speicher.
+        """
+        zukunft = asyncio.get_running_loop().create_future()
+        self._horcher.append((praedikat, zukunft))
+        return zukunft
+
     async def warten_auf(self, praedikat, sekunden: float):
         """Auf EIN Ereignis warten. Gibt None zurueck, wenn es ausbleibt."""
-        zukunft = asyncio.get_running_loop().create_future()
-        eintrag = (praedikat, zukunft)
-        self._horcher.append(eintrag)
+        zukunft = self.horchen(praedikat)
         try:
             return await asyncio.wait_for(zukunft, sekunden)
         except asyncio.TimeoutError:
             return None
-        finally:
-            if eintrag in self._horcher:
-                self._horcher.remove(eintrag)
 
     async def senden(self, methode: str, params: dict | None = None,
                      sitzung: str = "", sekunden: float = 20.0) -> dict:
@@ -556,6 +586,18 @@ class Kopfbrowser:
             "--disable-dev-shm-usage",
             "--hide-scrollbars",
             "--lang=de-DE",
+            # DAS WICHTIGSTE FLAG IN DIESER LISTE, und es sieht nicht so
+            # aus. Ohne es sucht Chrome beim ersten Netzzugriff ueber
+            # D-Bus einen Schluesselbund (gnome-keyring, KWallet) fuer
+            # seinen Passwortspeicher. Auf einem Server gibt es keinen,
+            # und Chrome merkt das nicht schnell, sondern nach einem
+            # Zeitablauf. GEMESSEN, dreimal hintereinander: die erste
+            # Navigation zu example.com brauchte 25,04 s, die zweite
+            # 0,07 s -- mit --password-store=basic 0,05 s und 0,05 s.
+            # Ein halbes Werkzeug, das in jeder zweiten Sitzung
+            # "die Seite hat nicht geantwortet" meldet, waere daran
+            # gescheitert, und niemand haette es bei Chrome gesucht.
+            "--password-store=basic",
             "--disable-features=Translate,MediaRouter,OptimizationHints",
             "--disable-background-networking",
             "--mute-audio",
@@ -755,10 +797,10 @@ class Kopfbrowser:
             self._waechter_wecken()
             if not self.offen:
                 return {"ok": False, "grund": "Der Browser ist nicht da."}
-            geladen = asyncio.ensure_future(self._draht.warten_auf(
+            # Erst lauschen, dann losschicken -- siehe _Draht.horchen.
+            geladen = self._draht.horchen(
                 lambda m, p, s: (m == "Page.loadEventFired"
-                                 and s == self._sitzung),
-                zeitlimit))
+                                 and s == self._sitzung))
             try:
                 antwort = await self._draht.senden(
                     "Page.navigate", {"url": adresse}, self._sitzung,
@@ -772,7 +814,11 @@ class Kopfbrowser:
                 return {"ok": False,
                         "grund": f"Die Seite kam nicht: "
                                  f"{antwort['errorText']}"}
-            await geladen
+            try:
+                await asyncio.wait_for(geladen, zeitlimit)
+            except asyncio.TimeoutError:
+                # Kein Grund aufzugeben: Was schon da ist, wird gelesen.
+                pass
             self._welt = None
             self._elemente = {}
             gelungen, wert = await self._js(
