@@ -343,6 +343,8 @@ class Hirn:
                 return True
             return not gesucht.issubset(config.SCHNELLE_WERKZEUGE)
         return name not in config.SCHNELLE_WERKZEUGE
+
+    def _subagenten_verfolgen(self, nachricht) -> None:
         """Mitschreiben, welche Unter-Arbeiter gerade laufen.
 
         Start ist ein Werkzeugaufruf aus config.UNTERARBEITER in SEINER
