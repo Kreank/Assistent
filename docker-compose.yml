@@ -97,9 +97,26 @@ services:
       # `docker compose run --rm sarvis claude` und dann anmelden) und
       # muss einen Neubau ueberleben.
       #
-      # BEWUSST NICHT /home/server3070/.claude: Das ist Saschas eigene
-      # Anmeldung samt Sitzungsverlauf. Sarvis bekommt seine eigene.
+      # Sarvis' eigener Ordner -- Sitzungsverlauf, Einstellungen,
+      # Projekte. Bewusst NICHT Saschas: Sein Verlauf geht Sarvis
+      # nichts an, und umgekehrt.
       - /srv/data/sarvis/claude:/home/sarvis/.claude
+
+      # Die ANMELDUNG dagegen wird geteilt, und zwar als einzelne Datei.
+      #
+      # Erst habe ich sie kopiert. Das hielt vier Stunden, dann kam auf
+      # jeden Zuruf "OAuth session expired": Ein Refresh-Token gilt fuer
+      # eine Einloesung, und wer zuerst erneuert, macht die Kopie des
+      # anderen ungueltig.
+      #
+      # Geteilt passiert genau das nicht. Wer erneuert, schreibt das
+      # neue Token in DIESE Datei, und alle anderen lesen es beim
+      # naechsten Mal. So lief auch der Telegram-Assistent monatelang --
+      # mein Fehler war nicht "zwei Sitzungen", sondern die Kopie.
+      #
+      # Einzelne Datei und nicht der Ordner: Nur der Zugang wird
+      # geteilt, nicht der Verlauf.
+      - /home/server3070/.claude/.credentials.json:/home/sarvis/.claude/.credentials.json
 
       # Nur lesen: die Zeitzone des Servers.
       - /etc/localtime:/etc/localtime:ro
