@@ -1064,6 +1064,14 @@ WERKZEUG_STUFEN = {
     # daraus, er habe ueberhaupt keinen Dateizugriff.
     "PowerShell": "pfad",
 
+    # Auf dem Rechner des Nutzers etwas tun. "fragen", nicht "still":
+    # Ein Programm zu starten ist eine Handlung an einer fremden
+    # Maschine, und wer am Rechner sitzt, soll nicht ueberrascht werden.
+    # Musik zu steuern dagegen ist zurueckzunehmen, indem man wieder
+    # drueckt -- das darf still.
+    "programm_am_rechner": "fragen",
+    "musik_am_rechner": "still",
+
     # --- Ins Netz sehen ---------------------------------------------------
     # Auf dem Dev-PC fehlten diese beiden, und es fiel nicht auf: Dort
     # machte web_zeigen den eingebauten Browser auf, und gelesen hat

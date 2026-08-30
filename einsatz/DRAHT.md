@@ -39,13 +39,29 @@ Nicht als Query-Parameter in der Adresse: Der stünde im Zugriffslog des
 Reverse Proxy, im Browserverlauf und in jedem Weiterleitungs-Header.
 
 ```json
-{ "schluessel": "…", "kann_browser": true }
+{ "schluessel": "…", "kann_browser": true, "kann": ["kann_rechner"] }
 ```
 
 `kann_browser` sagt, ob dieses Gerät die eingebauten Web-Werkzeuge
 bedienen kann (eine Seite lesen, ein Formular ausfüllen). Sarvis richtet
 solche Fragen an genau **ein** Gerät, und zwar das erste verbundene mit
 `true`. Für einen Rechner sinnvoll, fürs Handy nicht.
+
+`kann` ist eine Liste von Fähigkeiten, die über das Anzeigen hinausgehen.
+Bisher gibt es eine:
+
+| Fähigkeit | bedeutet |
+|---|---|
+| `kann_rechner` | „Ich kann Programme starten und Medientasten drücken" |
+
+**Eine Weboberfläche meldet sie nicht** — ein Browser darf keine
+Programme starten, und das soll so bleiben. Eine native App meldet sie.
+
+Was hier fehlt, fehlt mit Folgen: Sarvis fragt vor jedem solchen Befehl
+nach, ob überhaupt jemand ihn ausführen könnte, und sagt sonst ehrlich,
+dass er es von hier nicht kann. Eine App, die `kann_rechner` meldet und
+die Befehle dann ignoriert, ist schlimmer als eine, die es nicht meldet:
+Sarvis sagt dann „erledigt", und nichts ist passiert.
 
 Antwort bei Erfolg:
 
@@ -104,6 +120,7 @@ erweitern, ohne alle Oberflächen gleichzeitig anzufassen.
 | `browser` | `adresse` | Rest aus dem Desktop-Betrieb |
 | `browser_zu` | — | dito |
 | `horchen` | `an` | Dauerstrom jetzt schicken oder nicht |
+| `befehl` | `befehl`, plus Felder je nach Art | etwas auf dem Gerät TUN |
 | `verschieben` | `an` | dito |
 
 <!-- /draht:herein -->
@@ -163,6 +180,33 @@ Begründung „kein Klick, der an der Rückfrage vorbeiläuft". Gehandelt
 wird über Sarvis, nicht am Bild vorbei. Auf einem Touchscreen ist ab Werk
 alles anklickbar — die Sicherung muss also **aktiv** wiederhergestellt
 werden, sonst verschwindet sie lautlos.
+
+### `befehl` — die Umkehrung
+
+Alle anderen Arten schicken, was man **sehen** soll. Diese schickt, was
+jemand **tun** soll:
+
+```json
+{ "art": "befehl", "befehl": "programm", "name": "Spotify", "was": "" }
+{ "art": "befehl", "befehl": "medien", "was": "pause" }
+```
+
+`medien` kennt: `pause` · `weiter` · `zurueck` · `stop` · `lauter` ·
+`leiser` · `stumm`. Unter Windows sind das die virtuellen Medientasten
+(`VK_MEDIA_PLAY_PAUSE` und Geschwister) — sie wirken auf das, was gerade
+Ton macht, ohne dass man wissen muss, welches Programm das ist.
+
+**Warum es das gibt:** Auf dem Dev-PC konnte Sarvis Programme starten und
+Musik steuern — er lief ja auf demselben Rechner. Auf dem Server ist
+kein Spotify installiert, kein Bildschirm angeschlossen und niemand, der
+etwas hören würde. Zwölf Werkzeuge konnten nur noch scheitern.
+
+Also die Umkehrung: Nicht Sarvis führt den Befehl aus, sondern das
+Gerät, vor dem jemand sitzt. Damit wird aus dem Verlust ein Gewinn —
+vorher ging es nur auf dem einen Rechner, jetzt auf jedem, an dem eine
+App läuft. Vom Handy aus „mach Musik an" zu sagen, ging vorher gar nicht.
+
+Wer `kann_rechner` nicht meldet, bekommt diese Art nie zu sehen.
 
 ### `hintergrund`
 

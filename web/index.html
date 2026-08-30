@@ -60,12 +60,79 @@ body{display:flex;flex-direction:column;
   padding:2px 0;position:relative}
 .kachel .zeile .balken{position:absolute;left:-6px;top:1px;bottom:1px;
   border-radius:2px;opacity:.13}
-.kachel .zeile span:first-child{position:relative;overflow:hidden;
+/* nth-of-type, nicht first-child: In einer Zeile MIT Balken ist das
+   erste Kind das <i>, und damit traf first-child ausgerechnet die
+   Zeilen nicht, um die es geht -- ihre Bezeichnung wurde nicht
+   gekuerzt, sondern lief in den Betrag. */
+.kachel .zeile span:nth-of-type(1){position:relative;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;opacity:.78}
-.kachel .zeile span:last-child{position:relative;white-space:nowrap}
+.kachel .zeile span:nth-of-type(2){position:relative;white-space:nowrap}
 .kachel .fuss{margin-top:7px;font-size:9px;letter-spacing:.13em;
   text-transform:uppercase;opacity:.45}
 @keyframes auf{from{opacity:0;transform:translateY(-6px)}to{opacity:1}}
+
+/* --- Die acht uebrigen Kachelformen --------------------------------
+   Gemalt wird in sarvis.js, hier steht nur, was CSS besser kann als
+   ein SVG: Umbruch, Ausrichtung, Kuerzen mit Auslassungspunkten.
+
+   Eine Regel gilt fuer alles hier: NICHTS wird anklickbar. Das ist
+   die Uebersetzung von Qt.WindowTransparentForInput -- "kein Klick,
+   der an der Rueckfrage vorbeilaeuft". Es steht schon am #kacheln
+   und an der .kachel; keine Regel hier hebt es auf. */
+
+/* Eine gemalte Form ist so breit wie die Kachel und so hoch, wie sie
+   sich selbst ausgerechnet hat -- deshalb kein height:auto. */
+.kachel .bild{display:block;width:100%;height:auto;overflow:visible}
+
+/* Die Marke unter einer gekuerzten Form. Ein stummer Schnitt sieht aus
+   wie ein vollstaendiger Text. */
+.kachel .marke{text-align:center;font-size:10px;padding:2px 0}
+
+/* blasen: die Seite sagt, wer geschrieben hat. */
+.kachel .blase{border-radius:6px;padding:7px;margin:0;line-height:14px;
+  max-width:100%;word-break:break-word;opacity:.92}
+.kachel .blase.mir{margin-left:auto}
+.kachel .blasenzeit{font-size:9px;line-height:12px;padding-top:1px;opacity:.45}
+.kachel .blasenzeit.mir{text-align:right}
+.kachel .blase + .blase,.kachel .blasenzeit + .blase{margin-top:7px}
+
+/* vergleich: die Zahlen bekommen, was sie brauchen, die Bezeichnung
+   den Rest -- und kuerzt sich selbst. */
+.kachel .vgl{opacity:.86;display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;
+  column-gap:5px;align-items:center;row-gap:1px}
+.kachel .vgl .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:1px 0}
+.kachel .vgl .z{text-align:right;white-space:nowrap}
+.kachel .vgl .d span{display:inline-flex;align-items:center;gap:3px}
+.kachel .vgl .k{font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  opacity:.55;padding-bottom:2px}
+
+/* text: der Umbruch ist schon gerechnet, hier steht er nur. */
+.kachel .fliess{line-height:14px;opacity:.86}
+.kachel .fliess div{min-height:1px}
+
+/* torte: nebeneinander, wenn Platz ist -- sonst untereinander.
+   Die Entscheidung faellt in sarvis.js, siehe dort. */
+.kachel .torte{display:flex;gap:14px;align-items:center}
+.kachel .torte.hoch{flex-direction:column;gap:8px}
+.kachel .torte .ring{flex:0 0 auto;width:auto;height:auto}
+.kachel .legende{opacity:.88;flex:1 1 auto;min-width:0;width:100%;display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto auto;column-gap:4px;
+  align-items:center;row-gap:2px}
+.kachel .legende .leg{display:contents}
+.kachel .tupf{width:7px;height:7px;border-radius:2px;display:block}
+.kachel .tupf.leer{background:none;border:1px solid;border-radius:0}
+.kachel .legende .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kachel .legende .wt,.kachel .legende .pz{text-align:right;white-space:nowrap}
+
+/* kategorien: der Haarstrich unter der Ueberschrift ist das, was aus
+   einer eingerueckten Liste eine gruppierte macht -- ohne ihn liest
+   man die Ueberschrift als ersten Posten. */
+.kachel .grkopf{display:flex;justify-content:space-between;gap:9px;
+  font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  border-bottom:1px solid;padding:0 0 2px;margin:6px 0 2px}
+.kachel .grkopf:first-child{margin-top:0}
+.kachel .zeile.ein{margin-left:11px}
 
 /* --- Was im Hintergrund arbeitet ----------------------------------- */
 #hintergrund{position:absolute;top:10px;left:14px;width:min(52vw,220px);

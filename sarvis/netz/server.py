@@ -163,7 +163,12 @@ class Endpunkt:
             await ws.close(code=4401, message=b"kein Zugang")
             return None
 
-        o = Oberflaeche(name, kann_browser=bool(m.get("kann_browser")))
+        # Was diese Oberflaeche kann, sagt sie selbst. Ein Browser
+        # meldet nichts -- er DARF keine Programme starten, und das ist
+        # richtig so. Eine native App meldet "kann_rechner".
+        koennen = {str(f) for f in (m.get("kann") or []) if str(f)}
+        o = Oberflaeche(name, kann_browser=bool(m.get("kann_browser")),
+                        faehigkeiten=koennen)
         await ws.send_str(als_text({
             "art": "willkommen",
             "geraet": name,

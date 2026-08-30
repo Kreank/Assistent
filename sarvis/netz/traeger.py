@@ -45,9 +45,14 @@ WICHTIG = frozenset({"werkzeug", "kachel_weg", "verschieben"})
 class Oberflaeche:
     """Eine verbundene Bedienoberflaeche -- ein Handy, ein Dev-PC."""
 
-    def __init__(self, name: str, kann_browser: bool = False):
+    def __init__(self, name: str, kann_browser: bool = False,
+                 faehigkeiten: set[str] | None = None):
         self.name = name
         self.kann_browser = kann_browser
+        # Was diese Oberflaeche ausserdem kann. Ein Browser meldet
+        # nichts; eine native App sagt bei der Anmeldung, dass sie
+        # Programme starten und Medientasten druecken kann.
+        self.faehigkeiten = set(faehigkeiten or ())
         self.schlange: asyncio.Queue = asyncio.Queue()
         # Offene Fragen dieser Oberflaeche: nummer -> Future
         self.offen: dict[str, asyncio.Future] = {}
@@ -183,6 +188,10 @@ class NetzTraeger:
 
     def wie_viele(self) -> int:
         return len(self.oberflaechen)
+
+    def kann(self, faehigkeit: str) -> bool:
+        """Kann irgendeine verbundene Oberflaeche das?"""
+        return any(faehigkeit in o.faehigkeiten for o in self.oberflaechen)
 
 
 def als_text(felder: dict) -> str:

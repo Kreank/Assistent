@@ -14,7 +14,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 from .. import config
 
 from . import (auftrag, bericht, erinnern, finanzen, google, kacheln, medien,
-               programme, projekte, telegram, verlauf, zeit)
+               programme, projekte, rechner, telegram, verlauf, zeit)
 
 SERVER = "sarvis"
 
@@ -74,6 +74,8 @@ def bauen(sagen, leuchten=None, melden=None):
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)
+    # Was auf dem Rechner des Nutzers geschehen soll, nicht hier.
+    alle += rechner.werkzeuge(protokoll, leuchten)
     if config.finanz_schluessel():
         # Ohne Schluessel gaebe es acht Werkzeuge, die nur "kein
         # Zugang" sagen koennen -- das verwirrt mehr, als es nuetzt.

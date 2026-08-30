@@ -380,6 +380,31 @@ class Anzeige:
                      spalten=[str(x) for x in (spalten or [])][:2],
                      sekunden=round(float(sekunden), 1))
 
+    def befehl(self, art: str, **felder) -> None:
+        """Einen Befehl an die Oberflaechen schicken, die ihn ausfuehren.
+
+        Die Umkehrung des ueblichen Wegs: Sonst schickt Sarvis, was man
+        SEHEN soll. Hier schickt er, was jemand TUN soll -- ein Programm
+        starten, die Musik anhalten. Auf dem Server geht beides nicht
+        selbst, vor dem richtigen Rechner sitzt jemand anderes.
+
+        Eine Oberflaeche, die das nicht kann, ignoriert es einfach --
+        unbekannte Arten zu ueberspringen ist ohnehin die Regel. Deshalb
+        vorher kann() fragen, sonst sagt Sarvis "erledigt" ins Leere.
+        """
+        self._senden(art="befehl", befehl=str(art), **felder)
+
+    def kann(self, faehigkeit: str) -> bool:
+        """Kann eine verbundene Oberflaeche das?
+
+        Ueber UDP immer False: Dort haengt ein Anzeigefenster, kein
+        Rechner, der Befehle ausfuehrt. Auf Windows brauchte Sarvis das
+        auch nie -- er lief ja selbst auf dem Rechner.
+        """
+        traeger = self._traeger
+        pruefen = getattr(traeger, "kann", None)
+        return bool(pruefen(faehigkeit)) if pruefen else False
+
     def kachel_weg(self, name: str) -> None:
         """Eine Kachel ausblenden lassen -- der Auftrag ist fertig."""
         self._senden(art="kachel_weg", name=str(name))

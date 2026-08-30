@@ -50,6 +50,35 @@ Dauerstrom.
 
 ---
 
+## Was die App kann, was der Browser nicht darf
+
+Bei der Anmeldung meldet sie ihre Fähigkeiten:
+
+```json
+{ "schluessel": "…", "kann_browser": true, "kann": ["kann_rechner"] }
+```
+
+`kann_rechner` heißt: „Ich kann Programme starten und Medientasten
+drücken." Damit bekommt die App eine Art, die eine Weboberfläche nie
+sieht — `befehl` (Einzelheiten in DRAHT.md).
+
+    { "art": "befehl", "befehl": "programm", "name": "Spotify" }
+    { "art": "befehl", "befehl": "medien", "was": "pause" }
+
+Unter Windows sind das `Start-Process` bzw. die virtuellen Medientasten
+über `keybd_event` (`VK_MEDIA_PLAY_PAUSE`, `VK_VOLUME_UP` …). Der Reiz
+daran ist, dass es **kein Konto braucht**: Das Signal geht ans
+Betriebssystem, und wer gerade Ton macht, reagiert — Spotify, YouTube im
+Browser, VLC.
+
+**Melde `kann_rechner` nur, wenn du die Befehle wirklich ausführst.**
+Eine App, die es meldet und dann nichts tut, ist schlimmer als eine, die
+es weglässt: Sarvis sagt dann „erledigt", und nichts ist passiert. Ohne
+die Meldung sagt er ehrlich, dass er es von dort nicht kann.
+
+Unter Android ist `programm` mit einem Intent lösbar, `medien` über den
+`MediaSession`-Dienst. Was dort nicht geht, lässt man weg — siehe oben.
+
 ## Der Tastaturhaken
 
 `SetWindowsHookEx` mit `WH_KEYBOARD_LL`. Drei Dinge, die zählen:
