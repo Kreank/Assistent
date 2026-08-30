@@ -1,0 +1,112 @@
+# Sarvis auf dem Server.
+#
+#   docker compose build          bauen
+#   docker compose up -d          starten
+#   docker compose logs -f        zusehen
+#   docker compose run --rm sarvis bash    hineinschauen, ohne den
+#                                          Dienst anzufassen
+
+services:
+  sarvis:
+    build:
+      context: .
+      args:
+        # Damit die uid im Image zu der auf dem Host passt -- sonst
+        # gehoert alles, was Sarvis schreibt, jemand anderem.
+        UID: "1000"
+        GID: "1000"
+    image: sarvis:latest
+    container_name: sarvis
+    command: python -m sarvis.main
+    user: "1000:1000"
+    working_dir: /srv/storage/projects/sarvis
+    init: true
+
+    # WARUM HOST-NETZ UND KEINE PORT-ABBILDUNG
+    #
+    # netz/server.py bindet fest auf 127.0.0.1:8900, mit Begruendung:
+    # nach aussen soll ausschliesslich Caddy fuehren. Im Bruecken-Netz
+    # waere das aber die Loopback-Adresse DES CONTAINERS -- eine
+    # Abbildung "127.0.0.1:8900:8900" liefe ins Leere, denn abgebildet
+    # wird nur, was auf 0.0.0.0 lauscht. Der Dienst waere gestartet und
+    # trotzdem nicht erreichbar, ohne Fehlermeldung auf beiden Seiten.
+    #
+    # Mit dem Host-Netz ist das 127.0.0.1 des Containers das des
+    # Servers. Damit gilt genau das, was gefordert war: 8900 nur auf
+    # Loopback, davor Caddy -- und server.py bleibt unberuehrt.
+    #
+    # Nebenwirkung, hier erwuenscht: Ollama auf 11434 ist direkt
+    # erreichbar, host.docker.internal wird nicht gebraucht.
+    network_mode: host
+
+    environment:
+      # --- Orte (orte.py liest sie) ---
+      SARVIS_DATEN: /srv/data/sarvis
+      SARVIS_PRIVAT: /home/server3070
+      SARVIS_ARBEIT: /srv/storage/projects
+
+      # Modelle von Whisper landen hier, nicht im Image.
+      HF_HOME: /srv/data/sarvis/modelle/hf
+      XDG_CACHE_HOME: /srv/data/sarvis/cache
+
+      # Der Verlauf, den das SDK schreibt. Ausgeschrieben statt aus
+      # WURZEL gerechnet, damit ein Umzug des Quelltextes ihn nicht
+      # still verliert (orte.py, VERLAUF_ORDNER).
+      SARVIS_VERLAUF: /home/sarvis/.claude/projects/-srv-storage-projects-sarvis
+
+      # --- Git ---
+      # Steht auch im Image (git config --system). Hier noch einmal,
+      # weil es der Knopf ist, an dem man dreht -- und weil die
+      # Umgebungsvariablen die Datei uebersteuern, nicht umgekehrt.
+      GIT_AUTHOR_NAME: Sarvis
+      GIT_AUTHOR_EMAIL: sarvis@tech-artist.de
+      GIT_COMMITTER_NAME: Sarvis
+      GIT_COMMITTER_EMAIL: sarvis@tech-artist.de
+
+      HOME: /home/sarvis
+      TZ: Europe/Berlin
+      PYTHONUNBUFFERED: "1"
+
+    volumes:
+      # Der Quelltext. Gleicher Pfad wie auf dem Host -- siehe die lange
+      # Begruendung im Dockerfile (schutz.py und der Verlauf-Slug).
+      # Liegt ueber der Kopie aus dem Image, damit eine Aenderung wirkt,
+      # ohne neu zu bauen.
+      - /srv/storage/projects:/srv/storage/projects
+
+      # Der Benutzerordner als "privat"-Projektort. Ebenfalls gleicher
+      # Pfad, aus demselben Grund.
+      - /home/server3070:/home/server3070
+
+      # Alles, was Sarvis mitbringt und erzeugt: Gedaechtnis, Timer,
+      # Auftragsjournal, Zugaenge, Stimmen, Modelle.
+      - /srv/data/sarvis:/srv/data/sarvis
+
+      # Die Anmeldung der Claude-Code-CLI. Kommt von aussen (einmalig
+      # `docker compose run --rm sarvis claude` und dann anmelden) und
+      # muss einen Neubau ueberleben.
+      #
+      # BEWUSST NICHT /home/server3070/.claude: Das ist Saschas eigene
+      # Anmeldung samt Sitzungsverlauf. Sarvis bekommt seine eigene.
+      - /srv/data/sarvis/claude:/home/sarvis/.claude
+
+      # Nur lesen: die Zeitzone des Servers.
+      - /etc/localtime:/etc/localtime:ro
+
+    # Die Grafikkarte. Wie beim Transkript-Dienst -- der nvidia-Treiber
+    # wird eingehaengt, nichts davon steckt im Image.
+    #
+    # ACHTUNG, die Karte ist knapp: 8 GB, und Ollama belegt mit
+    # qwen3.5:9b davon rund 5,6 GB. large-v3-turbo mit
+    # compute_type="int8_float16" braucht gemessen 1.297 MiB -- das
+    # passt, aber nicht zweimal. Wer hier ein groesseres Whisper-Modell
+    # einstellt, nimmt es Ollama weg.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    restart: unless-stopped
