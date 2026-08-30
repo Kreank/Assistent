@@ -83,7 +83,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}" \
 # Eigene Schicht vor dem Quelltext: Eine Aenderung an sarvis/*.py soll
 # nicht die 1,5 GB CUDA-Raeder neu ziehen.
 #
-# DIE EINE AUSNAHME: openwakeword.
+# DIE ERSTE AUSNAHME: openwakeword.
 #
 # Es steht in requirements.txt allein wegen openwakeword.vad.VAD, dem
 # Silero-Sprachdetektor -- der laeuft ueber onnxruntime. Das Paket
@@ -99,13 +99,70 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}" \
 # requirements.txt bleibt dabei unangetastet -- sie beschreibt, was
 # Sarvis braucht; wie es auf dieser Python-Fassung hineinkommt, ist
 # Sache des Images.
+#
+# DIE ZWEITE UND UNANGENEHMSTE: aiohttp fehlt in requirements.txt.
+#
+# netz/server.py schreibt "from aiohttp import WSMsgType, web" -- der
+# Endpunkt auf 8900 IST aiohttp. Die Liste nennt es trotzdem nicht;
+# gemessen im ersten gebauten Image:
+#
+#   ModuleNotFoundError: No module named 'aiohttp'
+#
+# Vermutlich, weil sie mit ast ueber sarvis/*.py erhoben wurde, als
+# netz/ noch nicht stand. Es gehoert in requirements.txt und nicht
+# hierher -- aber solange es dort fehlt, faellt der Container erst beim
+# Start auf die Nase, und dieser Ausfall waere teurer als die eine
+# Zeile hier.
+#
+# DIE DRITTE: pynput.
+#
+# Es haengt auf Linux an evdev, und evdev liefert ueberhaupt keine
+# Raeder -- es wird immer uebersetzt und braucht dafuer linux/input.h
+# aus linux-libc-dev sowie einen Uebersetzer. Ohne die beiden bricht
+# der Bau ab ("The 'linux/input.h' ... include files are missing",
+# gemessen). Deshalb kommen gcc und die Header hier herein und im
+# selben Schritt wieder heraus: In einer eigenen Schicht blieben sie
+# sonst fuer immer im Image liegen.
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip \
-    && grep -v '^openwakeword' /tmp/requirements.txt > /tmp/requirements-ohne-oww.txt \
-    && pip install --no-cache-dir -r /tmp/requirements-ohne-oww.txt \
-    && pip install --no-cache-dir --no-deps openwakeword \
-    && pip install --no-cache-dir scikit-learn tqdm \
-    && rm /tmp/requirements.txt /tmp/requirements-ohne-oww.txt
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gcc libc6-dev linux-libc-dev; \
+    pip install --no-cache-dir --upgrade pip; \
+    grep -v '^openwakeword' /tmp/requirements.txt > /tmp/requirements-ohne-oww.txt; \
+    pip install --no-cache-dir -r /tmp/requirements-ohne-oww.txt; \
+    pip install --no-cache-dir --no-deps openwakeword; \
+    pip install --no-cache-dir scikit-learn tqdm; \
+    pip install --no-cache-dir aiohttp; \
+    rm /tmp/requirements.txt /tmp/requirements-ohne-oww.txt; \
+    apt-get purge -y --auto-remove gcc libc6-dev linux-libc-dev; \
+    rm -rf /var/lib/apt/lists/*
+
+# --- Das VAD-Modell -------------------------------------------------------
+#
+# openwakeword bringt silero_vad.onnx NICHT mit. Das Rad ist 60 KB
+# gross, die ONNX-Datei fehlt darin, und nachgeladen wuerde sie nur
+# ueber openwakeword.utils.download_models() -- das ruft in Sarvis
+# niemand. Gemessen:
+#
+#   VAD() ohne Datei  ->  NoSuchFile [ONNXRuntimeError] : 3 : NO_SUCHFILE
+#
+# Und weil weckwort.py:194 genau diesen Fehler abfaengt und still auf
+# "Weckwort aus" schaltet, sieht der Ausfall nach nichts aus: Es fehlt
+# einfach eine Funktion, ohne Meldung.
+#
+# Die Datei liegt unter DATEN (1,8 MB, sha256 a35ebf52...) und damit im
+# Volume. Hier steht deshalb ein Verweis, keine Kopie -- so bleibt das
+# Modell dort, wo Modelle hingehoeren, das Image braucht den Datenordner
+# nicht schon beim Bauen, und ein Austausch der Datei wirkt sofort.
+#
+# Der Zielpfad wird ermittelt, nicht geraten: find_spec liest ihn aus
+# der Installation, ohne das Paket auszufuehren.
+RUN set -eux; \
+    OWW="$(python -c 'import importlib.util as u; print(u.find_spec("openwakeword").submodule_search_locations[0])')"; \
+    echo "openwakeword liegt in $OWW"; \
+    mkdir -p "$OWW/resources/models"; \
+    ln -sfn /srv/data/sarvis/vad/silero_vad.onnx "$OWW/resources/models/silero_vad.onnx"; \
+    ls -l "$OWW/resources/models/silero_vad.onnx"
 
 # ctranslate2 sucht libcublas und libcudnn ueber den Linker-Pfad, nicht
 # ueber Python. Die pip-Pakete nvidia-cublas-cu12/nvidia-cudnn-cu12
