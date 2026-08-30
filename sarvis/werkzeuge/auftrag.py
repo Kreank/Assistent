@@ -36,7 +36,7 @@ from claude_agent_sdk import (
     tool,
 )
 
-from .. import config
+from .. import config, schutz
 from .projekte import _pfad
 
 # Werkzeuge, die der Arbeiter benutzen darf. Alles Uebrige wird abgelehnt.
@@ -471,8 +471,21 @@ class Werkstatt:
                         return PermissionResultDeny(
                             message="Dieser Befehl ist gesperrt."
                         )
-                # Absolute Pfade auf andere Laufwerke oder Ordner: nein.
-                for gefunden in re.findall(r"[a-zA-Z]:[\\/][^\s\"']*", befehl):
+                # Pfade, die aus dem Projekt herausfuehren: nein.
+                #
+                # Die Erkennung kommt bewusst aus schutz.pfade_im_befehl
+                # statt aus einem zweiten Regex hier. Der zweite war naemlich
+                # stehengeblieben, als der erste um POSIX erweitert wurde --
+                # er suchte weiter nur nach Laufwerksbuchstaben und fand auf
+                # Linux gar nichts. Gemessen liefen dadurch alle diese
+                # Befehle des Arbeiters ungeprueft durch:
+                #     cat /etc/shadow
+                #     cp /home/server3070/.ssh/id_ed25519 .
+                #     docker run -v /:/host alpine cat /host/etc/shadow
+                # Read/Write/Grep/Glob waren die ganze Zeit sauber begrenzt --
+                # nur Bash, das Werkzeug mit der groessten Reichweite, nicht.
+                # Eine Ortspruefung, zwei Regexe: einer davon veraltet still.
+                for gefunden in schutz.pfade_im_befehl(befehl, str(wurzel)):
                     if not innerhalb(gefunden):
                         return PermissionResultDeny(
                             message=f"{gefunden} liegt außerhalb des Projekts."

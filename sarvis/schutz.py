@@ -18,6 +18,7 @@ nicht selbst aendern duerfen, und Befehle, die ein verhoertes "ja" nicht
 tragen wuerde.
 """
 import re
+import sys
 import shlex
 from pathlib import Path
 
@@ -230,24 +231,92 @@ SUCHBEFEHLE = (
 )
 
 
-def pfade_im_befehl(befehl: str) -> list[str]:
-    """ALLE Pfade eines Befehls -- auch in Git-Bash-Schreibweise.
+# Ein Schema-Praefix wie "http://" oder "file://". Wird vor der
+# Pfadsuche ausgeschnitten: Sonst liest der POSIX-Zweig aus
+# "curl http://x.example/y" den Pfad "//x.example/y", und der
+# Laufwerks-Zweig machte daraus gemessen "p://x.example/y" -- beides
+# keine Pfade, aber beide loesen Rueckfragen aus, die niemand versteht.
+_SCHEMA = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://\S*")
 
-    Gesucht wurde bisher nur nach Laufwerksbuchstaben. Unter Windows
-    laeuft das Bash-Werkzeug aber in der Git-Bash, und die schreibt
-    Laufwerke als "/d/...". Gemessen: 'ls /d/Strato Server' fiel dadurch
-    auf "frei" durch, waehrend 'dir D:\\Strato Server' richtig fragte --
-    derselbe Ordner, nur anders geschrieben.
+# Ein absoluter POSIX-Pfad. Das (?<![\w:/.]) haelt vier Faelle heraus:
+# Wortzeichen davor (Division "a/b", Optionen "-n/x"), einen
+# Doppelpunkt (Laufwerksform, die der Zweig darueber schon hat), einen
+# zweiten Schraegstrich -- und einen Punkt, damit aus "../../.env" nicht
+# der Pfad "/../.env" wird. Der faellt zwar streng aus (er loest sich zu
+# /.env auf und liegt nirgends), aber zufaellig streng ist nicht streng.
+_POSIX_PFAD = re.compile(r"(?<![\w:/.])(/[^\s\"';|]*)")
 
-    Rueckgabe in Laufwerksform, damit die Stufen-Pruefungen damit
-    weiterarbeiten koennen.
+# Ein RELATIVER Pfad, aber nur mit "./" oder "../" davor.
+#
+# Ohne diesen Zweig blieb der Ausbruch nach oben offen: Steht in einem
+# Befehl gar kein absoluter Pfad, faellt freigabe._befehl_ganz_unter auf
+# den Arbeitsordner zurueck und haelt ihn fuer erlaubt. Damit deckte eine
+# Freigabe fuer "Befehle in mcn" auch
+#   cd /srv/storage/projects/mcn && cat ../../../home/server3070/.ssh/id_ed25519
+#
+# Bewusst NUR mit Punkt-Praefix. Ein blosses "src/app.py" mitzunehmen
+# hiesse, jedes Unterkommando nach Pfaden abzusuchen, und liefe bei
+# "npm run a/b" oder "git log --format=x/y" ins Leere -- False Positives
+# an einer Stelle, an der jeder davon eine gesprochene Rueckfrage ist.
+# "./" und "../" dagegen sind eindeutig, und genau sie tragen den
+# Ausbruch.
+_REL_PFAD = re.compile(r"(?<![\w:/.])(\.\.?/[^\s\"';|]*)")
+
+
+def pfade_im_befehl(befehl: str, bezug: str | None = None) -> list[str]:
+    """ALLE Pfade eines Befehls -- POSIX wie Windows.
+
+    Diese eine Funktion traegt vier Sicherungen: die NIE_LESEN/
+    NIE_SCHREIBEN-Pruefung ueber Befehle (befehl_stufe), die vierte
+    Bedingung von entwicklung_frei ("jeder genannte Pfad liegt auch im
+    Entwicklungsbereich"), _befehl_ganz_unter in freigabe.py und den
+    Bash-Zweig des Arbeiter-Wachhunds. Findet sie nichts, greift keine
+    davon -- und zwar still.
+
+    Genau das war auf Linux der Fall. Gemessen vor diesem Umbau, mit
+    den heutigen Listen und Arbeitsordner /srv/storage/projects/mcn:
+
+        pfade_im_befehl('cat /etc/shadow')  -> []
+        befehl_stufe('ls /')                -> 'frei'
+        entwicklung_frei('cd /etc')         -> True
+        freigabe fuer "Befehle in mcn" deckte 'cat /etc/shadow'
+
+    Der Regex suchte ausschliesslich nach Laufwerksbuchstaben. Auf
+    Windows war das vollstaendig, auf Linux traf es nichts.
+
+    Die Git-Bash-Umdeutung ("/d/x" ist Laufwerk D) laeuft nur noch auf
+    Windows. Auf Linux ist /d/x ein gewoehnlicher Ordner, und sie haette
+    aus ihm faelschlich "D:/x" gemacht -- einen Pfad, der hier nirgends
+    liegt und deshalb jede Ortspruefung bestanden haette.
+
+    Rueckgabe in der Form, die auf dieser Plattform gilt: absolute
+    POSIX-Pfade so, wie sie dastehen; Windows-Pfade in Laufwerksform.
+
+    NICHT erkannt werden weiterhin RELATIVE Pfade ("cat ../../.env").
+    Das war auf Windows schon so und ist eine eigene Luecke; sie zu
+    schliessen hiesse, jedes "src/app.py" als Pfad zu behandeln, und
+    das will vorher gemessen werden.
     """
-    b = str(befehl or "")
+    b = _SCHEMA.sub(" ", str(befehl or ""))
     treffer = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", b)
-    treffer += [
-        f"{lw.upper()}:/{rest}"
-        for lw, rest in re.findall(r"(?<![\w/])/([a-zA-Z])/([^\s\"';|]*)", b)
-    ]
+    if sys.platform == "win32":
+        treffer += [
+            f"{lw.upper()}:/{rest}"
+            for lw, rest in re.findall(r"(?<![\w/])/([a-zA-Z])/([^\s\"';|]*)", b)
+        ]
+    else:
+        treffer += _POSIX_PFAD.findall(b)
+    # Relative Pfade gegen den Ordner aufloesen, in dem der Befehl
+    # wirklich landet. Nicht resolve() -- das macht _unter() selbst, und
+    # es soll hier keine Datei angefasst werden, nur gerechnet.
+    #
+    # bezug ist ausdruecklich ein Parameter und nicht immer der
+    # Arbeitsordner: Der Arbeiter in auftrag.py laeuft in SEINEM
+    # Projektordner, nicht in Sarvis'. Beide denselben Bezug nehmen zu
+    # lassen ginge meistens gut und einmal falsch aus -- naemlich dann,
+    # wenn Sarvis' Ordner zufaellig im Projekt liegt.
+    treffer += [str(Path(bezug or _arbeitsordner) / r)
+                for r in _REL_PFAD.findall(b)]
     return treffer
 
 
