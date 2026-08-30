@@ -109,6 +109,67 @@ SPRICHT = "spricht"
 FRAGT = "fragt"
 
 
+# Die Anzeige, die gerade gilt.
+#
+# Drei Werkzeugmodule bauten sich bisher jeweils ihre EIGENE
+# Anzeige(config.ANZEIGE) -- kacheln.py, bericht.py, programme.py. Auf
+# einem Rechner war das gleichgueltig: Jede oeffnete einen UDP-Socket
+# zum selben Fenster, und Sockets sind billig.
+#
+# Im Netzbetrieb ist es ein Fehler, und zwar ein stiller: Diese drei
+# schickten weiter Datagramme an 127.0.0.1:49731, wo niemand mehr
+# zuhoert. Kacheln, Berichte und geoeffnete Seiten kamen also nirgends
+# an -- ohne Fehlermeldung, denn "verschwindet im Nichts" ist genau die
+# Zusage des Traegers.
+#
+# Deshalb eine Stelle statt drei. main.py setzt sie, sobald feststeht,
+# worueber gesendet wird; wer vorher fragt, bekommt eine UDP-Anzeige wie
+# frueher.
+_aktuelle: "Anzeige | None" = None
+
+
+def setzen(anzeige: "Anzeige") -> None:
+    """Die Anzeige hinterlegen, die alle benutzen sollen."""
+    global _aktuelle
+    _aktuelle = anzeige
+
+
+def _echte() -> "Anzeige":
+    """Die geltende Anzeige -- notfalls eine neue ueber UDP."""
+    global _aktuelle
+    if _aktuelle is None:
+        from . import config
+        _aktuelle = Anzeige(config.ANZEIGE)
+    return _aktuelle
+
+
+class _Weiterreicher:
+    """Schlaegt die geltende Anzeige bei JEDEM Aufruf neu nach.
+
+    Der Umweg ist noetig, weil die Werkzeuge einmal gebaut werden --
+    beim Hochfahren, im Konstruktor -- und dann jahrelang dieselben
+    Objekte behalten. Wer sich dabei die Anzeige merkt, merkt sich die,
+    die GERADE galt.
+
+    Genau das ist passiert: Die Werkzeuge entstehen vor dem Endpunkt,
+    hielten also die UDP-Anzeige fest und schickten weiter an ein
+    Fenster, das es nicht gibt. Sarvis sagte "die Route liegt auf deinem
+    Bildschirm", und auf dem Bildschirm lag nichts.
+
+    Ein Attributzugriff mehr je Aufruf. Das ist billiger als die Regel,
+    dass man Werkzeuge in einer bestimmten Reihenfolge bauen muss --
+    solche Regeln haelt man ein, bis man sie vergisst.
+    """
+
+    def __getattr__(self, name):
+        return getattr(_echte(), name)
+
+
+def aktuelle() -> "Anzeige":
+    """Ein Griff auf die jeweils geltende Anzeige."""
+    return _Weiterreicher()
+
+
 class UdpTraeger:
     """Der Weg zur Anzeige auf demselben Rechner.
 

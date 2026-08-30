@@ -20,6 +20,7 @@ for strom in (sys.stdout, sys.stderr):
         pass
 
 from . import config, klang, rueckfrage, schutz  # noqa: E402
+from . import anzeige as anzeige_modul  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .klang import gong  # noqa: E402
 
@@ -135,6 +136,9 @@ class Sarvis:
         # gesetzt: Er braucht die Ereignisschleife, und die laeuft hier
         # noch nicht.
         self.anzeige = Anzeige(config.ANZEIGE and not self.im_netz)
+        # Hinterlegen, damit die Werkzeuge dieselbe benutzen statt sich
+        # je eine eigene zu bauen -- siehe anzeige.aktuelle().
+        anzeige_modul.setzen(self.anzeige)
         self.endpunkt = None
         self.traeger = None
 
@@ -147,15 +151,22 @@ class Sarvis:
         # schickt eine fertige Aufnahme. Das spart die Rundreise vor dem
         # ersten Wort, in der sonst der Anfang verlorenginge.
         self.aufnehmer = (None if self.im_netz
-                          else klang.aufnehmer(melden=self.anzeige.pegel))
+                          else klang.aufnehmer(melden=self._pegel))
         self.lautsprecher = (None if self.im_netz
-                             else klang.lautsprecher(melden=self.anzeige.pegel))
+                             else klang.lautsprecher(melden=self._pegel))
         self.ohren = Ohren()
         self.mund = Mund()
         (self.werkzeugserver, self.werkzeugnamen, self.wecker,
          self.protokoll, self.werkstatt) = bauen(
             sagen=self.von_selbst_sagen,
-            leuchten=self.anzeige.werkzeug,
+            # Ueber self, nicht self.anzeige.werkzeug: Die Werkzeuge
+            # werden EINMAL gebaut, hier im Konstruktor. Eine gebundene
+            # Methode haelt die Anzeige fest, die gerade gilt -- und im
+            # Netzbetrieb wird sie danach ausgetauscht. Genau deshalb
+            # leuchtete auf dem Server kein einziges Werkzeug: Die
+            # Meldungen gingen weiter per UDP an ein Fenster, das es
+            # nicht gibt, und niemand merkte es.
+            leuchten=self._leuchten,
             melden=zeigen,
         )
         # Freigaben auf Zeit. Bewusst hier und nicht im Hirn: Sie
@@ -163,7 +174,7 @@ class Sarvis:
         # jede auf.
         self.freigaben = Freigaben()
         self.hirn = Hirn(self.werkzeugserver, self.werkzeugnamen,
-                         leuchten=self.anzeige.werkzeug,
+                         leuchten=self._leuchten,
                          nachfragen=self.nachfragen,
                          protokoll=self.protokoll,
                          zustand_zeile=lambda: " ".join(
@@ -209,6 +220,19 @@ class Sarvis:
         self.gruss_laeuft = False
 
     # --- Tastatur (fremder Faden) -----------------------------------------
+
+    def _leuchten(self, name: str, aktiv: bool = True, strom: str = "") -> None:
+        """Ein Werkzeug aufleuchten lassen -- ueber die JEWEILS geltende
+        Anzeige.
+
+        Nicht self.anzeige.werkzeug direkt weitergeben: Das bindet die
+        Anzeige von jetzt an ein Objekt, das den ganzen Lauf ueberdauert.
+        """
+        self.anzeige.werkzeug(name, aktiv, strom)
+
+    def _pegel(self, wert: float) -> None:
+        """Dasselbe fuer den Ausschlag."""
+        self.anzeige.pegel(wert)
 
     def _runter(self, taste):
         # Offene Rueckfrage: Enter heisst ja, Escape heisst nein.
@@ -992,8 +1016,12 @@ class Sarvis:
 
         self.traeger = NetzTraeger(self.schleife)
         self.anzeige = Anzeige(True, traeger=self.traeger)
+        # Jetzt gilt der Netz-Traeger. Ohne diese Zeile schickten
+        # kacheln.py, bericht.py und programme.py weiter per UDP an ein
+        # Fenster, das es auf dem Server nicht gibt -- und zwar still.
+        anzeige_modul.setzen(self.anzeige)
         self.lautsprecher = NetzLautsprecher(self.traeger,
-                                             melden=self.anzeige.pegel)
+                                             melden=self._pegel)
         # Der Horch braucht den Traeger, um dem Client zu sagen, wann er
         # aufhoeren soll -- waehrend Sarvis redet, will niemand den
         # Strom, und ohne dieses Wort laeuft der Rueckstand auf.

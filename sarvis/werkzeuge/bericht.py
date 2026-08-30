@@ -62,7 +62,7 @@ from html import escape
 from claude_agent_sdk import tool
 
 from .. import config
-from ..anzeige import Anzeige
+from .. import anzeige as anzeige_modul
 
 # --- Farben ---------------------------------------------------------------
 # Die Zustandsfarben der Engine aus hud.py (FARBEN). Bewusst KOPIERT und
@@ -795,7 +795,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             protokoll.merken(text)
 
     # Eigener Draht zur Anzeige, wie in programme.py und kacheln.py.
-    sicht = Anzeige(config.ANZEIGE)
+    # Die gemeinsame Anzeige, nicht eine eigene -- sonst sendet dieses
+    # Modul im Netzbetrieb weiter per UDP an ein Fenster, das es
+    # nicht gibt. Siehe anzeige.aktuelle().
+    sicht = anzeige_modul.aktuelle()
 
     @tool(
         "seite_zeigen",

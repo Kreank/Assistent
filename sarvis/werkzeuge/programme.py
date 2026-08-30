@@ -16,7 +16,7 @@ from difflib import SequenceMatcher
 from claude_agent_sdk import tool
 
 from .. import config
-from ..anzeige import Anzeige
+from .. import anzeige as anzeige_modul
 
 _liste: list[dict] | None = None
 _schloss = asyncio.Lock()
@@ -195,7 +195,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     # Ebenen zu faedeln waere mehr Umbau als Nutzen: Anzeige ist ein
     # zustandsloser UDP-Sender, der nie blockiert und ins Nichts sendet,
     # wenn die Anzeige gar nicht laeuft.
-    sicht = Anzeige(config.ANZEIGE)
+    # Die gemeinsame Anzeige, nicht eine eigene -- sonst sendet dieses
+    # Modul im Netzbetrieb weiter per UDP an ein Fenster, das es
+    # nicht gibt. Siehe anzeige.aktuelle().
+    sicht = anzeige_modul.aktuelle()
 
     @tool(
         "programm_starten",
@@ -448,19 +451,12 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
         adresse, name, gesucht = _adresse(ziel, suche)
 
-        if extern:
-            try:
-                await asyncio.to_thread(
-                    subprocess.Popen,
-                    ["powershell.exe", "-NoProfile", "-Command",
-                     f'Start-Process "{adresse}"'],
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-            except Exception as e:
-                return {"content": [{"type": "text", "text":
-                        f"Ging nicht: {e}"}], "is_error": True}
-        else:
-            sicht.browser(adresse)
+        # "extern" hiess auf dem Dev-PC: im richtigen Browser statt im
+        # eingebauten Fensterchen. Diesen Unterschied gibt es nicht mehr
+        # -- die Oberflaeche IST der richtige Browser. Der Parameter
+        # bleibt im Schema stehen, damit ein alter Aufruf nicht
+        # fehlschlaegt; er aendert nur nichts mehr.
+        sicht.browser(adresse)
 
         if leuchten:
             leuchten("Websuche")
@@ -525,24 +521,29 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if von:
             adresse += f"&origin={quote_plus(von)}"
 
-        try:
-            await asyncio.to_thread(
-                subprocess.Popen,
-                ["powershell.exe", "-NoProfile", "-Command",
-                 f'Start-Process "{adresse}"'],
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception as e:
-            return {"content": [{"type": "text", "text":
-                    f"Ging nicht: {e}"}], "is_error": True}
+        # Frueher: Start-Process, also "mach das auf MEINEM Bildschirm
+        # auf". Das setzte voraus, dass Sarvis und der Bildschirm
+        # derselbe Rechner sind -- auf dem Server gibt es keinen, und
+        # der Aufruf scheiterte mit FileNotFoundError: powershell.exe.
+        #
+        # Jetzt geht die Adresse an die OBERFLAECHEN. Der Nutzer sitzt
+        # ohnehin vor einem Browser; ihm den Link zu schicken ist nicht
+        # nur das, was hier moeglich ist, sondern auch das Bessere: Er
+        # sieht die echte Karte, kann hineinzoomen und weitersuchen.
+        # Ein Screencast aus einem unsichtbaren Browser auf dem Server
+        # koennte nichts davon.
+        #
+        # Und es geht an ALLE, die zusehen -- Handy und Rechner
+        # gleichzeitig. Das ging vorher gar nicht.
+        sicht.browser(adresse)
 
         if leuchten:
             leuchten("Websuche")
         wie = {"driving": "mit dem Auto", "transit": "mit Bus und Bahn",
                "walking": "zu Fuß", "bicycling": "mit dem Rad"}[mittel]
         return {"content": [{"type": "text", "text":
-                f"Route {wie} " + (f"von {von} " if von else "")
-                + f"nach {nach} ist offen."}]}
+                f"Die Route {wie} " + (f"von {von} " if von else "")
+                + f"nach {nach} liegt jetzt auf deinem Bildschirm."}]}
 
     # --- Die Seite lesen und bedienen -------------------------------------
     #

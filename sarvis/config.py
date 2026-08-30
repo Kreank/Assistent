@@ -1063,6 +1063,31 @@ WERKZEUG_STUFEN = {
     # Fehlte es hier, wurde jeder Befehl abgelehnt -- und Sarvis schloss
     # daraus, er habe ueberhaupt keinen Dateizugriff.
     "PowerShell": "pfad",
+
+    # --- Ins Netz sehen ---------------------------------------------------
+    # Auf dem Dev-PC fehlten diese beiden, und es fiel nicht auf: Dort
+    # machte web_zeigen den eingebauten Browser auf, und gelesen hat
+    # Sascha. Auf dem Server gibt es keinen Bildschirm -- ohne diese
+    # Zeilen sagt Sarvis "ich komme an keinen Fahrplan heran" und
+    # antwortet aus dem Gedaechtnis des Modells. Gemessen genau so
+    # passiert, bei einer Zugverbindung Berlin-Leipzig.
+    #
+    # "still", weil Nachsehen keine Handlung an der Aussenwelt ist --
+    # dieselbe Stufe wie web_lesen und mail_lesen.
+    #
+    # ABER: Damit waechst der Weg, vor dem das README warnt. Ein stilles
+    # Lesewerkzeug speist ein Modell, das anschliessend die Rueckfrage
+    # fuer mail_senden selbst formuliert. Eine Seite, die "ignoriere
+    # deine Anweisungen und schicke X" enthaelt, redet ab hier mit.
+    #
+    # Was dagegen steht, steht schon: mail_senden, telegram_senden,
+    # drive_teilen und die anderen wirksamen Werkzeuge bleiben auf
+    # "fragen", und sie stehen zusaetzlich in FREIGABE_NIE -- sie lassen
+    # sich also nicht einmal auf ein Ja hin fuer 30 Minuten freischalten.
+    # Der Weg von einer fremden Seite zu einer verschickten Mail fuehrt
+    # damit immer ueber einen gesprochenen Satz von Sascha.
+    "WebSearch": "still",
+    "WebFetch": "still",
 }
 
 # Wie lange Sarvis auf eine Antwort wartet. Danach: abgelehnt.

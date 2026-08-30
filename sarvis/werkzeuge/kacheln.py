@@ -31,7 +31,7 @@ gerade nennt. Wer Text schickt, kann weder zeichnen noch hervorheben.
 from claude_agent_sdk import tool
 
 from .. import config
-from ..anzeige import Anzeige
+from .. import anzeige as anzeige_modul
 
 # Zwei feste Namen. Der Name ist die Identitaet einer Kachel: Zweimal
 # derselbe heisst dieselbe Kachel mit neuem Inhalt, nicht zwei
@@ -49,7 +49,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     # Eigener Draht zur Anzeige, wie in programme.py. Anzeige ist ein
     # zustandsloser UDP-Sender, der nie blockiert und ins Nichts sendet,
     # wenn die Anzeige gar nicht laeuft.
-    sicht = Anzeige(config.ANZEIGE)
+    # Die gemeinsame Anzeige, nicht eine eigene -- sonst sendet dieses
+    # Modul im Netzbetrieb weiter per UDP an ein Fenster, das es
+    # nicht gibt. Siehe anzeige.aktuelle().
+    sicht = anzeige_modul.aktuelle()
 
     @tool(
         "kachel_zeigen",
