@@ -65,7 +65,32 @@ VERBOTEN = (
     r"iwr[^|]*\|\s*iex",            # PowerShell-Aequivalent
     r"\brmdir\s+/s\s+[a-z]:\\",
     r"\bdel\s+/[fs]",
+
+    # --- Linux ------------------------------------------------------
+    # Der Arbeiter hat Bash. Seine einzige Schranke ist der Projektordner,
+    # und die traegt nur, wo ein Pfad im Befehl steht. Diese Muster
+    # greifen unabhaengig davon -- sie sperren die Befehle, die auch im
+    # eigenen Ordner nichts zu suchen haben.
+    r"\bsudo\b",                              # gar nicht erst anfangen
+    r"\bsystemctl\b", r"\bservice\s+\w+\s+(stop|restart)\b",
+    r"\bdocker\b[^|]*\s-v\s+/[^:\s]*:",      # Host-Ordner hereinmounten
+    r"\bdocker\b[^|]*--privileged",
+    r"\bdocker\s+system\s+prune\b",
+    r"\b(mkfs|wipefs|shred)\b", r"\bdd\b[^|]*\bof=/dev/",
+    r"\b(chmod|chown)\b[^|]*\s-R\b[^|]*\s/\s*$",
+    r"\b(userdel|usermod|passwd)\b",
+    r"\bln\b(?![^|]*\s-s)",                   # HARTE Links, siehe unten
+    r"\bcrontab\b",
 )
+
+# Warum ln ohne -s gesperrt ist:
+#
+# Ein harter Link hat kein Ziel, das sich aufloesen liesse -- er IST die
+# Datei. Ein harter Link im Projektordner auf eine Datei ausserhalb macht
+# diese Datei damit im Projektordner beschreibbar, und keine Ortspruefung
+# kann das sehen: gemessen lieferte schreiben_stufe() fuer so einen Link
+# "frei". Symbolische Links (ln -s) sind harmlos, weil resolve() ihnen
+# folgt und am ZIEL misst -- die bleiben erlaubt.
 
 ARBEITER_PROMPT = """Du arbeitest an einem Projekt für Sascha.
 

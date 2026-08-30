@@ -83,6 +83,27 @@ NIE_BEFEHL = (
     r"\bcipher\s+/w", r"\breg\s+delete\s+HK(LM|EY_LOCAL)",
     r"curl[^|]*\|\s*(ba)?sh", r"iwr[^|]*\|\s*iex",
     r"rm\s+-rf\s+[/~]\s*$", r"\bdel\s+/[fs].*[a-z]:\\\s*$",
+
+    # --- Linux ------------------------------------------------------
+    # Die Liste darueber ist vollstaendig Windows. Auf dem Server sperrte
+    # sie damit nichts: gemessen war 'systemctl stop caddy' nur "fragen",
+    # also mit einem gesprochenen "ja" erreichbar -- und ein "ja" faellt
+    # im Gespraech leicht.
+    #
+    # Aufgenommen wird nur, was sich nicht zurueckholen laesst oder den
+    # Server als Ganzes trifft. Alles Uebrige bleibt bei "fragen": der
+    # Grundsatz ist nicht aussperren, sondern nachfragen.
+    r"\bmkfs(\.\w+)?\b",                    # Dateisystem neu anlegen
+    r"\bdd\b[^|]*\bof=/dev/",                # roh auf ein Geraet schreiben
+    r">\s*/dev/(sd|nvme|vd|hd)",              # dasselbe per Umleitung
+    r"\b(chmod|chown)\b[^|]*\s-R\b[^|]*\s/\s*$",   # Rechte ab Wurzel
+    r"\bsystemctl\b[^|]*\b(stop|disable|mask)\b",   # Dienste abschalten
+    r"\b(userdel|usermod|passwd)\b",          # Benutzer und Passwoerter
+    r"\biptables\b[^|]*\s-F\b", r"\bufw\s+disable\b",   # Firewall
+    r"\bdocker\s+system\s+prune\b",         # raeumt fremde Container weg
+    r"\bgit\s+push\b[^|]*--force",           # fremde Historie ueberschreiben
+    r":\(\)\s*\{.*\|.*&.*\}\s*;?\s*:",       # Fork-Bombe
+    r"\bshred\b", r"\bwipefs\b",
 )
 
 
