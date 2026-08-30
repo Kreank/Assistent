@@ -31,22 +31,33 @@ klickdurchlässig, damit man hindurcharbeiten kann. So sah Sarvis vorher aus.
 
 Wenn beides nicht gebraucht wird, ist die Weboberfläche weniger Arbeit.
 
-### Warum eine Android-App noch warten sollte
+### Android hat jetzt auch einen Grund
 
-Ihr einziger Vorteil gegenüber der Weboberfläche wäre „Hey Sarvis" bei
-gesperrtem Bildschirm — ein Foreground Service darf das Mikrofon
-offenhalten, ein Browser im Hintergrund nicht.
+*(Dieser Abschnitt sagte bis zum 30.08.2026 nachmittags das Gegenteil —
+damals gab es den Dauerstrom noch nicht. Er steht jetzt.)*
 
-Genau das braucht aber den **Dauerstrom**, und der ist serverseitig noch
-nicht gebaut (siehe „Was noch fehlt" in `DRAHT.md`). Ohne ihn kann eine
-Android-App nur fertige Aufnahmen schicken — und das kann die
-Weboberfläche auch. Erst der Dauerstrom auf dem Server, dann die App;
-sonst baut man eine App, deren Daseinsgrund noch nicht ansprechbar ist,
-und stellt am Ende fest, dass die Blockung (480 Werte, Silero) doch anders
-sein muss als angenommen.
+Der Vorteil einer Android-App gegenüber der Weboberfläche ist **„Hey
+Sarvis" bei gesperrtem Bildschirm**. Ein Foreground Service darf das
+Mikrofon offenhalten, ein Browser im Hintergrund nicht.
 
-**Windows ist davon nicht betroffen** — der Tastaturhaken braucht keinen
-Dauerstrom.
+Dafür schickt sie den **Dauerstrom** (Art `strom`, siehe DRAHT.md) —
+blockweise, was das Mikrofon hört. Zwei Dinge dabei:
+
+**Das Datenvolumen ist der Haken, nicht die Technik.** 16 kHz int16 sind
+256 kbit/s, also rund 260 MB am Tag, auch wenn niemand redet. Im WLAN
+egal, im Mobilfunk nicht. Eine App sollte das entweder an die
+Netzwerkart koppeln oder den Sprach-Erkenner lokal laufen lassen und nur
+senden, wenn wirklich jemand spricht.
+
+**Die Blockung ist eine Bedingung.** 480 Werte bei 16 kHz — Silero
+rechnet in Rahmen dieser Größe. Der Server blockt zwar neu, wenn etwas
+anderes ankommt, aber wer selbst blockt, sollte es richtig tun: Der
+Fehler fällt nicht auf, der Sprach-Erkenner sagt dann nicht „Fehler",
+er sagt nur öfter das Falsche.
+
+**Windows braucht das nicht** — der Tastaturhaken kommt ohne Dauerstrom
+aus, und wer am Rechner sitzt, kann auch einfach den Schalter in der
+Weboberfläche benutzen.
 
 ---
 
