@@ -1,8 +1,67 @@
 """Zustandsmeldungen an die Anzeige.
 
-Bewusst ueber einen UDP-Socket auf localhost: der Sender blockiert nie, und
-wenn die Anzeige gar nicht laeuft, verschwinden die Meldungen einfach im
-Nichts. Die Schleife darf nie auf die Optik warten muessen.
+Zwoelf Ereignisarten und eine Frage mit Antwort -- mehr ist die Naht
+zwischen Sarvis und dem, was man von ihm sieht, nicht. Genau deshalb
+laesst sie sich ins Netz verlegen: Sie ist schon ein Protokoll, es
+stand nur bisher auf einem UDP-Socket zu localhost.
+
+    zustand    pegel       untertitel   verschieben
+    nachhoeren hintergrund browser      browser_zu
+    kachel     kachel_weg  werkzeug     freigabe
+
+DER TRAEGER IST AUSTAUSCHBAR
+
+Anzeige spricht nicht mehr selbst mit einem Socket, sondern mit einem
+Traeger. Heute ist das UdpTraeger und alles bleibt, wie es war; spaeter
+tritt eine Netzfassung daneben, die dasselbe an alle verbundenen
+Oberflaechen schickt -- Handy und Dev-PC gleichzeitig.
+
+Was der Traeger dabei nachbauen MUSS, weil der ganze Rest darauf beruht:
+
+  Er blockiert nie. Diese Methoden werden aus der Ereignisschleife und
+  aus Audio-Rueckrufen gerufen, ohne await, ohne Faden. Ein Netz-Send,
+  der im Aufnahme-Rueckruf wartet, verzerrt den Ton.
+
+  Er darf verlieren. "Laeuft keine Anzeige, verschwindet es im Nichts"
+  ist keine Nachlaessigkeit, sondern eine Zusage: bericht.py schickt
+  eine Seite und FRAGT hinterher nach, ob sie wirklich zu sehen ist,
+  statt es zu behaupten. Ueber Netz kommt ein dritter Fall dazu, den es
+  bisher nicht gab -- Anzeige da, aber langsam. Dagegen hilft nur ein
+  Puffer mit Deckel und einer Wegwerfregel.
+
+FAST ALLES SIND ZUSTAENDE, KEINE AENDERUNGEN
+
+zustand, pegel, untertitel, nachhoeren, freigabe, hintergrund und selbst
+kachel (immer der ganze Inhalt) heilen sich beim naechsten Senden von
+selbst. Ein verlorenes Datagramm kostet ein Bild, mehr nicht.
+
+Drei Ausnahmen, bei denen Verlust bleibt -- heute unauffaellig, weil
+Loopback-UDP praktisch nichts verliert, ueber Netz aber nicht mehr:
+
+    werkzeug      ein Ereignis, kein Zustand: verloren = nie gezeigt
+    kachel_weg    verloren -> eine Zustandskachel steht fuer immer
+    verschieben   ein Umschaltbefehl: verloren -> beide Seiten uneins
+
+DAS STROM-FELD
+
+Sarvis soll ansprechbar bleiben, waehrend er arbeitet. Damit gibt es
+kuenftig mehr als einen Vorgang gleichzeitig: das Gespraech und n
+Auftraege. Von den zwoelf Arten trug bisher nur die Kachel eine
+Identitaet ("zweimal 'finanzen' heisst dieselbe Kachel mit neuem
+Inhalt"), und genau das ist das Muster, dem die anderen folgen muessen.
+
+Deshalb tragen zustand, untertitel, hintergrund und werkzeug jetzt ein
+optionales strom -- leer heisst "das Gespraech". Die heutige Anzeige
+ignoriert unbekannte Felder einfach; es kostet also nichts und muss
+spaeter nicht nachgeruestet werden. Und Nachruesten waere teuer: zustand
+ist kein Datenfeld, sondern der Verteiler des ganzen Bildes (Farbe,
+Deckkraft, Beschriftung, Boegen oder Balken). Ein strom-Feld dort spaeter
+einzufuehren hiesse, paintEvent und die Farbtabellen gleichzeitig
+anzufassen -- also genau die Stelle, an der der Sarvis-Look sitzt.
+
+Die Grenze verlaeuft dort, wo hud.py sie schon gezogen hat: "Der Ring in
+der Mitte gehoert IHM, diese Ecke der Arbeit im Hintergrund." Der Ring
+bleibt das Gespraech. Was arbeitet, bekommt einen Namen.
 """
 import json
 import socket
@@ -10,6 +69,21 @@ import time
 from uuid import uuid4
 
 ADRESSE = ("127.0.0.1", 49731)
+
+# Wie oft der Pegel hoechstens weitergereicht wird.
+#
+# Er hat drei Erzeuger, alle ungedrosselt: der Weckwort-Horcher rund um
+# die Uhr mit 33/s, der Aufnehmer waehrend der Aufnahme mit 40/s, der
+# Lautsprecher waehrend des Sprechens mit 80/s. Fuer ein Datagramm auf
+# localhost war das gleichgueltig. Ueber Netz sind 80 Nachrichten je
+# Sekunde je verbundenem Geraet Dauerlast -- und jede Verzoegerung staut
+# sich in einer Sendewarteschlange, die es heute gar nicht gibt.
+#
+# Die Anzeige braucht sie auch nicht: Sie malt 60 Bilder je Sekunde und
+# zieht den Wert dabei selbst traege nach. Sie braucht nur den jeweils
+# neuesten. 50/s liegt unter der Bildrate und ueber dem, was das Auge
+# an einem Ausschlag unterscheidet.
+PEGEL_JE_SEKUNDE = 50
 
 # Wie viele Datenpunkte je Form hoechstens mitgehen. Siehe kachel(),
 # warum das nicht eine Zahl fuer alle ist.
@@ -35,50 +109,38 @@ SPRICHT = "spricht"
 FRAGT = "fragt"
 
 
-class Anzeige:
-    def __init__(self, an: bool = True):
-        self.an = an
-        self._sock: socket.socket | None = None
-        if an:
-            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self._sock.setblocking(False)
+class UdpTraeger:
+    """Der Weg zur Anzeige auf demselben Rechner.
 
-    def _senden(self, **felder) -> None:
-        if not self._sock:
-            return
+    Ein Datagramm je Meldung, nicht blockierend, und was nicht ankommt,
+    ist weg. Genau diese drei Eigenschaften muss jeder andere Traeger
+    nachbauen -- siehe Modulkopf.
+    """
+
+    def __init__(self):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setblocking(False)
+
+    def senden(self, felder: dict) -> None:
         try:
             self._sock.sendto(json.dumps(felder).encode("utf-8"), ADRESSE)
         except OSError:
             pass  # Anzeige laeuft nicht -- egal
 
-    def fragen(self, art: str, sekunden: float = 8.0, **felder):
-        """Eine Frage an die Anzeige -- und diesmal MIT Antwort.
+    def fragen(self, felder: dict, sekunden: float) -> dict | None:
+        """Eine Frage, die auf Antwort wartet.
 
-        Der uebrige Draht ist mit Absicht einseitig: Der Sender blockiert
-        nie, und laeuft die Anzeige nicht, verschwinden die Meldungen im
-        Nichts. Fuer "was steht auf der Seite" reicht das nicht -- eine
-        Frage ohne Antwort ist keine.
-
-        Also ein zweiter Socket, der nur fuer diese eine Frage lebt:
+        Ein zweiter Socket, der nur fuer diese eine Frage lebt:
         aufmachen, den eigenen Port in der Frage nennen, warten,
         zumachen. Kein fester zweiter Port, den irgendwer belegt haben
         koennte, und nichts, was ueber die Frage hinaus offen bleibt.
-
-        Blockiert bis zum Zeitlimit -- also NUR aus einem Faden aufrufen
-        (asyncio.to_thread), nie aus der Schleife heraus.
-
-        Gibt None zurueck, wenn niemand antwortet. Das ist der Normalfall,
-        wenn die Anzeige gar nicht laeuft, und muss vom Aufrufer als
-        "geht gerade nicht" gesagt werden -- nicht als leeres Ergebnis.
         """
-        if not self._sock:
-            return None
         rueck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             rueck.bind(("127.0.0.1", 0))
             nummer = uuid4().hex[:12]
-            self._senden(art=art, antwort_an=rueck.getsockname()[1],
-                         nummer=nummer, **felder)
+            self.senden({**felder, "antwort_an": rueck.getsockname()[1],
+                         "nummer": nummer})
             ende = time.monotonic() + sekunden
             while True:
                 rest = ende - time.monotonic()
@@ -101,14 +163,75 @@ class Anzeige:
         finally:
             rueck.close()
 
-    def zustand(self, was: str, text: str = "") -> None:
-        self._senden(art="zustand", zustand=was, text=text)
+
+class Anzeige:
+    def __init__(self, an: bool = True, traeger=None):
+        self.an = an
+        self._traeger = traeger or (UdpTraeger() if an else None)
+        # Wann zuletzt ein Pegel durchgelassen wurde (time.monotonic).
+        self._pegel_zuletzt = 0.0
+
+    def _senden(self, **felder) -> None:
+        if self._traeger is None:
+            return
+        self._traeger.senden(felder)
+
+    def fragen(self, art: str, sekunden: float = 8.0, **felder):
+        """Eine Frage an die Anzeige -- und diesmal MIT Antwort.
+
+        Der uebrige Draht ist mit Absicht einseitig: Der Sender blockiert
+        nie, und laeuft die Anzeige nicht, verschwinden die Meldungen im
+        Nichts. Fuer "was steht auf der Seite" reicht das nicht -- eine
+        Frage ohne Antwort ist keine.
+
+        Blockiert bis zum Zeitlimit -- also NUR aus einem Faden aufrufen
+        (asyncio.to_thread), nie aus der Schleife heraus.
+
+        Gibt None zurueck, wenn niemand antwortet. Das ist der Normalfall,
+        wenn die Anzeige gar nicht laeuft, und muss vom Aufrufer als
+        "geht gerade nicht" gesagt werden -- nicht als leeres Ergebnis.
+
+        Ueber Netz kommt ein Unterschied dazu, den es hier nicht gibt:
+        "niemand hat geantwortet" und "die Verbindung ist weg" sind
+        beides None. Fuer den Nutzer ist das derselbe Satz, fuers
+        Wiederverbinden nicht.
+        """
+        if self._traeger is None:
+            return None
+        return self._traeger.fragen({"art": art, **felder}, sekunden)
+
+    def zustand(self, was: str, text: str = "", strom: str = "") -> None:
+        """Der Gemuetszustand: ruhig, hoert, denkt, spricht, fragt.
+
+        strom leer = das Gespraech, also der Ring in der Mitte. Ein
+        benannter Strom gehoert zu einem Vorgang, der nebenher laeuft --
+        die heutige Anzeige ignoriert ihn, eine Oberflaeche mit Platz
+        kann ihn getrennt zeigen. Siehe Modulkopf.
+        """
+        self._senden(art="zustand", zustand=was, text=text, strom=strom)
 
     def pegel(self, wert: float) -> None:
-        self._senden(art="pegel", pegel=round(float(wert), 4))
+        """Der Ausschlag fuer den Ring -- gedrosselt, siehe PEGEL_JE_SEKUNDE.
 
-    def untertitel(self, wer: str, text: str) -> None:
-        self._senden(art="untertitel", wer=wer, text=text)
+        Bewusst hier und nicht bei den drei Erzeugern: Sie rufen aus
+        Audio-Rueckrufen und wissen nichts voneinander. Der Deckel gehoert
+        an die Naht, wo alle drei zusammenlaufen.
+        """
+        wert = round(float(wert), 4)
+        jetzt = time.monotonic()
+        # Die Null geht IMMER durch. Sie ist kein Messwert, sondern ein
+        # Schlusspunkt: Aufnehmer und Lautsprecher melden sie genau
+        # einmal, wenn sie fertig sind. Faellt sie der Drossel zum Opfer,
+        # bleibt der Ring auf dem letzten Ausschlag stehen und behauptet
+        # eine Stimme, die schweigt -- und die naechste Meldung kommt
+        # erst beim naechsten Zuruf.
+        if wert > 0.0 and jetzt - self._pegel_zuletzt < 1.0 / PEGEL_JE_SEKUNDE:
+            return
+        self._pegel_zuletzt = jetzt
+        self._senden(art="pegel", pegel=wert)
+
+    def untertitel(self, wer: str, text: str, strom: str = "") -> None:
+        self._senden(art="untertitel", wer=wer, text=text, strom=strom)
 
     def verschieben(self, an: bool) -> None:
         """Verschiebemodus ein- oder ausschalten."""
@@ -128,8 +251,17 @@ class Anzeige:
         Nichtstun nicht zu unterscheiden -- und man fragt nach, ob
         ueberhaupt etwas passiert.
         """
+        alle = [str(z) for z in (zeilen or [])]
         self._senden(art="hintergrund",
-                     zeilen=[str(z) for z in (zeilen or [])][:3],
+                     zeilen=alle[:3],
+                     # Wie viele es WIRKLICH sind. Die Anzeige schrieb
+                     # bisher "im Hintergrund · n" aus der bereits
+                     # gekappten Liste -- die Zahl konnte also nie ueber
+                     # drei gehen, egal wie viel lief. Bei der Kachel
+                     # macht der Code das schon richtig ("weggelassen",
+                     # damit die Kuerzung nicht STUMM ist); hier fehlte
+                     # das Gegenstueck.
+                     gesamt=len(alle),
                      seit=round(float(seit), 1), fertig=bool(fertig))
 
     def browser(self, adresse: str) -> None:
@@ -191,9 +323,17 @@ class Anzeige:
         """Eine Kachel ausblenden lassen -- der Auftrag ist fertig."""
         self._senden(art="kachel_weg", name=str(name))
 
-    def werkzeug(self, name: str, aktiv: bool = True) -> None:
-        """Ein Werkzeug im Kranz aufleuchten lassen (Stufe 2)."""
-        self._senden(art="werkzeug", name=name, aktiv=bool(aktiv))
+    def werkzeug(self, name: str, aktiv: bool = True,
+                 strom: str = "") -> None:
+        """Ein Werkzeug im Kranz aufleuchten lassen.
+
+        Mehrere gleichzeitig sind schon heute moeglich -- jede Glut
+        klingt fuer sich ab. Was fehlt, ist die Herkunft: Zwei Vorgaenge,
+        die zugleich Dateien anfassen, sind eine einzige Glut. Dafuer
+        das strom-Feld.
+        """
+        self._senden(art="werkzeug", name=name, aktiv=bool(aktiv),
+                     strom=strom)
 
     def freigabe(self, text: str, sekunden: float = 0.0) -> None:
         """Was gerade ohne Rueckfrage durchgeht -- leerer Text: nichts.

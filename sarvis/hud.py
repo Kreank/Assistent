@@ -155,6 +155,7 @@ class Hud(QWidget):
         self.freigabe_rest = 0.0
         # Was im Hintergrund arbeitet, waehrend er still dasteht.
         self.hintergrund: list = []
+        self.hg_gesamt = 0
         self.hg_seit = 0.0        # wie lange laeuft es schon (Sekunden)
         self.hg_fertig = False    # gerade fertig geworden?
         self.verschiebbar = False  # Verschiebemodus?
@@ -320,6 +321,11 @@ class Hud(QWidget):
                 self.nachhoeren_ganz = max(0.1, self.nachhoeren)
             elif art == "hintergrund":
                 self.hintergrund = [str(z) for z in (m.get("zeilen") or [])]
+                # Wie viele es wirklich sind -- die Zeilen sind bei drei
+                # gekappt. Aeltere Sender schicken das Feld nicht; dann
+                # gilt, was ankam.
+                self.hg_gesamt = int(m.get("gesamt")
+                                     or len(self.hintergrund))
                 self.hg_seit = float(m.get("seit") or 0.0)
                 self.hg_fertig = bool(m.get("fertig"))
             elif art == "freigabe":
@@ -945,8 +951,12 @@ class Hud(QWidget):
             p.setBrush(c)
             p.drawEllipse(QPointF(x + 3 + i * 7.0, y + 8.0), 2.4, 2.4)
 
-        kopf = (f"im Hintergrund · {len(self.hintergrund)}"
-                if len(self.hintergrund) > 1 else "im Hintergrund")
+        # Die WIRKLICHE Zahl, nicht die der angezeigten Zeilen. Vorher
+        # stand hier len(self.hintergrund), und das ist die bei drei
+        # gekappte Liste: Bei sieben laufenden Auftraegen stand "· 3".
+        gesamt = max(self.hg_gesamt, len(self.hintergrund))
+        kopf = (f"im Hintergrund · {gesamt}" if gesamt > 1
+                else "im Hintergrund")
         f = QFont("Segoe UI", 7)
         f.setLetterSpacing(QFont.PercentageSpacing, 160)
         f.setCapitalization(QFont.AllUppercase)
