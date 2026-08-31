@@ -39,6 +39,18 @@ services:
     # erreichbar, host.docker.internal wird nicht gebraucht.
     network_mode: host
 
+    # Sarvis' Zugang zum Kopf. Eine eigene Datei und nicht hier
+    # eingetragen: Diese Datei liegt im Repository, das Token darf das
+    # nicht. Sie steht in /srv/data/sarvis, wird also mitgesichert und
+    # ueberlebt jeden Neubau -- wie alles andere, was Sarvis gehoert.
+    #
+    # `claude setup-token` SPEICHERT nichts, es zeigt das Token nur an
+    # (am 31.08.2026 einmal andersherum verstanden und deshalb hier
+    # notiert). Wer es verliert, holt sich mit demselben Befehl ein
+    # neues und traegt es dort ein.
+    env_file:
+      - /srv/data/sarvis/claude.env
+
     environment:
       # --- Betriebsart ---
       # "netz" statt "lokal": Auf dem Server gibt es kein Mikrofon, keine
@@ -63,7 +75,7 @@ services:
       # Der Verlauf, den das SDK schreibt. Ausgeschrieben statt aus
       # WURZEL gerechnet, damit ein Umzug des Quelltextes ihn nicht
       # still verliert (orte.py, VERLAUF_ORDNER).
-      SARVIS_VERLAUF: /home/sarvis/.claude/projects/-srv-storage-projects-sarvis
+      SARVIS_VERLAUF: /srv/data/sarvis/home/.claude/projects/-srv-storage-projects-sarvis
 
       # --- Git ---
       # Steht auch im Image (git config --system). Hier noch einmal,
@@ -74,7 +86,26 @@ services:
       GIT_COMMITTER_NAME: Sarvis
       GIT_COMMITTER_EMAIL: sarvis@tech-artist.de
 
-      HOME: /home/sarvis
+      # HOME LIEGT AUF DER DATENPLATTE, NICHT IM CONTAINER.
+      #
+      # Vorher war es /home/sarvis aus dem Dockerfile, und nur der
+      # Unterordner .claude war herausgemountet. Damit lag .claude.json
+      # -- Kontobindung, machineID, und vor allem der Vermerk, dass
+      # /srv/storage/projects/sarvis ein vertrauter Ordner ist -- IM
+      # Container. Ein `up --force-recreate` hat sie am 31.08.2026
+      # ersatzlos mitgenommen.
+      #
+      # Das faellt nicht als Fehler auf. Es faellt als Schweigen auf:
+      # Ohne den Vertrauensvermerk wartet die CLI auf eine Rueckfrage,
+      # die im Dienst niemand beantwortet -- der Container laeuft, und
+      # Sarvis sagt nichts. Derselbe Fallstrick hatte schon den
+      # Telegram-Abholer erwischt.
+      #
+      # Jetzt liegt das ganze HOME unter /srv/data/sarvis, das ohnehin
+      # als ganzer Ordner durchgereicht wird. Ein Neubau kann ihm
+      # dort nichts mehr wegnehmen, und es braucht keinen weiteren
+      # Mount -- schon gar keinen auf eine einzelne Datei.
+      HOME: /srv/data/sarvis/home
       TZ: Europe/Berlin
       PYTHONUNBUFFERED: "1"
 
@@ -98,25 +129,40 @@ services:
       # muss einen Neubau ueberleben.
       #
       # Sarvis' eigener Ordner -- Sitzungsverlauf, Einstellungen,
-      # Projekte. Bewusst NICHT Saschas: Sein Verlauf geht Sarvis
-      # nichts an, und umgekehrt.
-      - /srv/data/sarvis/claude:/home/sarvis/.claude
+      # Projekte -- liegt seit dem 31.08.2026 unter
+      # /srv/data/sarvis/home/.claude und kommt damit schon durch den
+      # Mount darueber mit. Bewusst NICHT Saschas Ordner: Sein Verlauf
+      # geht Sarvis nichts an, und umgekehrt.
 
-      # Die ANMELDUNG dagegen wird geteilt, und zwar als einzelne Datei.
+      # DIE ANMELDUNG WIRD NICHT MEHR GETEILT.
       #
-      # Erst habe ich sie kopiert. Das hielt vier Stunden, dann kam auf
-      # jeden Zuruf "OAuth session expired": Ein Refresh-Token gilt fuer
-      # eine Einloesung, und wer zuerst erneuert, macht die Kopie des
-      # anderen ungueltig.
+      # Hier stand einmal ein Bind-Mount auf Saschas
+      # .credentials.json -- "geteilt statt kopiert", damit ein
+      # erneuertes Token bei beiden ankommt. Der Gedanke war richtig,
+      # die Umsetzung nicht: Ein Bind-Mount haengt am Inode, nicht am
+      # Namen. Die CLI erneuert aber, indem sie die Datei ERSETZT
+      # (schreiben + umbenennen). In dem Moment zeigt der Host auf die
+      # neue Datei und der Container weiter auf die alte -- geteilt war
+      # danach gar nichts mehr, und keiner der beiden hat es gemerkt.
       #
-      # Geteilt passiert genau das nicht. Wer erneuert, schreibt das
-      # neue Token in DIESE Datei, und alle anderen lesen es beim
-      # naechsten Mal. So lief auch der Telegram-Assistent monatelang --
-      # mein Fehler war nicht "zwei Sitzungen", sondern die Kopie.
+      # Am 31.08.2026 gemessen: Host-Inode 1320965 (509 Bytes),
+      # Container-Inode 1320968 (281 Bytes). Sarvis' Kopie enthielt
+      # accessToken "" und refreshToken "" -- er hatte mit einem
+      # bereits eingeloesten Refresh-Token erneuert, war gescheitert
+      # und hatte sich dabei selbst ausgesperrt. Von da an konnte sich
+      # nichts mehr erneuern: es war nichts mehr da, womit.
       #
-      # Einzelne Datei und nicht der Ordner: Nur der Zugang wird
-      # geteilt, nicht der Verlauf.
-      - /home/server3070/.claude/.credentials.json:/home/sarvis/.claude/.credentials.json
+      # Deshalb jetzt ein EIGENER Zugang. Die Anmeldung liegt in
+      # /srv/data/sarvis/home/.claude/.credentials.json und kommt ueber
+      # den Ordner-Mount /srv/data/sarvis mit -- ein Ordner, dem ein
+      # Umbenennen DARIN nichts anhaben kann. Zwei eigenstaendige
+      # Sitzungen mit je eigenem Refresh-Token kommen sich nicht in die
+      # Quere; nur zwei Halter DESSELBEN Tokens tun das.
+      #
+      # Einmalig anmelden (und nach einem Abmelden erneut), so wie
+      # anmeldung.py es beim Start auch ansagt:
+      #   docker compose exec sarvis claude setup-token
+      #   danach: docker compose restart sarvis
 
       # Nur lesen: die Zeitzone des Servers.
       - /etc/localtime:/etc/localtime:ro

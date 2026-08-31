@@ -67,15 +67,69 @@ Neubau.
 `claude` als Unterprozess. Node 24.20.0 liegt unter `/opt/node`, die CLI
 kommt per `npm install -g @anthropic-ai/claude-code`.
 
-Angemeldet wird **von außen und einmalig**:
+Angemeldet wird **von außen und einmalig**, mit einem langlebigen Token —
+und zwar in drei Schritten, nicht zwei:
 
-    docker compose run --rm sarvis claude
+    docker compose exec sarvis claude setup-token
 
-Alles, was dabei entsteht, landet in `/srv/data/sarvis/claude` und ist im
-Container `/home/sarvis/.claude`. Das überlebt jeden Neubau.
+Das fragt nach einer Anmeldung im Browser und **zeigt** danach ein Token
+an (`sk-ant-oat01-…`). Gespeichert wird es nicht. Wer hier aufhört,
+startet neu und steht vor derselben Meldung — am 31.08.2026 genau so
+passiert. Also eintragen, als einzige Zeile in
+`/srv/data/sarvis/claude.env`:
+
+    CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…
+
+Die Datei hängt über `env_file` am Container, liegt bewusst außerhalb des
+Repositories und hat `chmod 600`. Dann:
+
+    docker compose restart sarvis
+
+Sarvis' ganzes `HOME` ist `/srv/data/sarvis/home`, liegt also auf der
+Datenplatte und nicht im Container. Das überlebt jeden Neubau — die
+Anmeldung ebenso wie `.claude.json`.
 
 Bewusst **nicht** `/home/server3070/.claude`: Das ist Saschas eigene
 Anmeldung samt Sitzungsverlauf. Sarvis bekommt seine eigene.
+
+Zwei Fallen, beide am 31.08.2026 eingetreten und behoben:
+
+**Die Anmeldung nicht teilen.** Erst war sie kopiert, dann als einzelne
+Datei aus Saschas Ordner gemountet. Beides hält nicht. Ein
+Refresh-Token gilt für genau eine Einlösung, und ein Bind-Mount hängt am
+Inode: Die CLI erneuert, indem sie die Datei *ersetzt* — danach zeigt
+der Host auf die neue und der Container weiter auf die alte, ohne dass
+einer der beiden es merkt. Gemessen: Host-Inode 1320965 (509 Bytes),
+Container-Inode 1320968 (281 Bytes) mit leerem `accessToken` und leerem
+`refreshToken`. Sarvis hatte sich beim Erneuern selbst ausgesperrt.
+Einzelne Dateien also nie mounten, wenn sie jemand ersetzen könnte.
+
+**`.claude.json` gehört auf die Datenplatte.** Sie stand vorher in
+`/home/sarvis`, wo nur der Unterordner `.claude` herausgemountet war.
+Ein `up --force-recreate` nahm sie ersatzlos mit — samt dem Vermerk,
+dass `/srv/storage/projects/sarvis` ein vertrauter Ordner ist. Das
+äußert sich nicht als Fehler, sondern als Schweigen: Die CLI wartet auf
+eine Rückfrage, die im Dienst niemand beantwortet.
+
+### Die Anmeldewache
+
+`anmeldung.wache()` läuft als Hintergrundaufgabe neben dem Gespräch,
+sieht alle 30 Minuten nach und schickt eine Mail, sobald der Zugang
+kippt — noch einmal, wenn er zurück ist. Fliegt im Gespräch ein
+Anmeldefehler, weckt `main.py` sie sofort (`jetzt_nachsehen()`).
+
+Der Weg nach draußen ist ein Telegram-Bot, falls `SARVIS_TG_TOKEN` und
+`SARVIS_TG_ERLAUBT` gesetzt sind, sonst eine Mail über Sarvis' eigenes
+Google-Konto an dieses Konto selbst. Telethon scheidet aus: Das ist
+Saschas eigener Account, und der kann sich selbst nicht anpiepen.
+
+Gewarnt wird auf Flanken, nicht auf Zuständen, mit zwölf Stunden Ruhe
+zwischen Erinnerungen — sonst wäre über Nacht aus einer Warnung ein
+Postfach voller Warnungen geworden. Ein gescheiterter Versand zählt
+nicht als gemeldet.
+
+Die Flankenlogik prüft `wache_test.py`; der Melde-Weg wurde einmal echt
+verschickt, weil eine Attrappe über den Posteingang nichts beweist.
 
 ## Die Git-Identität
 

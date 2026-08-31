@@ -955,6 +955,10 @@ class Sarvis:
                 # gerade redet, will wissen was los ist, nicht welche
                 # Ausnahme geflogen ist.
                 print(f"    -> {anmeldung.RAT}")
+                # Die Wache aus dem Warten holen: Wer gerade nicht
+                # zuhoert, soll es trotzdem erfahren, und zwar jetzt
+                # und nicht in einer halben Stunde.
+                anmeldung.jetzt_nachsehen()
                 await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
@@ -975,6 +979,10 @@ class Sarvis:
                 # gerade redet, will wissen was los ist, nicht welche
                 # Ausnahme geflogen ist.
                 print(f"    -> {anmeldung.RAT}")
+                # Die Wache aus dem Warten holen: Wer gerade nicht
+                # zuhoert, soll es trotzdem erfahren, und zwar jetzt
+                # und nicht in einer halben Stunde.
+                anmeldung.jetzt_nachsehen()
                 await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
@@ -998,6 +1006,10 @@ class Sarvis:
                 # gerade redet, will wissen was los ist, nicht welche
                 # Ausnahme geflogen ist.
                 print(f"    -> {anmeldung.RAT}")
+                # Die Wache aus dem Warten holen: Wer gerade nicht
+                # zuhoert, soll es trotzdem erfahren, und zwar jetzt
+                # und nicht in einer halben Stunde.
+                anmeldung.jetzt_nachsehen()
                 await self.von_selbst_sagen(anmeldung.satz(), mit_gong=False)
             self.anzeige.zustand(RUHIG)
         finally:
@@ -1261,6 +1273,13 @@ class Sarvis:
 
         melder = asyncio.create_task(self._hintergrund_melden())
         stimme = asyncio.create_task(self._melder())
+        # Sieht von selbst nach, ob der Zugang zu Claude noch gilt, und
+        # schreibt Sascha an, wenn nicht. Alles andere hier meldet erst,
+        # wenn jemand zuhoert -- das ist genau der Fall, der am
+        # 31.08.2026 vier Stunden lang nicht eintrat.
+        zugangswache = asyncio.create_task(
+            anmeldung.wache(sagen=lambda s: self.von_selbst_sagen(
+                s, mit_gong=False)))
         try:
             while True:
                 befehl = await self.schlange.get()
@@ -1343,6 +1362,7 @@ class Sarvis:
         finally:
             melder.cancel()
             stimme.cancel()
+            zugangswache.cancel()
             lauscher.stop()
             self.horcher.stopp()
             # schliessen() gab es, aufgerufen hat es nie jemand -- die

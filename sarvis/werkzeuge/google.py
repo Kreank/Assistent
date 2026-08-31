@@ -104,6 +104,55 @@ async def _hole(name: str, fassung: str):
         return await asyncio.to_thread(_dienst, name, fassung)
 
 
+async def eigene_adresse() -> str | None:
+    """Die Mailadresse des angemeldeten Kontos, oder nichts.
+
+    Damit niemand eine Adresse ins Programm schreiben muss: Wer
+    angemeldet ist, ist auch der, den eine Warnung angeht.
+    """
+    dienst = await _hole("gmail", "v1")
+    if dienst is None:
+        return None
+    try:
+        gefragt = await asyncio.to_thread(
+            lambda: dienst.users().getProfile(userId="me").execute())
+    except Exception:
+        return None
+    return (gefragt or {}).get("emailAddress")
+
+
+async def mail_hinaus(an: str, betreff: str, text: str) -> bool:
+    """Eine Mail verschicken, ohne den Umweg ueber das Werkzeug.
+
+    WOFUER
+
+    mail_senden() ist ein Werkzeug: Es haengt an den Closures
+    `vermerken` und `blinken` aus werkzeuge() und ist damit nur aus
+    einem Gespraech heraus aufrufbar. Die Anmeldewache laeuft aber
+    NEBEN dem Gespraech und muss gerade dann noch melden koennen, wenn
+    der Kopf nicht mehr denkt -- das ist ja der ganze Anlass.
+
+    Gibt zurueck, ob es geklappt hat, und wirft nichts: Eine Wache, die
+    am Melden scheitert und dabei ihre eigene Schleife abraeumt, waere
+    schlimmer als keine.
+    """
+    dienst = await _hole("gmail", "v1")
+    if dienst is None or "@" not in (an or ""):
+        return False
+    nachricht = EmailMessage()
+    nachricht["To"] = an
+    nachricht["Subject"] = betreff
+    nachricht.set_content(text)
+    roh = base64.urlsafe_b64encode(nachricht.as_bytes()).decode()
+    try:
+        await asyncio.to_thread(
+            lambda: dienst.users().messages().send(
+                userId="me", body={"raw": roh}).execute())
+    except Exception:
+        return False
+    return True
+
+
 def anmelden_interaktiv():
     """Einmalige Anmeldung im Browser. Gibt eine kleine Probe zurueck."""
     from google_auth_oauthlib.flow import InstalledAppFlow
