@@ -487,18 +487,31 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         "route_zeigen",
         "Öffnet eine Route in Google Maps — von wo nach wo, mit Verkehrs"
         "mittel. Für 'wie komme ich von Hamburg nach Berlin' oder 'zeig mir "
-        "den Weg zum Bahnhof'.",
+        "den Weg zum Bahnhof'. Mit losfahren=true startet stattdessen die "
+        "NAVIGATION auf dem Gerät, von dem gerade gesprochen wird — für "
+        "unterwegs im Auto.",
         {
             "type": "object",
             "properties": {
                 "von": {"type": "string",
                         "description": "Startpunkt. Leer lassen für den "
-                                       "aktuellen Standort."},
+                                       "aktuellen Standort. Wird bei "
+                                       "losfahren=true ignoriert."},
                 "nach": {"type": "string", "description": "Ziel."},
                 "mittel": {
                     "type": "string",
                     "enum": ["auto", "oepnv", "fuss", "rad"],
                     "description": "Verkehrsmittel. Vorgabe: auto.",
+                },
+                "losfahren": {
+                    "type": "boolean",
+                    "description":
+                        "true = Navigation SOFORT starten, ab dem "
+                        "aktuellen Standort, nur auf dem Gerät des "
+                        "Sprechers. Nimm das bei 'bring mich nach', "
+                        "'navigier mich', 'fahr los', 'ich sitze im "
+                        "Auto'. false oder weggelassen = die Route nur "
+                        "anzeigen, auf allen Bildschirmen.",
                 },
             },
             "required": ["nach"],
@@ -516,9 +529,28 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                   "fuss": "walking", "rad": "bicycling"}.get(
                       args.get("mittel") or "auto", "driving")
 
+        losfahren = bool(args.get("losfahren"))
+
         adresse = ("https://www.google.com/maps/dir/?api=1"
                    f"&destination={quote_plus(nach)}"
                    f"&travelmode={mittel}")
+        if losfahren:
+            # DER UNTERSCHIED ZWISCHEN "ROUTE" UND "NAVI".
+            #
+            # Ohne dir_action zeigt die Maps-App die Routenuebersicht --
+            # man muss noch auf "Starten" tippen. Genau das geht am
+            # Steuer nicht, und damit waere die ganze Sprachbedienung
+            # sinnlos: Der Sinn ist, das Handy NICHT anzufassen.
+            #
+            # Mit dir_action=navigate faengt sie sofort an zu navigieren.
+            # Auf einem Rechner wirkt der Zusatz nicht -- dort bleibt es
+            # die Uebersicht im Browser, was dort auch richtig ist.
+            adresse += "&dir_action=navigate"
+            # KEIN origin: Wer losfaehrt, faehrt von hier. Ein
+            # mitgegebener Startpunkt macht aus der Navigation wieder
+            # eine Vorschau, weil Maps dann nicht weiss, ob es beim
+            # Nutzer losgehen soll.
+            von = ""
         if von:
             adresse += f"&origin={quote_plus(von)}"
 
@@ -536,12 +568,40 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         #
         # Und es geht an ALLE, die zusehen -- Handy und Rechner
         # gleichzeitig. Das ging vorher gar nicht.
-        sicht.browser(adresse)
+        gezielt = False
+        if losfahren:
+            # AN EIN GERAET, NICHT AN ALLE -- dieselbe Ueberlegung wie
+            # beim Radio (werkzeuge/lesen.py). Wer im Auto sagt "bring
+            # mich nach Hamburg", meint das Handy in seiner Hand. Ginge
+            # es an alle, spraenge auf dem Rechner daheim ein Maps-Tab
+            # auf, den niemand sieht und niemand zumacht.
+            traeger = sicht.draht()
+            if traeger is not None and hasattr(traeger, "senden_gezielt"):
+                traeger.senden_gezielt(anzeige_modul.ziel(),
+                                       {"art": "browser",
+                                        "adresse": adresse})
+                gezielt = True
+        if not gezielt:
+            # Frueher: Start-Process, also "mach das auf MEINEM
+            # Bildschirm auf". Das setzte voraus, dass Sarvis und der
+            # Bildschirm derselbe Rechner sind -- auf dem Server gibt es
+            # keinen, und der Aufruf scheiterte mit FileNotFoundError:
+            # powershell.exe.
+            #
+            # Jetzt geht die Adresse an die OBERFLAECHEN, und zwar an
+            # alle, die zusehen -- Handy und Rechner gleichzeitig. Das
+            # ging vorher gar nicht.
+            sicht.browser(adresse)
 
         if leuchten:
             leuchten("Websuche")
         wie = {"driving": "mit dem Auto", "transit": "mit Bus und Bahn",
                "walking": "zu Fuß", "bicycling": "mit dem Rad"}[mittel]
+        if losfahren:
+            return {"content": [{"type": "text", "text":
+                    f"Navigation nach {nach} läuft {wie}. Sag dem Nutzer "
+                    "kurz, dass es losgeht — er sitzt vermutlich am "
+                    "Steuer und soll nicht auf den Bildschirm sehen."}]}
         return {"content": [{"type": "text", "text":
                 f"Die Route {wie} " + (f"von {von} " if von else "")
                 + f"nach {nach} liegt jetzt auf deinem Bildschirm."}]}
