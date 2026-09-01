@@ -101,6 +101,15 @@ PUNKTE_DECKEL = {
     "ablauf": 10,
 }
 
+# Wie viel Text ein Markdown-Blatt hoechstens traegt.
+#
+# Der Draht laesst 4 MB je Nachricht durch (netz/server.py,
+# NACHRICHT_MAX) -- daran liegt es also nicht. Es liegt daran, dass
+# niemand vierzigtausend Zeichen am Stueck liest: Was laenger ist, ist
+# ein Bericht und gehoert auf eine Seite (werkzeuge/bericht.py), nicht
+# in eine Gespraechsnachricht.
+MARKDOWN_MAX = 40_000
+
 # Zustaende
 RUHIG = "ruhig"
 HOERT = "hoert"
@@ -363,6 +372,44 @@ class Anzeige:
     def browser_zu(self) -> None:
         self._senden(art="browser_zu")
 
+    def blatt(self, kennung: str, sorte: str = "markdown", titel: str = "",
+              adresse: str = "", inhalt: str = "", datei: str = "",
+              bytes_: int = 0, sekunden: float = 0.0) -> None:
+        """Etwas zum Lesen zeigen -- groesser als eine Kachel.
+
+        Drei Sorten, ein Begriff (siehe netz/blaetter.py):
+
+            markdown  inhalt traegt den Text, keine Datei, keine Adresse
+            html      adresse zeigt auf /blatt/<kennung>, wird gerahmt
+            datei     dito, aber mit einem Knopf zum Herunterladen
+
+        kennung ist die IDENTITAET, wie name bei der Kachel: Zweimal
+        dieselbe heisst dasselbe Blatt mit neuem Inhalt.
+
+        WARUM DER TEXT BEIM MARKDOWN MITGEHT UND NICHT ALS DATEI
+
+        Eine formatierte Antwort ist Teil des Gespraechs und soll da
+        sein, sobald sie da ist. Eine Datei dafuer anzulegen hiesse:
+        schreiben, ausliefern, abholen -- drei Wege und ein Aufraeumer
+        fuer etwas, das in eine Nachricht passt.
+        """
+        text = str(inhalt or "")
+        if len(text) > MARKDOWN_MAX:
+            # Wie bei den Kacheln: lieber sichtbar gekuerzt als stumm.
+            # Ein Blatt, das mitten im Satz aufhoert, sieht aus wie ein
+            # Fehler in Sarvis und ist einer in der Uebertragung.
+            text = text[:MARKDOWN_MAX] + "\n\n*(gekürzt — der Rest passt "
+            text += "nicht auf ein Blatt)*"
+        self._senden(art="blatt", kennung=str(kennung),
+                     sorte=str(sorte or "markdown"), titel=str(titel or ""),
+                     adresse=str(adresse or ""), inhalt=text,
+                     datei=str(datei or ""), bytes=int(bytes_ or 0),
+                     sekunden=round(float(sekunden), 1))
+
+    def blatt_weg(self, kennung: str) -> None:
+        """Ein Blatt zuklappen."""
+        self._senden(art="blatt_weg", kennung=str(kennung))
+
     def kachel(self, name: str, kopf: str, punkte, sorte: str = "antwort",
                gross: str = "", stand: str = "", sekunden: float = 0.0,
                form: str = "liste", spalten=()) -> None:
@@ -457,6 +504,22 @@ class Anzeige:
         die Methoden hier drueber und nicht diesen Griff.
         """
         return self._traeger
+
+    def ueber_netz(self) -> bool:
+        """Haengt hier die Netz-Oberflaeche oder das Fenster auf diesem PC?
+
+        Der Unterschied zaehlt genau dort, wo etwas ANGEFASST werden
+        soll statt nur angezeigt: Auf dem Dev-PC schickt Sarvis eine
+        file:///-Adresse, und das eingebaute Fenster oeffnet sie. Ueber
+        Netz liegt die Datei auf dem Server und der Browser des Nutzers
+        woanders -- dieselbe Adresse zeigt dann ins Leere seiner eigenen
+        Platte, und die Weboberflaeche verwirft sie stumm.
+
+        Gefragt wird der Traeger und nicht die Betriebsart: Wer sendet,
+        weiss es sicher; eine Umgebungsvariable sagt nur, was gemeint
+        war.
+        """
+        return hasattr(self._traeger, "wie_viele")
 
     def kachel_weg(self, name: str) -> None:
         """Eine Kachel ausblenden lassen -- der Auftrag ist fertig."""

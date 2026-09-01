@@ -5,9 +5,15 @@ eine Taste halten, reden, Antwort hören.
 
 **Was steht:** die geschlossene Schleife — Ohren, Hirn, Mund — dazu die
 Anzeige, das Weckwort, das Gedächtnis, die gesprochenen Rückfragen und
-**74 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
+**103 eigene Werkzeuge**: Timer, Telegram, Google (Kalender, Mail,
 Aufgaben, Kontakte, Drive, Tabellen), Programme und Medien, Dateien,
 Projekte und Hintergrundaufträge, das eigene Finanzdashboard.
+
+Und **Blätter**: was gelesen statt gehört wird. Eine formatierte Antwort
+im Gespräch, ein Bericht zum Hinsetzen, oder eine Datei zum Behalten —
+PDF, Word, Excel, CSV, Text. Sarvis schreibt dafür Markdown; woraus
+daraus wird, entscheidet die Sorte. Der Weg dorthin steht in
+`einsatz/DRAHT.md`, die Absicherung in `sarvis/netz/blaetter.py`.
 
 ## Starten
 

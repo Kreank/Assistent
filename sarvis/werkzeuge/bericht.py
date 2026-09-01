@@ -97,7 +97,11 @@ BERICHTE_BEHALTEN = 30
 # Nur Dateien, deren Name auf unseren Zeitstempel endet -- "-20260828-1433"
 # oder "-20260828-1433-2". Wer sonst noch etwas in die Ablage legt (ein
 # Auftrag, der Nutzer selbst), soll es dort wiederfinden.
-_NAMENSMUSTER = re.compile(r"-\d{8}-\d{4}(-\d+)?\.html$")
+# Woran dieses Modul seine eigenen Erzeugnisse wiedererkennt. Die drei
+# Endungen, weil _aufraeumen sonst PDFs und Word-Dateien liegen liesse
+# und der Ordner nur noch waechst (werkzeuge/dokument.py legt sie hier
+# ab, nach demselben Muster und mit Absicht).
+_NAMENSMUSTER = re.compile(r"-\d{8}-\d{4}(-\d+)?\.(html|pdf|docx)$")
 
 # Hoechstens so viele Datenpunkte je Diagramm. Vierzig Saeulen auf 900
 # Punkten Breite sind rund zwanzig Punkte je Saeule -- darunter wird aus
@@ -177,12 +181,57 @@ body{margin:0;background:var(--grund);color:var(--text);
 h1{margin:14px 0 0;font-size:30px;line-height:1.2;font-weight:600;
  letter-spacing:-.01em}
 .unter{margin:8px 0 0;color:var(--leise);font-size:16px;max-width:70ch}
+.absender{margin:4px 0 0;color:var(--leise);font-size:12.5px;
+ line-height:1.55}
 .stand{margin:12px 0 0;color:var(--ruhig);font-size:12.5px;
  letter-spacing:.08em;text-transform:uppercase}
 h2{margin:38px 0 14px;font-size:19px;font-weight:600;letter-spacing:-.005em;
  padding-bottom:8px;border-bottom:1px solid var(--kante)}
 h3{margin:26px 0 8px;font-size:15px;font-weight:600;color:var(--ruhig)}
+/* h4 GIBT ES SEIT MARKDOWN, und vorher gab es sie nicht.
+   markdown_lesen.als_html schiebt jede Ueberschrift eine Ebene tiefer,
+   weil h1 dem Titel im Kopf gehoert -- aus "###" wird also h4. Ohne
+   diese Zeile stand die dritte Gliederungsebene im Browserstandard
+   mitten in einer durchgestalteten Seite; gemessen an einem Muster mit
+   drei Ebenen fiel genau sie heraus. */
+h4{margin:22px 0 7px;font-size:13.5px;font-weight:600;
+ letter-spacing:.03em;color:var(--leise)}
 p{margin:0 0 12px}
+
+/* WAS MARKDOWN ERZEUGT.
+
+   Bis hierher schrieb das Modell den Rumpf als HTML und benutzte dabei
+   die Klassen weiter unten (.kennzahl, .tabelle, .hinweis). Seit
+   werkzeuge/dokument.py kommt der Rumpf auch aus Markdown, und das
+   erzeugt schlichte Tags: ul, ol, blockquote, pre, code, hr. Die waren
+   hier nie gestaltet -- eine Aufzaehlung stand dann im Browserstandard
+   mitten in einer sonst durchgestalteten Seite, und im PDF genauso.
+   Gemessen an einem Muster-Angebot: das Zitat war ein eingerueckter
+   Absatz ohne jedes Kennzeichen.
+
+   Bewusst zurueckhaltend: Diese Tags sollen aussehen wie der Rest,
+   nicht auffallen. */
+ul,ol{margin:0 0 14px;padding-left:24px}
+li{margin:0 0 6px}
+li::marker{color:var(--ruhig)}
+/* Eine Unterliste steht IM li ihres Punktes. Ohne diese Zeile setzt
+   der Browser den Aussenabstand des Blocks noch einmal darunter, und
+   zwischen Unterpunkt und naechstem Hauptpunkt klafft eine Luecke, die
+   aussieht wie ein Absatzende. */
+li > ul,li > ol{margin:5px 0 0}
+s{color:var(--leise)}
+/* Das Hakenzeichen traegt die Aussage, nicht der Aufzaehlungspunkt --
+   deshalb bekommt es die Farbe und der Punkt daneben verschwindet. */
+.haken{color:var(--ruhig);margin-right:2px}
+blockquote{margin:0 0 14px;padding:2px 0 2px 15px;
+ border-left:2px solid var(--kante);color:var(--leise)}
+hr{border:0;border-top:1px solid var(--kante);margin:26px 0}
+code{font-family:Consolas,ui-monospace,"SF Mono",monospace;font-size:.88em;
+ padding:1px 6px;border-radius:5px;background:var(--flaeche);
+ border:1px solid var(--kante)}
+pre{margin:0 0 16px;padding:13px 15px;border-radius:9px;
+ background:var(--flaeche);border:1px solid var(--kante);overflow-x:auto}
+pre code{padding:0;border:0;background:none;font-size:12.5px;line-height:1.55}
 a{color:var(--hoert)}
 strong{color:#fff;font-weight:600}
 .block{margin:0 0 34px}
@@ -234,6 +283,45 @@ tfoot td{font-weight:600;background:#101A26;border-top:1px solid var(--kante)}
 @media (max-width:640px){
  .spalte{padding:0 16px}
  h1{font-size:24px}
+}
+
+/* AUF PAPIER IST ALLES ANDERSHERUM.
+
+   Der dunkle Grund ist am Bildschirm richtig und auf Papier ein Fehler
+   -- eine A4-Seite Anthrazit kostet eine halbe Patrone und macht die
+   Schrift schlechter lesbar, nicht besser. Chrome zieht diesen Block
+   auch beim Erzeugen eines PDF heran (Page.printToPDF wertet
+   @media print aus), er ist also nicht nur fuer den seltenen Fall
+   gedacht, dass jemand wirklich druckt: Er IST der Stil des PDF.
+
+   Deshalb werden hier die Variablen umgesetzt statt einzelne Regeln
+   nachgezogen -- alles, was von ihnen abhaengt, kommt dann von selbst
+   mit. Was das nicht erreicht, sind die drei Stellen mit fest
+   eingetragener Farbe; sie stehen darunter.
+
+   Flaechen bekommen einen Rahmen statt einer Fuellung: Ein grauer
+   Kasten im Druck ist ein grauer Kasten, ein Rahmen ist eine Kontur.
+
+   Und: keine Seitenumbrueche mitten in einer Ueberschrift oder einem
+   Diagramm. Ein Balkendiagramm, das ueber zwei Seiten faellt, ist
+   zweimal die Haelfte. */
+@media print{
+ :root{--grund:#fff;--text:#16202B;--leise:#5A6672;--ruhig:#7A5A2A;
+  --flaeche:#fff;--kante:#C8CDD3}
+ body{background:#fff;color:#16202B}
+ .kopf{background:#fff;border-bottom:1px solid #C8CDD3}
+ strong{color:#000}
+ th{background:#F0F2F4;color:#3C4854}
+ tfoot td,tbody tr:hover td{background:#F0F2F4}
+ .spalte{max-width:none;padding:0}
+ code,pre{background:#F6F7F8;border-color:#D6DAE0}
+ blockquote{border-left-color:#B8BEC6}
+ .fuss{padding-bottom:0}
+ a{color:#16202B}
+ h1,h2,h3,h4{break-after:avoid;page-break-after:avoid}
+ .diagramm,.kennzahl,table,blockquote,pre{break-inside:avoid;
+  page-break-inside:avoid}
+ @page{margin:18mm 16mm}
 }
 """
 
@@ -691,7 +779,7 @@ def _stamm_saeubern(titel: str) -> str:
     return name[:NAME_MAX].strip(" .-") or "bericht"
 
 
-def _ziel(stamm: str):
+def _ziel(stamm: str, endung: str = ".html"):
     """Freien Pfad in der Ablage suchen; legt den Ordner an, wenn er fehlt.
 
     Gibt None zurueck, wenn der Pfad wider Erwarten aus dem Ordner
@@ -707,12 +795,12 @@ def _ziel(stamm: str):
     """
     config.ABLAGE.mkdir(parents=True, exist_ok=True)
     stempel = datetime.now().strftime("%Y%m%d-%H%M")
-    ziel = config.ABLAGE / f"{stamm}-{stempel}.html"
+    ziel = config.ABLAGE / f"{stamm}-{stempel}{endung}"
     zaehler = 2
     # Zweimal derselbe Titel in derselben Minute ueberschreibt nicht --
     # es koennen zwei verschiedene Auswertungen sein.
     while ziel.exists():
-        ziel = config.ABLAGE / f"{stamm}-{stempel}-{zaehler}.html"
+        ziel = config.ABLAGE / f"{stamm}-{stempel}-{zaehler}{endung}"
         zaehler += 1
     if config.ABLAGE.resolve() != ziel.resolve().parent:
         return None
@@ -727,8 +815,8 @@ def _aufraeumen() -> int:
     legt, findet es dort wieder.
     """
     try:
-        dateien = [p for p in config.ABLAGE.glob("*.html")
-                   if _NAMENSMUSTER.search(p.name)]
+        dateien = [p for p in config.ABLAGE.iterdir()
+                   if p.is_file() and _NAMENSMUSTER.search(p.name)]
     except OSError:
         return 0
     if len(dateien) <= BERICHTE_BEHALTEN:
@@ -759,13 +847,41 @@ def seite_bauen(titel: str, inhalt: str, untertitel: str = "",
     rumpf = _diagramme_einsetzen(_rumpf_richten(inhalt), diagramme or [])
     jetzt = datetime.now()
     stand = str(stand or "").strip() or f"Stand {jetzt:%d.%m.%Y, %H:%M} Uhr"
-    kopf = [f'<div class="marke">{_RING}<span>Sarvis</span></div>',
-            f"<h1>{escape(str(titel))}</h1>"]
+
+    # WER OBEN STEHT, entscheidet config.DOKUMENT_ABSENDER. Ohne Eintrag
+    # bleibt es beim Ringzeichen -- so, wie es seit jeher war und wie es
+    # fuer eine Auswertung richtig ist, die nur Sascha liest. Mit
+    # Eintrag steht dort der Absender: Ein Angebot, das der Assistent
+    # unterschreibt, ist kein Angebot.
+    absender = str(getattr(config, "DOKUMENT_ABSENDER", "") or "").strip()
+    if absender:
+        marke = [f'<div class="marke"><span>{escape(absender)}</span></div>']
+        zeilen = [str(z).strip()
+                  for z in getattr(config, "DOKUMENT_ZEILEN", []) or []
+                  if str(z).strip()]
+        if zeilen:
+            marke.append('<p class="absender">'
+                         + "<br>".join(escape(z) for z in zeilen) + "</p>")
+    else:
+        marke = [f'<div class="marke">{_RING}<span>Sarvis</span></div>']
+
+    kopf = marke + [f"<h1>{escape(str(titel))}</h1>"]
     if untertitel:
         kopf.append(f'<p class="unter">{escape(str(untertitel))}</p>')
     kopf.append(f'<p class="stand">{escape(stand)}</p>')
-    fuss = f"Erzeugt von Sarvis am {jetzt:%d.%m.%Y um %H:%M} Uhr"
-    if pfad:
+
+    eigener_fuss = str(getattr(config, "DOKUMENT_FUSS", "") or "").strip()
+    if eigener_fuss:
+        fuss = escape(eigener_fuss)
+    elif absender:
+        # Name gesetzt, aber keine Fusszeile: Dann lieber nur das Datum
+        # als eine Herkunftsangabe, die dem Kopf widerspricht.
+        fuss = f"{jetzt:%d.%m.%Y}"
+    else:
+        fuss = f"Erzeugt von Sarvis am {jetzt:%d.%m.%Y um %H:%M} Uhr"
+    if pfad and not absender:
+        # Der Dateipfad ist eine Notiz an den Betreiber und gehoert
+        # nicht auf etwas, das nach draussen geht.
         fuss += f" · {escape(pfad)}"
     return (
         "<!DOCTYPE html>\n"
@@ -958,22 +1074,53 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     "is_error": True}
         await asyncio.to_thread(_aufraeumen)
 
-        # as_uri() und nicht "file:///" + Pfad: Umlaute, Leerzeichen und
-        # Backslashes werden dabei richtig kodiert. Ein handgebautes
-        # file://-Ziel scheitert genau dann, wenn der Titel deutsch ist.
-        sicht.browser(ziel.as_uri())
-
-        # Und jetzt nachsehen, ob wirklich etwas aufgegangen ist. Der
-        # Draht zur Anzeige ist mit Absicht einseitig -- laeuft sie
-        # nicht, verschwindet die Meldung im Nichts, und ohne diese
-        # Frage behauptete Sarvis eine Seite, die niemand sieht.
-        # web_stand ist die einzige Frage, die auch ohne Browser eine
-        # sinnvolle Antwort hat (siehe hud.py).
+        # ZWEI WEGE, UND DER TRAEGER ENTSCHEIDET.
+        #
+        # Am Dev-PC oeffnet das eingebaute Fenster eine file:///-Adresse
+        # -- Datei und Fenster liegen auf demselben Rechner. Ueber Netz
+        # ist genau das der Fehler, den es hier zu beheben gab: Die
+        # Datei liegt im Container, der Browser des Nutzers steht
+        # woanders, und die Weboberflaeche verwirft alles, was nicht
+        # http ist, STILL (sarvis.js, seiteZeigen). Sarvis sagte "die
+        # Seite steht im Fenster", und es stand nichts.
+        #
+        # Also wird die Seite ueber Netz nicht verschickt, sondern
+        # ABRUFBAR gemacht: netz/blaetter.py legt sie unter eine
+        # unerratbare Adresse, die Oberflaeche rahmt sie ein.
         offen = False
-        if sicht.an:
-            antwort = await asyncio.to_thread(
-                sicht.fragen, "web_stand", STAND_ZEITLIMIT)
-            offen = bool(antwort and antwort.get("offen"))
+        if sicht.ueber_netz():
+            from ..netz import blaetter
+            try:
+                kennung = await asyncio.to_thread(
+                    blaetter.hinlegen, ziel, "html", titel)
+            except (OSError, ValueError) as e:
+                return {"content": [{"type": "text", "text":
+                        f"Die Seite ist geschrieben, aber ich konnte sie "
+                        f"nicht bereitstellen: {e}"}], "is_error": True}
+            sicht.blatt(kennung, sorte="html", titel=titel,
+                        adresse=blaetter.adresse(kennung))
+            # Ueber Netz gibt es keine Rueckfrage ans Fenster, aber
+            # etwas Besseres: Der Traeger weiss, wie viele Oberflaechen
+            # verbunden sind. Null heisst, es sieht gerade niemand hin
+            # -- und das gehoert gesagt statt behauptet.
+            draht = sicht.draht()
+            offen = bool(draht and draht.wie_viele())
+        else:
+            # as_uri() und nicht "file:///" + Pfad: Umlaute, Leerzeichen
+            # und Backslashes werden dabei richtig kodiert. Ein
+            # handgebautes file://-Ziel scheitert genau dann, wenn der
+            # Titel deutsch ist.
+            sicht.browser(ziel.as_uri())
+            # Und jetzt nachsehen, ob wirklich etwas aufgegangen ist.
+            # Der Draht zur Anzeige ist mit Absicht einseitig -- laeuft
+            # sie nicht, verschwindet die Meldung im Nichts, und ohne
+            # diese Frage behauptete Sarvis eine Seite, die niemand
+            # sieht. web_stand ist die einzige Frage, die auch ohne
+            # Browser eine sinnvolle Antwort hat (siehe hud.py).
+            if sicht.an:
+                antwort = await asyncio.to_thread(
+                    sicht.fragen, "web_stand", STAND_ZEITLIMIT)
+                offen = bool(antwort and antwort.get("offen"))
 
         if leuchten:
             # Derselbe Globus wie bei web_zeigen: Es ist dasselbe Fenster.
@@ -983,10 +1130,21 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         anzahl = len(list(args.get("diagramme") or []))
         womit = f" mit {anzahl} Diagramm{'en' if anzahl != 1 else ''}" \
             if anzahl else ""
-        if offen:
+        if offen and sicht.ueber_netz():
+            satz = (f"»{titel}«{womit} liegt jetzt als Blatt vor dem "
+                    "Nutzer. Sag den Kern trotzdem — die Seite ersetzt "
+                    "deine Antwort nicht.")
+        elif offen:
             satz = (f"»{titel}«{womit} steht jetzt im Browserfenster. Sag "
                     "den Kern trotzdem — die Seite ersetzt deine Antwort "
                     "nicht.")
+        elif sicht.ueber_netz():
+            # Ehrlich statt schoen, zweiter Fall: Die Seite ist da und
+            # abrufbar, es ist nur niemand verbunden, der sie sehen
+            # koennte.
+            satz = (f"»{titel}«{womit} ist fertig, aber gerade ist keine "
+                    "Oberfläche verbunden — sie wird da sein, sobald "
+                    "wieder eine offen ist.")
         else:
             # Ehrlich statt schoen: Die Datei ist da, das Fenster nicht.
             # Der Pfad steht in der Antwort, damit Sarvis ihn nennen

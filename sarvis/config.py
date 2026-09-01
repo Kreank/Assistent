@@ -353,12 +353,44 @@ ELEVENLABS_FORMAT = "mp3_44100_128"
 # Ueberlegung wie beim Finanzdashboard.
 ELEVENLABS_ZEITGRENZE = 20.0
 
+# --- Was auf Dokumenten steht --------------------------------------------
+#
+# Kopf und Fuss von Berichten, PDFs und Word-Dateien
+# (werkzeuge/bericht.py, werkzeuge/dokument.py).
+#
+# LEER HEISST SARVIS. Steht hier kein Name, tragen die Dokumente das
+# Ringzeichen und "Erzeugt von Sarvis am ..." -- richtig fuer etwas, das
+# nur man selbst liest, und falsch fuer alles, was an jemand anderen
+# geht: Dort steht dann der Assistent im Briefkopf statt des Absenders.
+#
+# Sobald ein Name eingetragen ist, weichen beide dem hier. Beispiel:
+#
+#   DOKUMENT_ABSENDER = "Sascha Richter"
+#   DOKUMENT_ZEILEN = ["Musterstrasse 1, 04103 Leipzig",
+#                      "0341 1234567 · post@example.de"]
+#   DOKUMENT_FUSS = "Sascha Richter · USt-IdNr. DE123456789"
+#
+# Die Zeilen stehen klein unter dem Namen, der Fuss unten auf jeder
+# Seite. Wer nur den Namen setzt, bekommt genau den -- die anderen
+# beiden sind einzeln entbehrlich.
+DOKUMENT_ABSENDER = ""
+DOKUMENT_ZEILEN: list[str] = []
+DOKUMENT_FUSS = ""
+
 # Ausgewaehlt am 28.08.2026 aus achtzehn Farben auf zwei Stimmdateien,
 # an fuenf echten Saetzen verglichen (Weckantwort, Begruessung, Zahlen,
-# Rueckfrage, lange Aufzaehlung). Die groessere Datei kostet Rechenzeit:
-# bei langen Saetzen 1330 statt 637 Millisekunden -- das ist die
-# Wartezeit vor dem ersten Ton, und sie war es wert.
-STIMME = DATEN / "stimmen" / "de_DE-thorsten-high.onnx"
+# Rueckfrage, lange Aufzaehlung).
+#
+# ZURUECK AUF MEDIUM am 01.09.2026, auf Ansage. "high" war die Wahl aus
+# dem Vergleich und im Betrieb die schlechtere: Die groessere Datei
+# kostet bei langen Saetzen 1330 statt 637 Millisekunden, und das ist
+# nicht irgendeine Rechenzeit, sondern die Stille vor dem ersten Ton --
+# jedes Mal. Am einzelnen Satz war der Unterschied im Klang zu hoeren,
+# im Gespraech war es die Wartezeit.
+#
+# Beide Dateien liegen weiterhin unter DATEN/stimmen; ein Wechsel ist
+# diese eine Zeile und ein Neustart.
+STIMME = DATEN / "stimmen" / "de_DE-thorsten-medium.onnx"
 
 # Manche Stimmen bringen mehrere Sprecher mit. Bei
 # de_DE-thorsten_emotional-medium sind das Stimmungen:
@@ -400,7 +432,28 @@ RHYTHMUS = 0.95
 # Modelle, sondern normale Stimmen mit Effektkette -- HAL, GLaDOS und
 # JARVIS sind Schauspieler mit Bearbeitung. Kostet Millisekunden.
 # Moeglich: "aus", "hologramm", "bordcomputer", "halle", "kuenstlich", "nah"
-STIMMFARBE = "sarvis"
+#
+# AUS SEIT DEM 01.09.2026, auf Ansage: "wieder Thorsten normal".
+#
+# Am Tag zuvor wurde dafuer die Stimmdatei von high auf medium gestellt
+# -- das war die falsche Haelfte. Verzerrt hat nicht das Modell,
+# sondern diese Zeile: Die Farbe "sarvis" schiebt die Formanten um
+# Faktor 1,32 (das ist der kuenstliche Beiklang), doppelt die Stimme
+# zweifach leicht verstimmt und legt Hall darueber. Das Ergebnis klingt
+# nach Bordcomputer, und genau das war urspruenglich gewollt.
+#
+# Seit dem 01.09.2026 nachmittags "praesent", nach sechs Hoerproben am
+# selben Satz: etwas Fundament, etwas Luft, ein kleiner Raum -- sonst
+# nichts. Die Wahl fiel zwischen "aus", "praesent" und "sternenschiff"
+# und war knapp; wer sie noch einmal hoeren will, findet das Skript
+# unter stimmproben.py und die Farben hier daneben.
+#
+# Die Nachbarn, falls es doch kippen soll: "aus" ist unbearbeitet,
+# "sternenschiff" eine Stufe entrueckter (Star-Trek-Richtung),
+# "begleiter" noch eine weiter. Zurueck zur alten Bordcomputer-Stimme
+# geht mit "sarvis"; die Effektkette steht unveraendert in
+# stimmfarbe.py. Es ist jedesmal ein Wort und ein Neustart.
+STIMMFARBE = "praesent"
 
 # --- Hirn -----------------------------------------------------------------
 MODELL = "claude-opus-5"
@@ -481,9 +534,17 @@ Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei i
 
 Du hast eine Anzeige, und du sollst sie benutzen. Sobald deine Antwort aus Zahlen, einer Liste, einem Verlauf oder einem Vergleich besteht, stell sie hin, statt sie nur vorzulesen. Vorgelesene Zahlen sind nach dem dritten Posten weg.
 
-Zwei Wege, und die Größe entscheidet. kachel_zeigen ist eine Kachel neben der Engine, für den Blick nebenbei: ein paar Zeilen, ein Balken- oder Tortendiagramm, ein Gesprächsverlauf, ein Vergleich. seite_zeigen ist eine Seite im eingebauten Browser, fürs Hinsetzen: eine richtige Auswertung, mehrere Diagramme, etwas zum Durchsehen oder Behalten.
+Vier Wege, und die Größe entscheidet — nicht dein Geschmack. kachel_zeigen ist eine Kachel neben der Engine, für den Blick nebenbei: ein paar Zeilen, ein Balken- oder Tortendiagramm, ein Gesprächsverlauf, ein Vergleich. blatt_zeigen ist eine formatierte Antwort im Gespräch: Überschriften, Listen, eine kleine Tabelle, Links — alles, was gesprochen unübersichtlich wäre und doch keine ganze Auswertung ist. seite_zeigen ist eine Seite fürs Hinsetzen: eine richtige Auswertung mit mehreren Diagrammen. dokument_erstellen macht eine Datei zum BEHALTEN oder WEITERGEBEN — PDF zum Ausdrucken und Verschicken, Word zum Weiterschreiben, Excel wenn gerechnet oder sortiert werden soll, CSV für den Import woandershin, Text für das rohe Markdown.
 
-Bei drei Zahlen fragst du nicht, da nimmst du die Kachel. Bei einer Jahresauswertung fragst du auch nicht, da nimmst du die Seite. Nur wenn es wirklich dazwischen liegt, fragst du in einem Halbsatz: "Als Kachel daneben oder als Seite zum Hinsetzen?" Das ist eine Frage zur Sache, keine Erlaubnisfrage — sie ist erlaubt.
+Bei drei Zahlen fragst du nicht, da nimmst du die Kachel. Bei einer Anleitung in fünf Schritten fragst du auch nicht, da nimmst du das Blatt. Bei einer Jahresauswertung nimmst du die Seite. Nur wenn es wirklich dazwischen liegt, fragst du in einem Halbsatz: "Als Blatt daneben oder als Seite zum Hinsetzen?" Das ist eine Frage zur Sache, keine Erlaubnisfrage — sie ist erlaubt.
+
+Der Unterschied zwischen Seite und Dokument ist nicht die Größe, sondern was danach damit geschieht: Eine Seite liest man und schließt sie, ein Dokument geht an jemanden oder wird aufgehoben. Erzeug ein Dokument, wenn der Nutzer es sagt ("schick mir das", "zum Ausdrucken", "als PDF") — nicht auf Verdacht. Eine Datei, die niemand wollte, liegt danach herum.
+
+Sagt er nur "als Datei", entscheidet der Inhalt: Sind es überwiegend Zahlen in einer Tabelle, nimm Excel — dort kommen sie als Zahlen an, mit denen man rechnen kann. Ist es ein Schreiben, nimm PDF. Soll er daran weiterschreiben, Word. Frag nicht nach dem Format, wenn der Inhalt es beantwortet.
+
+Das Blatt und das Dokument schreibst du in Markdown: # Überschriften, **fett**, *kursiv*, ~~durchgestrichen~~, `code`, - Listen mit eingerückten Unterpunkten, 1. Nummerierung, - [ ] und - [x] für Checklisten, > Zitate, ```Code```, | Tabellen |, --- Trennlinie, [Text](https://ziel). Kein HTML — das wird als Text angezeigt, nicht ausgeführt.
+
+Zwei Dinge, an denen es sonst scheitert: Eine Tabelle braucht ihre |---|-Trennzeile unter der Kopfzeile, sonst ist sie keine. Und Unterpunkte rückst du mit zwei Leerzeichen ein — daran hängt die Verschachtelung, in der Anzeige wie in Word.
 
 Was du hinstellst, sagst du trotzdem. Die Anzeige ersetzt die Antwort nicht, sie zeigt sie. Und schick den Nutzer nie auf eine fremde Webseite und lass ihn sich nirgends anmelden, um etwas zu sehen, das du ihm gerade vorgelesen hast.
 
@@ -886,6 +947,13 @@ WERKZEUG_STUFEN = {
     # falsche Frage ("Soll ich chat-niko.html anlegen?") war der Anlass
     # fuer das Werkzeug.
     "seite_zeigen":       "still",
+    # Zeigen ist kein Handeln -- dieselbe Einstufung wie Kachel
+    # und Seite. dokument_erstellen schreibt zwar eine Datei,
+    # aber in Sarvis' eigene Ablage und nirgendwo sonst
+    # (bericht._ziel prueft das zweifach).
+    "blatt_zeigen":       "still",
+    "blatt_weg":          "still",
+    "dokument_erstellen": "still",
     # Der Gespraechsverlauf ist kein Gedaechtnis, sondern das Protokoll
     # der eigenen Sitzung -- Nachschlagen darin ist Nachlesen dessen, was
     # ohnehin gesagt wurde.

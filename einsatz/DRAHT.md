@@ -133,6 +133,8 @@ Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
 | `freigabe` | `text`, `sekunden` | was gerade ohne Rückfrage durchgeht |
 | `kachel` | `name`, `sorte`, `kopf`, `gross`, `stand`, `punkte`, `form`, `spalten`, `weggelassen`, `sekunden` | eine Datenkachel |
 | `kachel_weg` | `name` | Kachel ausblenden |
+| `blatt` | `kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`, `sekunden` | etwas zum Lesen |
+| `blatt_weg` | `kennung` | Blatt zuklappen |
 | `ton` | `daten`, `rate`, `runde` | gesprochenes Audio, satzweise |
 | `ton_stopp` | `runde` | sofort still sein |
 | `radio` | `url`, `name` | diesen Sender abspielen — Adresse, kein Ton |
@@ -207,6 +209,65 @@ Begründung „kein Klick, der an der Rückfrage vorbeiläuft". Gehandelt
 wird über Sarvis, nicht am Bild vorbei. Auf einem Touchscreen ist ab Werk
 alles anklickbar — die Sicherung muss also **aktiv** wiederhergestellt
 werden, sonst verschwindet sie lautlos.
+
+### Blätter
+
+Ein Blatt ist, was gelesen statt gehört wird. Die Kachel ist zu klein
+dafür (rund 290 Punkte breit, zwölf Datenpunkte), der Untertitel ist
+eine Zeile. Drei Sorten, ein Kasten:
+
+| `sorte` | wo der Inhalt steckt | wie er gezeigt wird |
+|---|---|---|
+| `markdown` | `inhalt`, mit der Nachricht | die Oberfläche setzt ihn |
+| `html` | `adresse` → `/blatt/<kennung>` | in einem Rahmen |
+| `datei` | dito, plus `datei` und `bytes` | ein Knopf zum Herunterladen |
+
+`kennung` ist die **Identität**, wie `name` bei der Kachel: Zweimal
+dieselbe heißt dasselbe Blatt mit neuem Inhalt, nicht zwei
+übereinander. `sekunden` ist die Lebensdauer, 0 heißt „bis
+`blatt_weg`".
+
+**`adresse` ist immer ein Pfad auf diesen Server**, beginnend mit
+`/blatt/`. Nie eine fremde Adresse — und eine Oberfläche, die etwas
+anderes bekommt, zeigt es nicht an. Der Draht ist authentifiziert, was
+über ihn kommt, ist trotzdem aus Modellausgabe gebaut.
+
+Die Adresse trägt keinen Geräteschlüssel, weil sie keinen tragen kann:
+Ein `<iframe>` schickt keine eigenen Kopfzeilen, ein Download-Knopf
+auch nicht, und der Systemviewer, der das PDF danach öffnet, erst
+recht nicht. Was stattdessen schützt, steht in
+`sarvis/netz/blaetter.py`: 192 Bit Zufall in der Kennung, sieben Tage
+Frist, kein Verzeichnis, und der Pfad wird nie aus der Adresse gebaut.
+
+**Markdown ist die einzige Auszeichnung, und HTML ist keine.** Die
+Teilmenge: `#` bis `###`, `**fett**`, `*kursiv*`, `~~durchgestrichen~~`,
+`` `code` ``, `-` und `1.` Listen mit bis zu drei Ebenen (zwei
+Leerzeichen je Ebene), `- [ ]` und `- [x]` für Haken, `>` Zitat,
+```` ``` ```` Codeblock, `|` Tabellen (die `|---|`-Zeile ist Pflicht),
+`---` Trennlinie, `[Text](https://ziel)`. Alles andere überlebt als
+Text.
+
+Ein Linkziel, das nicht mit `http://`, `https://`, `mailto:` oder
+`tel:` beginnt, wird zu blossem Text — sichtbar, aber nicht anklickbar.
+**Bilder werden benannt, nicht geladen:** `![Foto](…)` wird zu
+`[Foto]`. Ein `<img>` auf eine fremde Adresse wäre in einem Blatt
+zweierlei — ein leerer Rahmen, weil die CSP nur `data:` durchlässt,
+und ein Abruf, der verrät, wann das Blatt geöffnet wurde.
+
+Nicht gelesen werden Fußnoten und der eingerückte Codeblock (vier
+Leerzeichen statt Rücktikken). Der zweite ließe sich nicht sicher von
+der Fortsetzung eines Listenpunkts unterscheiden, und eine Aufzählung,
+die zur Hälfte als Quelltext erscheint, ist schlimmer als ein
+Codeblock, der wie ein Absatz aussieht.
+
+**Der Rahmen bekommt kein `allow-scripts`.** Das ist die Bedingung
+dafür, dass ein Blatt aus Modellausgabe gebaut werden darf: Sarvis
+kann den Rechner bedienen, und was er anzeigt, hat er womöglich von
+einer fremden Seite gelesen. Ohne Skripte, ohne `allow-same-origin`
+und ohne Zugriff auf `localStorage` (dort liegt der Geräteschlüssel)
+ist der Inhalt etwas zum Ansehen und sonst nichts. Wer das später „zur
+Bequemlichkeit" lockert, hebt die einzige Absicherung auf, die es hier
+gibt.
 
 ### `befehl` — die Umkehrung
 

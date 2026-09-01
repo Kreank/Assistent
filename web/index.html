@@ -261,6 +261,95 @@ body{display:flex;flex-direction:column;
    (damit man sieht, dass er über etwas liegt), aber hinter der Schrift
    darf nichts durchscheinen -- gemessen las man den Untertitel quer
    durch die Beschriftung hindurch. */
+/* --- Das Blatt ------------------------------------------------------
+   Derselbe Zuschnitt wie #blick und aus demselben Grund: Es legt sich
+   ueber die Buehne, statt neben ihr um Platz zu ringen. Der Ring
+   bleibt darunter sichtbar -- Sarvis redet weiter, waehrend man liest.
+
+   ANKLICKBAR, und das ist eine Ausnahme mit Ansage. Kacheln sind es
+   nicht ("kein Klick, der an der Rueckfrage vorbeilaeuft"), weil ueber
+   Sarvis gehandelt wird und nicht am Bild vorbei. Ein Blatt ist kein
+   Bild, sondern Text: Wer es nicht scrollen kann, kann es nicht lesen.
+   Was hier geklickt wird, veraendert aber nichts -- es scrollt, es
+   laedt herunter, es macht zu. Es gibt keinen Weg von hier zurueck in
+   Sarvis' Auftragsschleife, und genau daran darf sich nichts aendern. */
+#blatt{position:absolute;inset:8px;z-index:9;display:flex;
+  flex-direction:column;gap:8px;padding:10px 12px 12px;
+  border:1px solid rgba(255,179,71,.34);border-radius:14px;
+  background:rgba(6,11,20,.94);backdrop-filter:blur(6px);
+  box-shadow:0 18px 50px rgba(0,0,0,.55)}
+#blatt[hidden]{display:none}
+#blatt .leiste{flex:0 0 auto;display:flex;align-items:center;gap:10px}
+#blatt .was{min-width:0;flex:1 1 auto}
+#blatt .titel{font-size:13px;font-weight:600;color:rgba(255,196,120,.95);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#blatt .dazu{font-size:11px;color:rgba(232,241,253,.42);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#blatt .laden,#blattzu{flex:0 0 auto;font:inherit;font-size:12px;
+  padding:6px 12px;border-radius:8px;cursor:pointer;text-decoration:none;
+  border:1px solid rgba(255,179,71,.42);background:rgba(255,179,71,.14);
+  color:#ffd8a8}
+#blatt .laden[hidden]{display:none}
+#blattzu{border-color:rgba(232,241,253,.22);background:transparent;
+  color:rgba(232,241,253,.62)}
+#blatt .platz{flex:1 1 auto;min-height:0;display:flex}
+#blatt .rahmen{flex:1 1 auto;width:100%;border:0;border-radius:9px;
+  background:#0B1219}
+#blatt .rahmen[hidden]{display:none}
+
+/* Der Lesetext. Eine Spalte mit Maximalbreite -- eine Zeile ueber die
+   ganze Breite eines 27-Zoll-Schirms findet das Auge am Ende nicht
+   zurueck an den Anfang. */
+#blatt .text{flex:1 1 auto;min-height:0;overflow-y:auto;padding:2px 4px 8px;
+  max-width:74ch;font-size:14.5px;line-height:1.62;
+  color:rgba(232,241,253,.88);scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,.18) transparent;
+  overflow-wrap:anywhere}
+#blatt .text:empty{display:none}
+#blatt .text h1,#blatt .text h2,#blatt .text h3{margin:20px 0 8px;
+  line-height:1.3;color:rgba(255,196,120,.95)}
+#blatt .text h1{font-size:19px}
+#blatt .text h2{font-size:16.5px}
+#blatt .text h3{font-size:14.5px;color:rgba(232,241,253,.75)}
+#blatt .text > :first-child{margin-top:0}
+#blatt .text p{margin:0 0 12px}
+#blatt .text ul,#blatt .text ol{margin:0 0 12px;padding-left:22px}
+#blatt .text li{margin:0 0 5px}
+/* Eine Unterliste steht IM li ihres Punktes -- ohne diese Zeile setzt
+   der Browser den Aussenabstand noch einmal darunter, und zwischen
+   Unterpunkt und naechstem Hauptpunkt klafft eine Luecke, die aussieht
+   wie ein Absatzende. */
+#blatt .text li > ul,#blatt .text li > ol{margin:4px 0 0}
+#blatt .text li::marker{color:rgba(255,179,71,.6)}
+#blatt .text s{color:rgba(232,241,253,.45)}
+#blatt .text .haken{color:rgba(255,196,120,.9);margin-right:2px}
+#blatt .text strong{color:#fff;font-weight:600}
+#blatt .text em{color:rgba(232,241,253,.95)}
+#blatt .text a{color:#7ee2a0}
+#blatt .text code{font-family:Consolas,ui-monospace,monospace;font-size:.88em;
+  padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.08)}
+#blatt .text pre{margin:0 0 14px;padding:11px 13px;border-radius:9px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  overflow-x:auto}
+#blatt .text pre code{padding:0;background:none;font-size:12.5px;
+  line-height:1.5}
+#blatt .text blockquote{margin:0 0 12px;padding:2px 0 2px 13px;
+  border-left:2px solid rgba(255,179,71,.42);color:rgba(232,241,253,.68)}
+#blatt .text hr{border:0;border-top:1px solid rgba(255,255,255,.12);
+  margin:18px 0}
+/* Eine breite Tabelle scrollt IN IHREM Kasten. Ohne das schiebt sie das
+   ganze Blatt waagerecht, und dann scrollt man den Text statt der
+   Zahlen -- derselbe Fehler, den bericht.py mit .tabelle vermeidet. */
+#blatt .text .tabelle{margin:0 0 14px;overflow-x:auto;border-radius:9px;
+  border:1px solid rgba(255,255,255,.10)}
+#blatt .text table{border-collapse:collapse;width:100%;font-size:13px}
+#blatt .text th,#blatt .text td{padding:7px 11px;text-align:left;
+  border-bottom:1px solid rgba(255,255,255,.07);white-space:nowrap}
+#blatt .text th{color:rgba(255,196,120,.85);font-weight:600;font-size:11.5px;
+  letter-spacing:.06em;text-transform:uppercase;
+  background:rgba(255,255,255,.045)}
+#blatt .text tr:last-child td{border-bottom:0}
+
 #blick .leiste{flex:0 0 auto;display:flex;align-items:center;gap:10px;
   padding:8px 10px;border-top:1px solid rgba(255,255,255,.07);
   background:#070c14}
@@ -417,6 +506,40 @@ body{display:flex;flex-direction:column;
       <div class="was"><div class="titel"></div><div class="ort"></div></div>
       <span id="liveperle" hidden>live</span>
       <button id="blickzu" type="button">Schließen</button>
+    </div>
+  </div>
+  <!-- Das Blatt: was gelesen statt gehoert wird. Drei Sorten in einem
+       Kasten (Markdown, eine ganze Seite, eine Datei) -- der Kasten ist
+       derselbe, weil es fuer den Nutzer dasselbe ist: etwas, das
+       dasteht, bis er es zumacht. -->
+  <div id="blatt" hidden>
+    <div class="leiste">
+      <div class="was"><div class="titel"></div><div class="dazu"></div></div>
+      <a class="laden" hidden download>Herunterladen</a>
+      <button id="blattzu" type="button">Schließen</button>
+    </div>
+    <div class="platz">
+      <article class="text"></article>
+      <!-- DER RAHMEN IST DER RIEGEL.
+
+           Was hier hineinkommt, ist aus Modellausgabe gebaut -- und das
+           Modell hat vorher fremde Seiten gelesen. sandbox OHNE
+           allow-scripts und OHNE allow-same-origin heisst: kein
+           JavaScript, kein Zugriff auf localStorage (dort liegt der
+           Geraeteschluessel), kein window.parent, keine Cookies. Der
+           Inhalt kann angesehen werden und sonst nichts.
+
+           allow-popups nur, damit ein Link im Bericht aufgeht -- und
+           allow-popups-to-escape-sandbox, damit die geoeffnete Seite
+           nicht ihrerseits in der Sandbox landet und dann kaputt
+           aussieht.
+
+           Wer hier spaeter allow-scripts ergaenzt, hebt die
+           Absicherung auf, gegen die das Ganze gebaut wurde: Sarvis
+           kann diesen Rechner bedienen. -->
+      <iframe class="rahmen" hidden title="Blatt"
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
+              referrerpolicy="no-referrer"></iframe>
     </div>
   </div>
   <div id="untertitel"></div>

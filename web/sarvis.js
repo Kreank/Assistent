@@ -29,9 +29,22 @@ const BESCHRIFTUNG = {
   ruhig: 'bereit', hoert: 'hört zu', denkt: 'denkt nach',
   spricht: 'spricht', fragt: 'wartet auf dich',
 };
-const WERKZEUGE = ['Timer', 'Gedächtnis', 'Telegram', 'Websuche', 'Programme',
-  'Musik', 'Dateien', 'Projekte', 'Aufträge', 'Kalender', 'E-Mail', 'Aufgaben',
-  'Kontakte', 'Drive', 'Tabellen', 'Entwicklung', 'Finanzen'];
+// Reihenfolge UND Lage wie config.WERKZEUGE. Die Lage ist kein
+// Beiwerk: Ein Werkzeug, das noch nicht gebaut ist, wird nur blass
+// angedeutet -- sonst behauptet der Kranz eine Faehigkeit, die es
+// nicht gibt. Solange alles "bereit" ist, sieht man keinen
+// Unterschied; genau deshalb faellt das Fehlen erst auf, wenn es zu
+// spaet ist.
+const WERKZEUG_BEREIT = 0.95;   // gebaut und nutzbar   (config.py)
+const WERKZEUG_GEPLANT = 0.65;  // kommt noch, angedeutet
+const WERKZEUGE = [
+  ['Timer', 'bereit'], ['Gedächtnis', 'bereit'], ['Telegram', 'bereit'],
+  ['Websuche', 'bereit'], ['Programme', 'bereit'], ['Musik', 'bereit'],
+  ['Dateien', 'bereit'], ['Projekte', 'bereit'], ['Aufträge', 'bereit'],
+  ['Kalender', 'bereit'], ['E-Mail', 'bereit'], ['Aufgaben', 'bereit'],
+  ['Kontakte', 'bereit'], ['Drive', 'bereit'], ['Tabellen', 'bereit'],
+  ['Entwicklung', 'bereit'], ['Finanzen', 'bereit'],
+];
 
 const KACHEL_ANTWORT = [255, 179, 71];
 const KACHEL_ZUSTAND = [126, 224, 168];
@@ -41,9 +54,14 @@ const S = {
   zustand: 'ruhig', pegel: 0, geglaettet: 0, verlauf: new Array(VERLAUF_LAENGE).fill(0),
   untertitel: '', wer: 'sarvis', hervor: 0, nachhoeren: 0, nachhoerenGanz: 1,
   glut: new Map(), hintergrund: [], hgGesamt: 0, hgSeit: 0, hgFertig: false,
+  // Was gerade ohne Rueckfrage durchgeht. Steht da, solange es gilt --
+  // eine Freigabe, die man nicht sieht, ist keine Zusage mehr, sondern
+  // eine Gewohnheit. Der Rest laeuft hier herunter, damit die Anzeige
+  // von selbst verschwindet, statt eine abgelaufene weiter zu behaupten.
+  freigabe: '', freigabeRest: 0,
   tick: 0, kacheln: new Map(), verbunden: false,
 };
-WERKZEUGE.forEach(w => S.glut.set(w, 0));
+WERKZEUGE.forEach(([name]) => S.glut.set(name, 0));
 
 const rgb = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const mischen = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
@@ -117,6 +135,7 @@ function malen() {
   ring(farbe, staerke);
   kern(farbe, staerke);
   zustandswort(farbe);
+  if (S.freigabe) freigabewort();
 }
 
 function untergrund(staerke) {
@@ -133,7 +152,7 @@ function untergrund(staerke) {
 
 function kranz(farbe) {
   const n = WERKZEUGE.length;
-  WERKZEUGE.forEach((name, i) => {
+  WERKZEUGE.forEach(([name, lage], i) => {
     const w = -Math.PI / 2 + 2 * Math.PI * i / n;
     const cx = MITTE.x + Math.cos(w) * KRANZ, cy = MITTE.y + Math.sin(w) * KRANZ;
     let glut = S.glut.get(name) || 0;
@@ -141,7 +160,11 @@ function kranz(farbe) {
       const puls = 0.5 + 0.5 * Math.sin(S.tick * 2.4);
       glut = Math.max(glut, 0.30 + 0.40 * puls);
     }
-    const kraft = Math.min(1, 0.95 + glut * 0.9);
+    // Die Lage steckt allein in der Deckkraft -- "wird nur blass
+    // angedeutet". An der Farbe zu drehen brauchte es nicht: Ein
+    // geplantes Werkzeug bekommt nie eine Glut, weil es nie laeuft.
+    const grund = lage === 'bereit' ? WERKZEUG_BEREIT : WERKZEUG_GEPLANT;
+    const kraft = Math.min(1, grund + glut * 0.9);
     const c = glut > 0.02 ? farbe : [150, 168, 196];
 
     // Speiche nach innen
@@ -238,6 +261,53 @@ function zustandswort(farbe) {
   p.restore();
 }
 
+/* Was gerade ohne Rueckfrage durchgeht -- gesperrte Versalschrift in
+ * einer Farbe, die zu keinem Zustand gehoert: Die Freigabe laeuft
+ * weiter, egal ob er zuhoert, denkt oder schweigt.
+ *
+ * UNTER dem Kranz, nicht dicht unter dem Ring wie in hud.py. Dort
+ * (RADIUS+100) kreuzt die Zeile auf halber Hoehe den Kranz: Auf y 380
+ * sitzen die Werkzeuge bei x 252 und 407, ihre Beschriftungen gehen
+ * nach aussen, und dazwischen bleiben 155 Punkte fuer einen Text, der
+ * gemessen 291 breit ist. Gerendert und angesehen -- "frei: Dateien
+ * lesen ..." lag quer ueber E-MAIL und PROJEKTE. Genau der Fall, den
+ * hud.py im Kommentar zum Hintergrund beschreibt ("drei Texte
+ * uebereinander, keiner davon lesbar"); er trifft die Freigabe dort
+ * ebenso, faellt nur selten auf, weil selten eine anliegt.
+ *
+ * KRANZ+30 liegt unter dem tiefsten Werkzeug (y 395) und ueber dem
+ * Untertitel, der ohnehin ein eigenes Element unter der Buehne ist.
+ * Damit steht die ganze Breite zur Verfuegung. */
+function freigabewort() {
+  p.save();
+  p.font = '7px "Segoe UI",system-ui,sans-serif';
+  p.textAlign = 'center'; p.textBaseline = 'middle';
+  saum(gesperrt(freigabeKuerzen(S.freigabe.toUpperCase())),
+       MITTE.x, MITTE.y + KRANZ + 30, 'rgba(255,186,92,.88)');
+  p.restore();
+}
+
+// Gesperrt wird ueber eingeschobene Leerzeichen -- letterSpacing kennt
+// die Leinwand erst seit Chrome 99 und Safari 17.4, und ein stiller
+// Rueckfall auf ungesperrt saehe aus wie ein anderer Text.
+const gesperrt = (t) => t.split('').join(' ');
+
+// Der Text kommt vom Server und kann lang werden ("frei: Dateien lesen
+// in dem Ordner websearch · 5 min +2"). Gesperrt ist er doppelt so
+// breit. Lieber sichtbar abschneiden als ueber den Rand hinausschreiben
+// -- ein stummer Schnitt am Rand sieht aus wie der ganze Text. hud.py
+// laesst Qt am Rechteck schneiden und hat deshalb keine Marke.
+const FREIGABE_BREITE = BREITE - 120;
+function freigabeKuerzen(text) {
+  if (p.measureText(gesperrt(text)).width <= FREIGABE_BREITE) return text;
+  let t = text;
+  while (t.length > 1
+         && p.measureText(gesperrt(t + '…')).width > FREIGABE_BREITE) {
+    t = t.slice(0, -1);
+  }
+  return t + '…';
+}
+
 function saum(text, x, y, farbe) {
   // Fuenfmal dunkel versetzt, dann einmal in Farbe -- derselbe Saum wie
   // in hud.py. Er ist der Grund, warum die Schrift ueber jedem
@@ -261,6 +331,10 @@ function schlag() {
   S.glut.forEach((v, k2) => { if (v > 0.001) S.glut.set(k2, v * 0.975); });
   if (S.hervor > 0) S.hervor -= 0.016;
   if (S.nachhoeren > 0) S.nachhoeren -= 0.016;
+  if (S.freigabe) {
+    S.freigabeRest -= 0.016;
+    if (S.freigabeRest <= 0) S.freigabe = '';
+  }
   malen();
   requestAnimationFrame(schlag);
 }
@@ -1532,6 +1606,330 @@ function seiteZu() {
   document.getElementById('seite').classList.remove('an');
 }
 
+// =====================================================================
+// Das Blatt -- was gelesen statt gehoert wird
+// =====================================================================
+/* Drei Sorten in einem Kasten, weil es fuer den Nutzer eine Sache ist:
+ *
+ *   markdown  der Text kommt MIT der Nachricht und wird hier gesetzt
+ *   html      ein ganzer Bericht, geholt von /blatt/<kennung>
+ *   datei     dasselbe, aber als Knopf zum Herunterladen
+ *
+ * WARUM DER MARKDOWN-WANDLER HIER STEHT UND NICHT AUF DEM SERVER
+ *
+ * Der Server koennte fertiges HTML schicken -- er hat den Wandler
+ * ohnehin (werkzeuge/markdown_lesen.py, fuer PDF und Word). Dann kaeme
+ * aber HTML ueber den Draht, das hier in innerHTML landet, und die
+ * Sicherheit des Blattes haenge an einer Datei auf der anderen Seite
+ * der Leitung. So haengt sie an dieser Funktion: Es gibt hier keinen
+ * Pfad, auf dem ein Zeichen aus der Nachricht ununtersucht in den Baum
+ * kommt. Jeder Text geht durch sicher(), jedes Tag entsteht hier.
+ *
+ * Der Preis sind zwei Wandler statt einem. Sie muessen dieselbe
+ * Teilmenge koennen, nicht denselben Code sein -- und die Teilmenge
+ * steht in beiden Dateien im Kopf. */
+
+/* Was als Linkziel durchgeht. Dieselbe Liste wie in markdown_lesen.py
+ * und aus demselben Grund wie bei seiteZeigen: Ein javascript:-Ziel in
+ * einem href ist ein fremder Befehl an einem Knopf, den der Nutzer
+ * fuer harmlos haelt. */
+const ZIEL_OK = /^(https?:\/\/|mailto:|tel:)/i;
+
+/* Inline-Auszeichnung. Code zuerst: Was in Ruecktikken steht, ist
+ * woertlich und darf nicht noch einmal nach Sternchen abgesucht
+ * werden -- sonst wird aus `a*b*c` ein Kursivsatz mitten im Code. */
+/* Das Bild VOR dem Link, sonst frisst der Link die Klammern und das
+ * Ausrufezeichen bleibt einzeln stehen. Bilder werden nicht geladen,
+ * sondern benannt -- siehe markdown_lesen.py, dieselbe Begruendung. */
+const INLINE = /(`[^`\n]+`)|(!\[[^\]\n]*\]\([^)\s]+\))|(\[[^\]\n]+\]\([^)\s]+\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\n]+\*|_[^_\n]+_)/g;
+
+function mdInline(zeile) {
+  let aus = '', zuletzt = 0, t;
+  INLINE.lastIndex = 0;
+  while ((t = INLINE.exec(zeile)) !== null) {
+    if (t.index > zuletzt) aus += sicher(zeile.slice(zuletzt, t.index));
+    const roh = t[0];
+    if (t[1]) {
+      aus += `<code>${sicher(roh.slice(1, -1))}</code>`;
+    } else if (t[2]) {
+      const schnitt = roh.indexOf('](');
+      const bez = roh.slice(2, schnitt).trim();
+      aus += `<em>${sicher('[' + (bez || 'Bild') + ']')}</em>`;
+    } else if (t[3]) {
+      const schnitt = roh.indexOf('](');
+      const text = roh.slice(1, schnitt), ziel = roh.slice(schnitt + 2, -1);
+      // Nicht wegwerfen, nur entschaerfen: Der Nutzer soll sehen, was
+      // dastand -- er soll es nur nicht anklicken koennen.
+      aus += ZIEL_OK.test(ziel)
+        ? `<a href="${sicher(ziel).replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer">${sicher(text)}</a>`
+        : sicher(`${text} (${ziel})`);
+    } else if (t[4]) {
+      aus += `<strong>${sicher(roh.slice(2, -2))}</strong>`;
+    } else if (t[5]) {
+      aus += `<s>${sicher(roh.slice(2, -2))}</s>`;
+    } else {
+      aus += `<em>${sicher(roh.slice(1, -1))}</em>`;
+    }
+    zuletzt = t.index + roh.length;
+  }
+  if (zuletzt < zeile.length) aus += sicher(zeile.slice(zuletzt));
+  return aus;
+}
+
+const MD_UEBER = /^(#{1,6})\s+(.*)$/;
+// Die Einrueckung wird mitgelesen (Gruppe 1) -- daraus wird die Stufe.
+const MD_PUNKT = /^([ \t]*)[-*+]\s+(.*)$/;
+const MD_ZAHL = /^([ \t]*)(\d{1,3})[.)]\s+(.*)$/;
+// Mehrfache > gelten als ein Zitat: ein stehengebliebenes ">" ist
+// schlechter als eine nicht dargestellte Verschachtelung.
+const MD_ZITAT = /^\s*>+\s?(.*)$/;
+const MD_HAKEN = /^\[([ xX])\]\s+(.*)$/;
+const HAKEN_AN = '\u2611', HAKEN_AUS = '\u2610';
+const STUFE_BREITE = 2, STUFEN_TIEF = 2;
+
+// Wie weit eine Zeile eingerueckt ist. Tabulator zaehlt vier, nicht
+// acht -- Schreiber mischen Tabulator und zwei Leerzeichen.
+function einzug(zeile) {
+  const roh = zeile.slice(0, zeile.length - zeile.replace(/^[ \t]+/, '').length);
+  return (roh.match(/ /g) || []).length + (roh.match(/\t/g) || []).length * 4;
+}
+const MD_LINIE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+const MD_ZAUN = /^\s*```+\s*(\w*)\s*$/;
+const MD_TRENN = /^\s*\|?[\s:|-]+\|[\s:|-]*$/;
+
+function mdZellen(zeile) {
+  let roh = zeile.trim();
+  if (roh.startsWith('|')) roh = roh.slice(1);
+  if (roh.endsWith('|')) roh = roh.slice(0, -1);
+  return roh.split('|').map(z => mdInline(z.trim()));
+}
+
+/* Eine Liste samt ihrer Unterebenen.
+ *
+ * Verschachtelt wird richtig, also INNERHALB des vorigen <li> -- ein
+ * <ul> als Geschwister waere zwar auch eingerueckt, aber
+ * Vorleseprogramme lesen es dann als eigene Liste vor, und die
+ * Zugehoerigkeit ist weg. Gleiche Bauart wie _liste_html in
+ * werkzeuge/markdown_lesen.py; beide muessen dasselbe koennen. */
+function listeHtml(punkte, geordnet) {
+  const tag = geordnet ? 'ol' : 'ul';
+  const aus = [`<${tag}>`];
+  let stufe = 0, offen = false;
+  for (const p of punkte) {
+    const ziel = p.stufe || 0;
+    while (ziel > stufe) {
+      // Ohne offenes <li> zuerst eines aufmachen: Eine Liste, die mit
+      // einem Unterpunkt beginnt, waere ungueltiges HTML.
+      if (!offen) { aus.push('<li>'); offen = true; }
+      aus.push(`<${tag}>`); stufe++; offen = false;
+    }
+    while (ziel < stufe) {
+      if (offen) { aus.push('</li>'); offen = false; }
+      aus.push(`</${tag}></li>`); stufe--;
+    }
+    if (offen) aus.push('</li>');
+    const marke = p.haken == null ? ''
+      : `<span class="haken">${p.haken ? HAKEN_AN : HAKEN_AUS}</span> `;
+    aus.push(`<li>${marke}${p.html}`);
+    offen = true;
+  }
+  if (offen) aus.push('</li>');
+  while (stufe > 0) { aus.push(`</${tag}></li>`); stufe--; }
+  aus.push(`</${tag}>`);
+  return aus.join('');
+}
+
+function markdown(text) {
+  const zeilen = String(text == null ? '' : text)
+    .replace(/\r\n?/g, '\n').split('\n');
+  const aus = [];
+  let absatz = [];
+  const absatzZu = () => {
+    if (absatz.length) { aus.push(`<p>${mdInline(absatz.join(' '))}</p>`); absatz = []; }
+  };
+
+  for (let i = 0; i < zeilen.length; i++) {
+    const zeile = zeilen[i];
+
+    const zaun = MD_ZAUN.exec(zeile);
+    if (zaun) {
+      absatzZu();
+      const inhalt = [];
+      i++;
+      while (i < zeilen.length && !MD_ZAUN.test(zeilen[i])) inhalt.push(zeilen[i++]);
+      // Ein Codeblock ohne schliessenden Zaun ist kein Fehler, sondern
+      // ein Modell, dem die Zeichen ausgegangen sind. Was da ist, wird
+      // gezeigt.
+      aus.push(`<pre><code>${sicher(inhalt.join('\n'))}</code></pre>`);
+      continue;
+    }
+    if (!zeile.trim()) { absatzZu(); continue; }
+    if (MD_LINIE.test(zeile)) { absatzZu(); aus.push('<hr>'); continue; }
+
+    const ueber = MD_UEBER.exec(zeile);
+    if (ueber) {
+      absatzZu();
+      const stufe = Math.min(ueber[1].length, 3);
+      aus.push(`<h${stufe}>${mdInline(ueber[2].trim())}</h${stufe}>`);
+      continue;
+    }
+
+    // Eine Tabelle erkennt man erst an der ZWEITEN Zeile: Die erste
+    // sieht aus wie jede andere mit Strichen darin.
+    if (zeile.includes('|') && i + 1 < zeilen.length && MD_TRENN.test(zeilen[i + 1])) {
+      absatzZu();
+      const kopf = mdZellen(zeile);
+      i += 2;
+      const reihen = [];
+      while (i < zeilen.length && zeilen[i].includes('|') && zeilen[i].trim()) {
+        reihen.push(mdZellen(zeilen[i++]));
+      }
+      i--;
+      aus.push('<div class="tabelle"><table><thead><tr>'
+        + kopf.map(z => `<th>${z}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + reihen.map(r => '<tr>' + r.map(z => `<td>${z}</td>`).join('') + '</tr>').join('')
+        + '</tbody></table></div>');
+      continue;
+    }
+
+    const zitat = MD_ZITAT.exec(zeile);
+    if (zitat) {
+      absatzZu();
+      const teile = [zitat[1]];
+      while (i + 1 < zeilen.length && MD_ZITAT.test(zeilen[i + 1])) {
+        teile.push(MD_ZITAT.exec(zeilen[++i])[1]);
+      }
+      aus.push(`<blockquote>${mdInline(teile.join(' ').trim())}</blockquote>`);
+      continue;
+    }
+
+    const punkt = MD_PUNKT.exec(zeile), zahl = MD_ZAHL.exec(zeile);
+    if (punkt || zahl) {
+      absatzZu();
+      // Die Sorte der ERSTEN Zeile bestimmt die Liste. Ein nummerierter
+      // Unterpunkt unter einer Aufzaehlung bleibt derselbe Block --
+      // sonst zerfaellt die Liste in drei, sobald jemand mischt.
+      const geordnet = !!zahl;
+      const grund = einzug(zeile);
+      const punkte = [];
+      while (i < zeilen.length) {
+        const p = MD_PUNKT.exec(zeilen[i]) || MD_ZAHL.exec(zeilen[i]);
+        if (!p) break;
+        let roh = p[p.length - 1];
+        const stufe = Math.max(0, Math.min(
+          Math.floor((einzug(zeilen[i]) - grund) / STUFE_BREITE), STUFEN_TIEF));
+        let haken = null;
+        const kasten = MD_HAKEN.exec(roh.trim());
+        if (kasten) { haken = kasten[1].toLowerCase() === 'x'; roh = kasten[2]; }
+        punkte.push({ html: mdInline(roh.trim()), stufe, haken });
+        i++;
+      }
+      i--;
+      aus.push(listeHtml(punkte, geordnet));
+      continue;
+    }
+
+    absatz.push(zeile.trim());
+  }
+  absatzZu();
+  return aus.join('');
+}
+
+/* Wie gross ist die Datei -- in etwas, das man vorlesen koennte. */
+function menge(bytes) {
+  const b = Number(bytes) || 0;
+  if (!b) return '';
+  if (b < 1024) return b + ' Bytes';
+  if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+  return (b / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
+}
+
+let blattJetzt = '';
+
+function blattZeigen(m) {
+  const el = document.getElementById('blatt');
+  const kennung = String(m.kennung || '');
+  if (!kennung) return;
+  const sorte = String(m.sorte || 'markdown');
+  const text = el.querySelector('.text');
+  const rahmen = el.querySelector('.rahmen');
+  const laden = el.querySelector('.laden');
+
+  el.querySelector('.titel').textContent = String(m.titel || 'Blatt');
+  blattJetzt = kennung;
+
+  // Immer erst alles zurueck auf null. Sonst steht beim Wechsel von
+  // einer Datei zu einem Text noch der Download-Knopf da und laedt das
+  // Vorige herunter -- ein Knopf, der etwas anderes tut, als daneben
+  // steht.
+  text.innerHTML = '';
+  rahmen.hidden = true;
+  rahmen.removeAttribute('src');
+  laden.hidden = true;
+  laden.removeAttribute('href');
+
+  if (sorte === 'markdown') {
+    el.querySelector('.dazu').textContent = '';
+    text.innerHTML = markdown(m.inhalt);
+    text.scrollTop = 0;
+  } else if (sorte === 'html') {
+    el.querySelector('.dazu').textContent = 'Bericht';
+    // Nur ein Pfad auf DIESEN Server. Eine fremde Adresse in diesem
+    // Rahmen waere eine fremde Seite mit unserem Aussehen -- der Draht
+    // ist authentifiziert, aber was ueber ihn kommt, ist Modellausgabe.
+    const adresse = String(m.adresse || '');
+    if (!adresse.startsWith('/blatt/')) { blattZu(); return; }
+    rahmen.src = adresse;
+    rahmen.hidden = false;
+  } else if (sorte === 'datei') {
+    const name = String(m.datei || 'datei');
+    const gross = menge(m.bytes);
+    el.querySelector('.dazu').textContent = gross ? `${name} · ${gross}` : name;
+    const adresse = String(m.adresse || '');
+    if (!adresse.startsWith('/blatt/')) { blattZu(); return; }
+    laden.href = adresse;
+    laden.setAttribute('download', name);
+    laden.hidden = false;
+    // Ein PDF liesse sich rahmen -- aber nicht in einem sandbox-iframe
+    // ohne Skripte, denn Chromes eigener Betrachter ist selbst eine
+    // Anwendung. Also ehrlich: ein Satz und ein Knopf.
+    text.innerHTML = `<p>Diese Datei liegt für dich bereit. `
+      + `<strong>${sicher(name)}</strong>${gross ? ' · ' + sicher(gross) : ''}</p>`
+      + `<p>Sie bleibt sieben Tage abrufbar.</p>`;
+  } else {
+    // Unbekannte Sorte: still ueberspringen, wie ueberall am Draht.
+    return;
+  }
+
+  el.hidden = false;
+  clearTimeout(el._uhr);
+  const sek = Number(m.sekunden) || 0;
+  if (sek > 0) el._uhr = setTimeout(() => blattWeg(kennung), sek * 1000);
+}
+
+function blattWeg(kennung) {
+  // Nur zumachen, wenn das gemeinte Blatt auch das offene ist. Sonst
+  // reisst eine abgelaufene Uhr das Blatt weg, das inzwischen ein
+  // anderes ist.
+  if (kennung && blattJetzt && kennung !== blattJetzt) return;
+  blattZu();
+}
+
+function blattZu() {
+  const el = document.getElementById('blatt');
+  clearTimeout(el._uhr);
+  el.hidden = true;
+  blattJetzt = '';
+  // Die Quelle wirklich loesen und nicht nur verstecken: Ein
+  // verborgener Rahmen laedt sonst weiter und haelt die Seite im
+  // Speicher. Dieselbe Ueberlegung wie beim Radio.
+  const rahmen = el.querySelector('.rahmen');
+  rahmen.hidden = true;
+  rahmen.removeAttribute('src');
+  el.querySelector('.text').innerHTML = '';
+}
+
 function hintergrundZeigen() {
   const kasten = document.getElementById('hintergrund');
   if (!S.hintergrund.length && !S.hgFertig) { kasten.classList.remove('an'); return; }
@@ -1644,6 +2042,14 @@ function empfangen(m) {
     case 'werkzeug':
       if (m.aktiv) S.glut.set(m.name, 1.0);
       break;
+    case 'freigabe':
+      // Leerer Text heisst: nichts steht mehr frei. Der Server schickt
+      // ihn bei jeder Aenderung neu -- die Minutenzahl IM Text friert
+      // also nur ein, wenn nichts passiert, und dann laeuft ohnehin
+      // der Rest darunter ab.
+      S.freigabe = m.text || '';
+      S.freigabeRest = Number(m.sekunden) || 0;
+      break;
     case 'hintergrund':
       S.hintergrund = m.zeilen || [];
       S.hgGesamt = Number(m.gesamt) || S.hintergrund.length;
@@ -1654,6 +2060,8 @@ function empfangen(m) {
     case 'kachel':     kachelZeigen(m); break;
     case 'kachel_weg': kachelWeg(m.name); break;
     // Nicht oeffnen, sondern anbieten -- siehe seiteZeigen().
+    case 'blatt':      blattZeigen(m); break;
+    case 'blatt_weg':  blattWeg(m.kennung); break;
     case 'browser':    seiteZeigen(m.adresse); break;
     case 'web_bild':   blickZeigen(m); break;
     // Der Bildstrom. Kommt nur, solange wir ihn angefordert haben --
@@ -1694,9 +2102,16 @@ function senden(o) {
 // Ton: hin und zurück
 // =====================================================================
 let hoerer = null, quelle = null, knoten = null, gesammelt = [], nimmtAuf = false;
+// Wie viele Werte davon der Vorlauf beisteuert -- siehe aufnahmeStop().
+let vorlaufWerte = 0;
 
 async function aufnahmeStart() {
   if (nimmtAuf) return;
+  // SOFORT abgreifen, vor getUserMedia: Was danach im Ring liegt,
+  // waere schon die Zeit NACH dem Tastendruck und ueberlappte mit
+  // dem, was das Aufnahmemikrofon gleich selbst hoert.
+  const vorn = vorlaufNehmen();
+  vorlaufWerte = vorn.reduce((n, a) => n + a.length, 0);
   try {
     if (!hoerer) {
       // 16 kHz direkt anfordern -- dann muss nichts umgetastet werden,
@@ -1718,7 +2133,12 @@ async function aufnahmeStart() {
     });
     quelle = hoerer.createMediaStreamSource(strom);
     knoten = hoerer.createScriptProcessor(2048, 1, 1);
-    gesammelt = [];
+    // Der Vorlauf steht VOR dem, was jetzt aufgenommen wird. Zwischen
+    // beiden bleibt die Anlaufzeit des Mikrofons als Luecke stehen --
+    // die ist nicht zurueckzuholen, solange die Aufnahme ein eigenes
+    // Mikrofon oeffnet. Ein fehlendes Phonem verkraftet Whisper besser
+    // als ein doppeltes, deshalb lieber die Luecke als ein Ueberlapp.
+    gesammelt = vorn;
     knoten.onaudioprocess = e => {
       const d = e.inputBuffer.getChannelData(0);
       gesammelt.push(new Float32Array(d));
@@ -1746,7 +2166,11 @@ function aufnahmeStop() {
   quelle.mediaStream && quelle.mediaStream.getTracks().forEach(t => t.stop());
 
   const gesamt = gesammelt.reduce((n, a) => n + a.length, 0);
-  if (gesamt < 16000 * 0.4) { S.zustand = 'ruhig'; return; }  // zu kurz
+  // Gemessen wird, was WIRKLICH gedrueckt wurde -- ohne den Vorlauf.
+  // Sonst hebt er die Schwelle des Servers (0,4 s) aus: Ein
+  // versehentliches Antippen kaeme mit 300 ms geschenkter Zeit
+  // darueber und ginge als Aufnahme durch.
+  if (gesamt - vorlaufWerte < 16000 * 0.4) { S.zustand = 'ruhig'; return; }
 
   const alles = new Int16Array(gesamt);
   let i = 0, spitze = 0;
@@ -1952,6 +2376,47 @@ let horchQuelle = null, horchKnoten = null, horcht = false;
 let horchPuffer = [], horchPause = false;
 const HORCH_BUENDEL = 4096;   // ≈ 256 ms bei 16 kHz
 
+/* Der Vorlauf -- die letzten Millisekunden VOR dem Tastendruck.
+ *
+ * Menschen druecken die Sprechtaste eine Silbe zu spaet, und
+ * aufnahmeStart() oeffnet danach erst das Mikrofon. Beides zusammen
+ * frisst regelmaessig das erste Wort. DRAHT.md verlangt deshalb einen
+ * Ringpuffer, aus dem beim Loslassen die Zeit davor mitgeht.
+ *
+ * Gespeist wird er aus dem Mithoer-Strom, weil DER schon laeuft: Ein
+ * eigenes Mikrofon nur fuer den Vorlauf hiesse, es dauerhaft offen zu
+ * halten -- die Lampe im Tab an, ohne dass jemand zuhoert. Ohne
+ * Mithoeren gibt es also keinen Vorlauf; das ist der ehrliche Preis
+ * und kein Fehler.
+ *
+ * Gefuellt wird nur, wenn ohnehin gesendet wuerde -- nicht waehrend
+ * horchPause. Sonst stuende Sarvis' eigene Stimme im Vorlauf, und der
+ * Echo-Filter auf dem Server vergleicht Text: Er merkt es erst,
+ * nachdem Whisper es als Frage des Nutzers gelesen hat. */
+const VORLAUF_WERTE = 4800;   // 300 ms bei 16 kHz
+let vorlauf = [];
+
+function vorlaufSchieben(block) {
+  vorlauf.push(block);
+  let summe = vorlauf.reduce((n, a) => n + a.length, 0);
+  // Vorn abwerfen, bis es wieder passt. Ein angebrochener Block wird
+  // beschnitten statt ganz verworfen -- sonst schwankt der Vorlauf
+  // zwischen 170 und 300 ms, je nachdem, wann die Taste faellt.
+  while (vorlauf.length > 1 && summe - vorlauf[0].length >= VORLAUF_WERTE) {
+    summe -= vorlauf.shift().length;
+  }
+  if (summe > VORLAUF_WERTE) {
+    vorlauf[0] = vorlauf[0].subarray(summe - VORLAUF_WERTE);
+  }
+}
+
+// Nimmt den Vorlauf heraus und leert ihn -- zweimal dasselbe Stueck
+// waere ein Echo im eigenen Satz.
+function vorlaufNehmen() {
+  const s = vorlauf; vorlauf = [];
+  return s;
+}
+
 async function horchenStart() {
   if (horcht) return;
   try {
@@ -1972,7 +2437,9 @@ async function horchenStart() {
       // schicken. Sonst hört er sich selbst zu, und der Rückstand
       // läuft auf.
       if (nimmtAuf || horchPause) { horchPuffer = []; return; }
-      horchPuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const block = new Float32Array(e.inputBuffer.getChannelData(0));
+      vorlaufSchieben(block);
+      horchPuffer.push(block);
       const summe = horchPuffer.reduce((n, a) => n + a.length, 0);
       if (summe < HORCH_BUENDEL) return;
       const alles = new Int16Array(summe);
@@ -1996,7 +2463,7 @@ async function horchenStart() {
 
 function horchenStop() {
   if (!horcht) return;
-  horcht = false; horchPuffer = [];
+  horcht = false; horchPuffer = []; vorlauf = [];
   try {
     horchQuelle.disconnect(); horchKnoten.disconnect();
     horchQuelle.mediaStream.getTracks().forEach(t => t.stop());
@@ -2032,6 +2499,16 @@ function blickZeigen(m) {
   kasten.querySelector('.ort').textContent = ort.slice(0, 90);
   kasten.hidden = false;
 }
+
+document.getElementById('blattzu').addEventListener('click', blattZu);
+
+/* Escape macht zu, was oben liegt. Erst das Blatt, dann der Blick --
+   die Reihenfolge ist die der Stapelung, sonst schliesst eine Taste
+   etwas im Hintergrund, waehrend vorn noch etwas steht. */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('blatt').hidden) { blattZu(); return; }
+});
 
 document.getElementById('blickzu').addEventListener('click', () => {
   if (live) { fernsichtAus(); return; }   // Zumachen heißt hier: abschalten

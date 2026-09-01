@@ -201,6 +201,65 @@ FARBEN = {
         ],
     },
 
+    # --- Die zurueckhaltenden drei -------------------------------------
+    #
+    # Entstanden am 01.09.2026 aus einer Ansage: "momentan klingt sie
+    # sehr nach Roboter -- weniger Roboter, mehr Richtung menschlich,
+    # aber nicht zu menschlich. Eher Star Trek."
+    #
+    # WORAN DER ROBOTER HAENGT: an den Formanten. "sarvis" schiebt sie
+    # um Faktor 1,32 nach oben, und das ist der blecherne Beiklang --
+    # nicht der Hall, nicht die Doppelung. Eine Verschiebung nach oben
+    # macht den Resonanzkoerper rechnerisch kleiner, und "kleiner Kopf"
+    # hoert das Ohr als "kein Kopf".
+    #
+    # Diese drei fassen die Formanten deshalb gar nicht an oder schieben
+    # sie leicht NACH UNTEN. Was sie kuenstlich macht, ist Raum und ein
+    # Hauch Doppelung -- also das, was auch eine Lautsprecherdurchsage
+    # kuenstlich macht. Der Mensch bleibt hoerbar.
+
+    # Stufe eins, am dichtesten am Menschen: eine gute Aufnahme, ein
+    # guter Lautsprecher, ein kleiner Raum. Sonst nichts.
+    "praesent": {
+        "halbtoene": -0.5,
+        "schritte": [
+            ("tiefregal", {"bis": 220, "verstaerkung": 0.25}),
+            ("hochregal", {"ab": 3800, "verstaerkung": 0.20}),
+            ("hall", {"dauer": 0.20, "anteil": 0.09, "vorlauf": 0.010}),
+        ],
+    },
+
+    # Stufe zwei, die Star-Trek-Richtung: ruhig, klar, eine Spur
+    # ueberirdisch -- aber jederzeit verstaendlich. Der Bordcomputer der
+    # Enterprise klingt nicht nach Maschine, er klingt nach jemandem,
+    # der nicht im Raum steht.
+    "sternenschiff": {
+        "halbtoene": -1.0,
+        "schritte": [
+            ("hochregal", {"ab": 3600, "verstaerkung": 0.26}),
+            # Zwei Stimmen, kaum verstimmt: Das ist der Unterschied
+            # zwischen "leicht entrueckt" und "Chor". Ab etwa 0,3
+            # Anteil hoert man zwei Sprecher statt einen.
+            ("doppeln", {"stimmen": 2, "streuung_ms": 4.0,
+                         "verstimmung": 0.0012, "anteil": 0.18}),
+            ("hall", {"dauer": 0.28, "anteil": 0.13, "vorlauf": 0.014}),
+        ],
+    },
+
+    # Stufe drei, einen Schritt weiter weg: hier werden die Formanten
+    # angefasst, aber nach UNTEN -- das macht die Stimme voller statt
+    # blechern. Nicht mehr ganz Thorsten, immer noch ein Mensch.
+    "begleiter": {
+        "halbtoene": -1.0,
+        "schritte": [
+            ("formanten", {"faktor": 0.94}),
+            ("hochregal", {"ab": 3800, "verstaerkung": 0.24}),
+            ("doppeln", {"stimmen": 2, "streuung_ms": 5.0,
+                         "verstimmung": 0.002, "anteil": 0.24}),
+            ("hall", {"dauer": 0.26, "anteil": 0.12}),
+        ],
+    },
+
     # Wie aus einer Sprechanlage: schmaler, direkter, mit leichtem Biss.
     "bordcomputer": {
         "halbtoene": -1.0,

@@ -13,9 +13,9 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, bericht, erinnern, fachdaten, finanzen, google,
-               kacheln, lesen, medien, musik, programme, projekte, rechner,
-               telegram, unterwegs, verlauf, wetter, zeit)
+from . import (auftrag, bericht, dokument, erinnern, fachdaten, finanzen,
+               google, kacheln, lesen, medien, musik, programme, projekte,
+               rechner, telegram, unterwegs, verlauf, wetter, zeit)
 
 SERVER = "sarvis"
 
@@ -72,6 +72,9 @@ def bauen(sagen, leuchten=None, melden=None):
             + verlauf.werkzeuge(protokoll, leuchten))
     alle += kacheln.werkzeuge(protokoll, leuchten)
     alle += bericht.werkzeuge(protokoll, leuchten)
+    # Blaetter und Dateien -- dieselbe Familie wie Kachel und
+    # Seite, nur groesser beziehungsweise zum Behalten.
+    alle += dokument.werkzeuge(protokoll, leuchten)
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)

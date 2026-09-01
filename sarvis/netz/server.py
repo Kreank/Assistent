@@ -5,6 +5,7 @@
 Zwei Wege fuehren hier hinein:
 
     GET  /            die Oberflaeche selbst (HTML, JS, das Symbol)
+    GET  /blatt/<k>   ein Bericht, ein PDF, eine Word-Datei
     WS   /draht       der Ereignisstrom in beide Richtungen
 
 WAS UEBER DEN DRAHT GEHT
@@ -50,7 +51,7 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from .. import config
-from . import geraete
+from . import blaetter, geraete
 from .fernsicht import Fernsicht
 from .traeger import NetzTraeger, Oberflaeche, als_text
 
@@ -281,6 +282,11 @@ class Endpunkt:
         # netz/spotify.py.
         from . import spotify
         spotify.anmelden(app)
+        # Die Blaetter -- Berichte, PDFs, Word-Dateien. Ebenfalls ohne
+        # Geraeteschluessel, und ebenfalls mit Begruendung: Ein <iframe>
+        # und ein Download-Knopf schicken keine eigenen Kopfzeilen.
+        # Was stattdessen schuetzt, steht in netz/blaetter.py.
+        blaetter.anmelden(app)
         return app
 
 
