@@ -37,6 +37,7 @@ from .. import config
 
 GESAGT = "gemerkt.md"
 BEMERKT = "beobachtet.md"
+ENTSCHIEDEN = "entschieden.md"
 
 KOPF = {
     GESAGT: "# Gemerkt\n\nWas du mir ausdrücklich gesagt hast.\n",
@@ -44,13 +45,33 @@ KOPF = {
               "**Vermutungen, keine Tatsachen.**\nHier darf falsch stehen, "
               "was ich falsch verstanden habe. Durchsehen und korrigieren\n"
               "ist ausdrücklich vorgesehen.\n"),
+    ENTSCHIEDEN: (
+        "# Entschieden\n\nWas du entschieden hast — mit Datum und Thema.\n"
+        "Keine Vermutung: Eine Entscheidung ist etwas, das du selbst gesagt "
+        "hast.\nDeshalb hält Sarvis sie ohne Nachfrage fest.\n\n"
+        "Jeder Eintrag trägt ein `[thema: …]`. Kommt später eine neue "
+        "Entscheidung\nzum selben Thema, wandert die alte in die Notizen — "
+        "es gilt immer die\njüngste. Das entscheidet der Vergleich der "
+        "Themen, nicht eine Einschätzung.\n"),
 }
+
+# Der Themenschluessel eines Eintrags -- die Angel der Versionierung.
+_THEMA = re.compile(r"\[thema:\s*([^\]]{1,60})\]\s*$")
 
 _ABLAUF = re.compile(r"\(gilt bis (\d{1,2})\.(\d{1,2})\.(\d{4})\)")
 
 
+_DATEIEN = {"bemerkt": BEMERKT, "entschieden": ENTSCHIEDEN}
+
+
 def _datei(art: str):
-    return config.GEDAECHTNIS / (BEMERKT if art == "bemerkt" else GESAGT)
+    return config.GEDAECHTNIS / _DATEIEN.get(art, GESAGT)
+
+
+def _thema_von(zeile: str) -> str:
+    """Der Themenschluessel eines Eintrags, klein und ohne Beiwerk."""
+    t = _THEMA.search(zeile.strip())
+    return " ".join(t.group(1).lower().split()) if t else ""
 
 
 def _sauberer_name(text: str, laenge: int = 40) -> str:
@@ -280,13 +301,21 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     @tool(
         "merken",
-        "Schreibt etwas ins Langzeitgedächtnis. Zwei Arten, und die "
-        "Unterscheidung ist wichtig: 'gesagt' für alles, worum der Nutzer "
-        "dich ausdrücklich bittet ('merk dir, dass...'). 'bemerkt' für "
-        "etwas, das dir von selbst auffällt und dauerhaft nützlich ist — "
-        "sparsam benutzen, nur was über den Tag hinaus zählt, niemals "
-        "Vergängliches wie laufende Timer. Was nur eine Weile gilt, "
-        "bekommt gilt_bis.",
+        "Schreibt etwas ins Langzeitgedächtnis. Drei Arten:\n\n"
+        "'entschieden' — der Nutzer hat etwas ENTSCHIEDEN oder angewiesen: "
+        "'verwirf das', 'das machen wir nicht mehr', 'ab jetzt immer so', "
+        "'lass das liegen'. Das hältst du IMMER fest, ohne zu fragen und "
+        "ohne dass er dich darum bittet. Es ist keine Vermutung — er hat es "
+        "selbst gesagt. Braucht ein thema.\n\n"
+        "'gesagt' — eine dauerhafte Angabe über den Nutzer, die er "
+        "ausgesprochen hat: wie er heißt, was er nicht mag, wie er etwas "
+        "haben will.\n\n"
+        "'bemerkt' — was DU aus dem Gespräch schließt. Nur das: sparsam, "
+        "und nur was über den Tag hinaus zählt.\n\n"
+        "Die Probe für alle drei: Würde das deine Antwort in einer "
+        "ÄHNLICHEN SITUATION in ein paar Wochen ändern? Dann merk es dir. "
+        "Sonst nicht — ein laufender Timer ändert nichts, eine verworfene "
+        "Arbeit schon.",
         {
             "type": "object",
             "properties": {
@@ -299,9 +328,12 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 },
                 "art": {
                     "type": "string",
-                    "enum": ["gesagt", "bemerkt"],
-                    "description": "'gesagt' = ausdrücklich gewünscht, "
-                                   "'bemerkt' = eigene Beobachtung.",
+                    "enum": ["entschieden", "gesagt", "bemerkt"],
+                    "description": "'entschieden' = der Nutzer hat es "
+                                   "entschieden oder angewiesen (immer "
+                                   "festhalten), 'gesagt' = dauerhafte "
+                                   "Angabe über ihn, 'bemerkt' = deine "
+                                   "eigene Beobachtung.",
                 },
                 "gilt_bis": {
                     "type": "string",
@@ -309,6 +341,17 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                    "Vergängliche. Danach verschwindet der "
                                    "Eintrag von selbst.",
                     "pattern": r"^\d{1,2}\.\d{1,2}\.\d{4}$",
+                },
+                "thema": {
+                    "type": "string",
+                    "description": "Worum es geht, in zwei bis drei Wörtern "
+                                   "— 'auftrag lokale-llms', 'projekt "
+                                   "finanzdashboard', 'wandfarbe flur'. "
+                                   "Daran erkennt Sarvis später, dass eine "
+                                   "neue Angabe DIESE hier ablöst. Immer "
+                                   "denselben Wortlaut für dieselbe Sache "
+                                   "benutzen. Bei 'entschieden' Pflicht, "
+                                   "sonst hilfreich.",
                 },
             },
             "required": ["inhalt", "art"],
@@ -326,14 +369,33 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         eintrag = f"- {datetime.now():%Y-%m-%d} — {inhalt}"
         if args.get("gilt_bis"):
             eintrag += f"  (gilt bis {args['gilt_bis']})"
+        thema = " ".join(str(args.get("thema") or "").lower().split())[:60]
+        if thema:
+            eintrag += f"  [thema: {thema}]"
 
         # Widersprueche ersetzen statt anhaeufen: zwei sich widersprechende
-        # Eintraege sind schlimmer als keiner. Aber erst ab einer Laenge,
-        # die wirklich denselben Sachverhalt meint -- ein kurzer Kern ist
-        # Praefix von allem Moeglichen und frass sonst den genaueren
-        # Eintrag ("Ich mag Kaffee" gegen "Ich mag Kaffee schwarz").
-        kern = inhalt.lower()[:40]
-        ersetzt = [z for z in zeilen if len(kern) >= 20 and kern in z.lower()]
+        # Eintraege sind schlimmer als keiner.
+        #
+        # Zwei Wege dahin, und der erste ist der verlaessliche:
+        #
+        # (1) Ueber das THEMA. Gleicher Schluessel heisst dieselbe Sache,
+        #     Punkt -- ein Zeichenvergleich, keine Einschaetzung. Genau
+        #     daran scheiterte es vorher: "Projekt X wird verworfen" und
+        #     "Projekt X ist in Arbeit" haben keine 20 gemeinsamen
+        #     Anfangszeichen und standen deshalb beide im Prompt, als
+        #     gaelte beides.
+        #
+        # (2) Ueber den Wortlaut, wie bisher -- fuer Eintraege ohne Thema.
+        #     Erst ab einer Laenge, die wirklich denselben Sachverhalt
+        #     meint: Ein kurzer Kern ist Praefix von allem Moeglichen und
+        #     frass sonst den genaueren Eintrag ("Ich mag Kaffee" gegen
+        #     "Ich mag Kaffee schwarz").
+        if thema:
+            ersetzt = [z for z in zeilen if _thema_von(z) == thema]
+        else:
+            kern = inhalt.lower()[:40]
+            ersetzt = [z for z in zeilen
+                       if len(kern) >= 20 and kern in z.lower()]
         if ersetzt:
             # Aus Schicht 1 nehmen heisst nicht wegwerfen -- dasselbe
             # Versprechen wie in umschichten().
@@ -346,7 +408,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         blinken()
         vermerken(f"merken ({art}): {inhalt}"
                   + (f" (ersetzt {len(ersetzt)})" if ersetzt else ""))
-        antwort = f"Gemerkt ({'Beobachtung' if art == 'bemerkt' else 'gesagt'})."
+        antwort = "Gemerkt ({}).".format(
+            {"bemerkt": "Beobachtung", "entschieden": "Entscheidung"}
+            .get(art, "gesagt"))
         if ersetzt:
             antwort += (f" {len(ersetzt)} früherer Eintrag ersetzt"
                         if len(ersetzt) == 1

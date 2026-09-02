@@ -47,6 +47,7 @@ from .ohren import Ohren  # noqa: E402
 # einen Horch, der auf den Strom einer Oberflaeche wartet.
 from .weckwort import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
+from .gedaechtnis import entscheidungen_nachtrag  # noqa: E402
 from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
                         zustand_zeile)
 
@@ -180,6 +181,12 @@ class Sarvis:
                          zustand_zeile=lambda: " ".join(
                              z for z in (zustand_zeile(self.wecker),
                                          unterbrochen_zeile(self.werkstatt),
+                                         # NACH der Auftragszeile, nicht
+                                         # davor: Was Sascha entschieden
+                                         # hat, soll das letzte Wort haben
+                                         # gegenüber einer Zeile, die
+                                         # dieselbe Sache erneut anbietet.
+                                         entscheidungen_nachtrag(),
                                          schutz.arbeitsordner_zeile())
                              if z),
                          freigaben=self.freigaben)

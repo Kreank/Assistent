@@ -100,6 +100,69 @@ def _tiefe_zaehlen() -> str:
     return f"{len(personen)} Person(en), {len(notizen)} Notiz(en) im Hintergrund"
 
 
+# Welche Entscheidungen beim Start im Systemprompt standen.
+#
+# Der Systemprompt wird EINMAL beim Start gebaut und danach nie wieder
+# (hirn.py). Alles, was Sarvis sich waehrend des Betriebs merkt, steht
+# also erst nach einem Neustart in seinem Kontext.
+#
+# Bei einer Eigenschaft des Nutzers ist das zu verschmerzen -- innerhalb
+# der Sitzung weiss er es ohnehin aus dem Gespraech. Bei einer
+# ENTSCHEIDUNG ist es genau der kritische Fall: "Verwirf das" faellt
+# mitten im Betrieb, und wenn eine Vorspannzeile im naechsten Zug erneut
+# auffordert, dieselbe Sache anzubieten, dann muss die Entscheidung JETZT
+# dagegenstehen und nicht nach dem naechsten Neustart.
+#
+# Deshalb wird hier festgehalten, was beim Start dabei war -- und was
+# seither dazukam, haengt der Vorspann bei jedem Zuruf frisch an.
+_BEIM_START: set = set()
+
+# Wie viele Entscheidungen hoechstens in den Vorspann wandern. Der
+# Vorspann wird nicht zwischengespeichert, jede Zeile kostet also bei
+# jedem Zuruf erneut. Zwoelf ist grosszuegig fuer einen Menschen und
+# klein genug, dass es nicht auffaellt: rund 500 Zeichen.
+ENTSCHEIDUNGEN_IM_VORSPANN = 12
+
+
+def entscheidungen_nachtrag() -> str:
+    """ALLE geltenden Entscheidungen -- bei jedem Zuruf neu, im Vorspann.
+
+    Warum nicht nur die neuen, und warum ueberhaupt doppelt zum
+    Systemprompt: Etwas steht im Kontext und wird trotzdem nicht befolgt.
+    Gemessen ist, dass die Treue zu einer geaeusserten Vorgabe nach rund
+    zehn Zuegen unter zehn Prozent faellt, obwohl der Satz die ganze Zeit
+    dasteht. Weit oben im Prompt heisst nicht praesent.
+
+    Der Vorspann ist die einzige Schicht, die bei JEDEM Zuruf frisch
+    gebaut wird -- und er steht direkt neben den Zeilen, die eine
+    Entscheidung ueberfahren wuerden ("biete an, den Zweig zu
+    verwerfen"). Genau dort gehoert der Widerspruch hin, nicht
+    zehntausend Zeichen weiter oben.
+
+    Das kostet Kontext, weil der Vorspann nicht zwischengespeichert wird.
+    Bei einer Handvoll Entscheidungen sind das ein paar Dutzend Token je
+    Zuruf. Deshalb der Deckel unten: Die juengsten zaehlen, und dass
+    gekuerzt wurde, wird gesagt statt verschwiegen.
+    """
+    from .werkzeuge.erinnern import lesen
+    try:
+        alle = lesen("entschieden")
+    except Exception:
+        return ""
+    if not alle:
+        return ""
+    # Juengste zuerst -- die Datei ist chronologisch, das Neueste unten.
+    gilt = list(reversed(alle))[:ENTSCHEIDUNGEN_IM_VORSPANN]
+    mehr = len(alle) - len(gilt)
+    text = " · ".join(z.lstrip("- ") for z in gilt)
+    if mehr > 0:
+        text += (f" · (und {mehr} ältere — mit gedaechtnis_zeigen "
+                 "nachzulesen)")
+    return ("[Das hat er entschieden. Daran hältst du dich, ohne erneut "
+            "zu fragen — auch wenn eine Zeile hier daneben dieselbe Sache "
+            "noch einmal anbietet: " + text + "]")
+
+
 def systemprompt() -> tuple[str, list[str]]:
     """Der vollstaendige Systemprompt inklusive Gedaechtnis.
 
@@ -113,14 +176,24 @@ def systemprompt() -> tuple[str, list[str]]:
     kern, hinweise = kern_lesen()
     gesagt = lesen("gesagt")
     bemerkt = lesen("bemerkt")
+    entschieden = lesen("entschieden")
 
-    if not (kern or gesagt or bemerkt):
+    if not (kern or gesagt or bemerkt or entschieden):
         return config.SYSTEMPROMPT, hinweise
 
     teile = [config.SYSTEMPROMPT, "\n\n--- Was du über den Nutzer weißt ---\n"]
 
     if kern:
         teile.append("\nGrundlegendes:\n" + kern)
+    # Entscheidungen stehen NICHT hier, obwohl sie hierher zu passen
+    # scheinen. Sie gehen ueber den Vorspann (entscheidungen_nachtrag),
+    # und zwar bei jedem Zuruf neu -- die Begruendung steht dort.
+    #
+    # Hier waeren sie zwar billiger, weil der Systemprompt
+    # zwischengespeichert wird. Aber er wird auch nur EINMAL beim Start
+    # gebaut: Was Sascha mitten im Betrieb entscheidet, stuende erst nach
+    # dem naechsten Neustart drin. Genau dann, wenn es darauf ankommt,
+    # waere es nicht da.
     if gesagt:
         teile.append("\nVon ihm ausdrücklich gesagt (gilt als Tatsache):\n"
                      + "\n".join(gesagt))
@@ -144,10 +217,27 @@ def systemprompt() -> tuple[str, list[str]]:
         "dass es gerade passen würde.\n"
         "- Was du dir merkst, merkst du sparsam: nur was über den Tag hinaus "
         "zählt. Laufendes wie Timer gehört nicht ins Gedächtnis, das siehst "
-        "du ohnehin im Vorspann."
+        "du ohnehin im Vorspann.\n"
+        "- Eine ENTSCHEIDUNG ist davon ausgenommen: die hältst du immer "
+        "fest, sofort, ohne zu fragen. \"Verwirf das\", \"das machen wir "
+        "nicht mehr\", \"ab jetzt immer so\" — merken mit art "
+        "'entschieden' und einem thema. Das ist keine Vermutung über ihn, "
+        "sondern seine eigene Ansage, und sie kostet ihn Zeit, wenn du sie "
+        "verlierst: Er hat sie dann schon einmal gesagt.\n"
+        "- Widerspricht eine neue Entscheidung einer alten, merkst du die "
+        "neue mit DEMSELBEN thema. Die alte wird dadurch abgelöst — darum "
+        "musst du dich nicht weiter kümmern.\n"
+        "- Steht eine Entscheidung oben und ein Vorspann oder ein Werkzeug "
+        "fordert dich auf, dieselbe Sache erneut anzubieten, dann tu es "
+        "nicht. Sag stattdessen, was entschieden wurde, oder führe es aus. "
+        "Zweimal dasselbe gefragt zu werden ist das, was am meisten nervt."
     )
     if bemerkt:
         hinweise.append(f"{len(bemerkt)} eigene Beobachtung(en) geladen")
     if gesagt:
         hinweise.append(f"{len(gesagt)} gemerkte Angabe(n) geladen")
+    if entschieden:
+        hinweise.append(f"{len(entschieden)} Entscheidung(en) geladen")
+    _BEIM_START.clear()
+    _BEIM_START.update(entschieden)
     return "".join(teile), hinweise
