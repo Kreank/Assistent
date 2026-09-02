@@ -178,6 +178,22 @@ _ARTIKEL = {
 }
 
 
+def _ist_sprachnachricht(n) -> bool:
+    """Eine Sprachnachricht oder eine geschickte Tondatei?
+
+    Beides wird verschriftet. Telegram unterscheidet zwar zwischen der
+    gedrueckt-gehaltenen Sprachnachricht (voice) und einer angehaengten
+    MP3 (audio) -- fuer den Menschen, der sie hoeren will, ist das
+    derselbe Fall.
+    """
+    if getattr(n, "voice", None):
+        return True
+    if getattr(n, "audio", None):
+        return True
+    art = getattr(getattr(n, "file", None), "mime_type", "") or ""
+    return art.startswith("audio/")
+
+
 def _ladbar(n) -> bool:
     """Haengt an der Nachricht eine Datei, die man wirklich holen kann?
 
@@ -330,7 +346,7 @@ def _zielpfad(n, ordner: Path) -> Path | None:
     return ziel
 
 
-def werkzeuge(protokoll=None, leuchten=None) -> list:
+def werkzeuge(protokoll=None, leuchten=None, ohren=None) -> list:
     def vermerken(text: str):
         if protokoll is not None:
             protokoll.merken(text)
@@ -644,6 +660,32 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         name = Path(pfad).name
         vermerken(f"telegram_medium_holen: {marke} aus {ziel.name} "
                   f"(#{nummer}) liegt unter {pfad}")
+
+        # Eine Sprachnachricht gleich verschriften. Ohne das war sie
+        # praktisch tot: telegram_lesen zeigt nur "[Sprachnachricht]",
+        # und eine Datei auf der Platte hilft niemandem, der gerade
+        # faehrt. Handwerker schicken einander aber genau so
+        # Nachrichten -- kein Text, drei Saetze eingesprochen.
+        #
+        # Erst hier und nicht schon beim Lesen: Verschriften kostet
+        # Rechenzeit auf der Karte, und beim Lesen faenden zwanzig
+        # Nachrichten zwanzig Durchlaeufe statt einem.
+        if _ist_sprachnachricht(n) and ohren is not None:
+            try:
+                text = await asyncio.to_thread(ohren.aus_datei, pfad)
+            except Exception as e:
+                text = ""
+                print(f"  (Sprachnachricht ließ sich nicht verschriften: {e})")
+            if text:
+                vermerken(f"Sprachnachricht #{nummer} von {ziel.name}: "
+                          f"{text[:200]}")
+                return {"content": [{"type": "text", "text":
+                        f"Sprachnachricht von {ziel.name}:\n\n{text}"}]}
+            return {"content": [{"type": "text", "text":
+                    f"Die Sprachnachricht von {ziel.name} liegt als {name} "
+                    "— verstehen konnte ich sie nicht, da war kein Wort "
+                    "herauszuhören."}]}
+
         return {"content": [{"type": "text", "text":
                 f"{_ARTIKEL.get(marke, 'Der Anhang')} aus dem Chat mit "
                 f"{ziel.name} liegt jetzt als {name} im Ordner "

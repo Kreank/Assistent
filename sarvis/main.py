@@ -163,6 +163,7 @@ class Sarvis:
         (self.werkzeugserver, self.werkzeugnamen, self.wecker,
          self.protokoll, self.werkstatt) = bauen(
             sagen=self.von_selbst_sagen,
+            ohren=self.ohren,
             # Ueber self, nicht self.anzeige.werkzeug: Die Werkzeuge
             # werden EINMAL gebaut, hier im Konstruktor. Eine gebundene
             # Methode haelt die Anzeige fest, die gerade gilt -- und im

@@ -81,6 +81,30 @@ class Ohren:
         )
         return " ".join(s.text.strip() for s in stuecke).strip()
 
+    def aus_datei(self, pfad, hinweise: str | None = None) -> str:
+        """Eine Tondatei verschriften -- Sprachnachrichten von anderen.
+
+        faster-whisper dekodiert selbst (ueber PyAV), es braucht also
+        weder ffmpeg im Bild noch einen Umweg ueber ein numpy-Array.
+        Damit versteht es auch das OGG/Opus, in dem Telegram
+        Sprachnachrichten verschickt.
+
+        Anders als hoeren() OHNE vad_filter: Der schneidet Stille am Rand
+        weg, was bei einem kurzen Zuruf ans Mikrofon richtig ist. Eine
+        fremde Sprachnachricht faengt aber oft mit einer Pause an, und
+        wer erst nach zwei Sekunden loslegt, verliert damit sein erstes
+        Wort.
+        """
+        stuecke, _ = self.modell.transcribe(
+            str(pfad),
+            language=config.SPRACHE,
+            beam_size=1,
+            vad_filter=False,
+            condition_on_previous_text=False,
+            hotwords=hinweise or config.HOTWORDS or None,
+        )
+        return " ".join(s.text.strip() for s in stuecke).strip()
+
     def aufwaermen(self) -> None:
         """Erster Durchlauf ist immer langsam. Den zahlen wir beim Start.
 

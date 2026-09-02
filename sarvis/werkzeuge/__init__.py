@@ -58,12 +58,17 @@ class Protokoll:
         )
 
 
-def bauen(sagen, leuchten=None, melden=None):
+def bauen(sagen, leuchten=None, melden=None, ohren=None):
     """Baut den Werkzeugserver.
 
     sagen(text)          -- Sarvis spricht von sich aus (Timer abgelaufen)
     leuchten(name)       -- Werkzeug im Anzeigenkranz aufleuchten lassen
     melden(titel, text)  -- Windows-Benachrichtigung
+    ohren                -- das schon geladene Whisper, zum Verschriften
+                            fremder Sprachnachrichten. Bewusst
+                            durchgereicht und nicht neu geladen: Ein
+                            zweites Modell auf derselben Karte waere
+                            zwei Gigabyte fuer dieselbe Arbeit.
     """
     protokoll = Protokoll()
     wecker = zeit.Wecker(sagen=sagen, leuchten=leuchten, melden=melden)
@@ -103,7 +108,7 @@ def bauen(sagen, leuchten=None, melden=None):
     if google.bereit():
         alle += google.werkzeuge(protokoll, leuchten)
     if config.telegram_bereit():
-        alle += telegram.werkzeuge(protokoll, leuchten)
+        alle += telegram.werkzeuge(protokoll, leuchten, ohren=ohren)
     server = create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=alle)
     namen = [f"mcp__{SERVER}__{w.name}" for w in alle]
     return server, namen, wecker, protokoll, werkstatt
