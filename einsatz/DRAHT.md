@@ -659,6 +659,117 @@ Drei Dinge greifen jetzt ineinander:
 Im offenen Nachhörfenster wird **nicht** gekappt: Wer angesprochen wurde
 und diktiert, macht Denkpausen und darf ausholen.
 
+## Dateien hochladen
+
+Sascha schickt aus der App etwas herüber — einen Plan als PDF, ein
+Angebot als Word, eine Preisliste als Excel, eine Datei aus einem
+Projekt. Sarvis liest sie und sagt, was drinsteht.
+
+### 1. Adresse und Methode
+
+```
+POST /datei
+Content-Type: multipart/form-data
+```
+
+**Multipart, nicht roher Body.** Ein Feld, und es heißt `datei`:
+
+```
+--grenze
+Content-Disposition: form-data; name="datei"; filename="Angebot.pdf"
+Content-Type: application/pdf
+
+<Bytes>
+--grenze--
+```
+
+Der Dateiname aus `filename` wird übernommen, gesäubert und mit einem
+Zeitstempel versehen. Ein anderer Feldname als `datei` ergibt **400**.
+
+Warum nicht über den Draht: Der trägt 4 MB je Nachricht, und base64
+bläht um ein Drittel auf — eine 5-MB-Datei passt nicht mehr. In Stücke
+zerlegen hieße, im Protokoll eine Zusammensetz-Logik zu führen samt der
+Frage, was bei einem abgebrochenen Stück geschieht. Das kann HTTP schon.
+
+### 2. Anmeldung
+
+**Derselbe Geräteschlüssel wie am Draht, im Kopf:**
+
+```
+X-Sarvis-Schluessel: <derselbe Schlüssel wie bei der Draht-Anmeldung>
+```
+
+Nicht als Abfrage in der Adresse — Adressen landen in Protokollen und
+im Browserverlauf, Kopfzeilen nicht.
+
+Das ist bewusst das Gegenteil der Blätter. Die tragen keinen Schlüssel,
+weil ein Download-Knopf und ein System-PDF-Viewer keine eigenen
+Kopfzeilen schicken können. Beim Hochladen baut die App die Anfrage
+selbst, kann also einen Kopf setzen — und muss es: Wer hochladen darf,
+füllt Sarvis' Eingang und damit seinen Kontext.
+
+Ohne oder mit falschem Schlüssel: **401**, in beiden Fällen dieselbe
+Antwort und ohne Hinweis, was falsch war.
+
+### 3. Grenzen
+
+| | |
+|---|---|
+| Höchstens je Datei | **25 MB** (`config.DATEI_MAX`) |
+| Zu groß | **413** `{"fehler": "zu gross", "hoechstens": 26214400}` |
+| Leere Datei | **400** `{"fehler": "leer"}` |
+| Falsches Feld | **400** `{"fehler": "kein Feld 'datei'"}` |
+
+Geprüft wird zweimal: erst `Content-Length`, dann beim stückweisen
+Lesen mitgezählt. Ein Client ohne `Content-Length` kommt also nicht
+durch die Hintertür.
+
+**Erlaubte Endungen** — eine Positivliste (`config.DATEI_ENDUNGEN`):
+
+- Text: `.txt .md .markdown .rst .log .csv .tsv .json .yaml .yml .toml .ini .cfg .conf .env .xml .html .htm .svg`
+- Code: `.py .js .ts .tsx .jsx .css .scss .sass .less .java .kt .kts .c .h .cpp .hpp .cs .go .rs .rb .php .swift .sql .gradle .dockerfile .diff .patch`
+- Dokumente: `.pdf .docx .doc .xlsx .xls .pptx .odt .ods .rtf .epub`
+- Bilder: `.png .jpg .jpeg .gif .webp .bmp .heic`
+
+Alles andere: **415** `{"fehler": "diese Art Datei nehme ich nicht", "endung": ".sh"}`
+
+Ausführbares steht bewusst nicht drin — `.exe`, `.sh`, `.bat`, `.ps1`.
+Sarvis kann Programme starten; eine Datei von außen, die ausgeführt
+werden könnte, ist ein Weg zu weit. Die Antwort nennt die abgelehnte
+Endung, damit unterscheidbar bleibt, ob etwas wirklich unerwünscht ist
+oder ob nur niemand daran gedacht hat.
+
+### 4. Was zurückkommt
+
+```json
+{ "gut": true, "name": "2026-09-02-1933-Angebot.pdf", "bytes": 128442 }
+```
+
+**`name` ist die Kennung.** Unter diesem Namen liegt die Datei im
+Eingang, und darauf zeigt Sarvis im Gespräch. Der Zeitstempel steht
+vorn, damit der Ordner sich chronologisch sortiert und zwei Dateien
+namens „Angebot.pdf" von verschiedenen Tagen einander nicht
+überschreiben — was der Normalfall ist, nicht die Ausnahme.
+
+Die App kann den Namen anzeigen („liegt bei Sarvis als …") oder ihn
+schlicht verwerfen; nötig ist er nicht.
+
+### Was danach passiert
+
+Sarvis **liest die Datei nicht von selbst vor.** Wer eine Datei
+schickt, tut das meistens mitten in einem Satz und will danach etwas
+Bestimmtes wissen. Ein Assistent, der ungefragt eine Preisliste
+vorträgt, ist eine Zumutung.
+
+Er erfährt nur, dass sie da ist: Beim nächsten Zuruf steht eine Zeile
+in seinem Vorspann (`[Gerade angekommen: … ]`). Fragt Sascha dann
+etwas, liest Sarvis mit `datei_lesen` hinein. Der Name muss dabei nicht
+stimmen — „schau mal ins Angebot von Müller" findet `Angebot.docx`,
+„lies mir den Wartungsbericht vor" findet `bericht.pdf`.
+
+Der Eingang hält die **60 jüngsten** Dateien; darüber fällt die älteste
+weg. Die App muss also nichts aufräumen.
+
 ### `auto` — die Oberfläche sitzt im Fahrzeug
 
 ```json

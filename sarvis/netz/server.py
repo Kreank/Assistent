@@ -51,6 +51,7 @@ from pathlib import Path
 from aiohttp import WSMsgType, web
 
 from .. import config
+from ..werkzeuge import eingang
 from . import blaetter, geraete
 from .fernsicht import Fernsicht
 from .traeger import NetzTraeger, Oberflaeche, als_text
@@ -85,11 +86,12 @@ class Endpunkt:
     """
 
     def __init__(self, zuruf_an=None, sprache_an=None, strom_an=None,
-                 auto_an=None, weg_an=None):
+                 auto_an=None, datei_an=None, weg_an=None):
         """zuruf_an(text, geraet)        -- eine getippte Zeile kam an
         sprache_an(proben, geraet)    -- eine fertige Aufnahme kam an
         strom_an(daten, rate, geraet) -- ein Stueck Dauerstrom kam an
         auto_an(an, geraet)             -- die Oberflaeche sitzt im Auto
+        datei_an(pfad, geraet)          -- eine Datei kam herein
         weg_an(geraet)                -- eine Oberflaeche ist gegangen
         Alle vier werden in der Ereignisschleife von Sarvis gerufen.
         """
@@ -97,6 +99,7 @@ class Endpunkt:
         self.sprache_an = sprache_an
         self.strom_an = strom_an
         self.auto_an = auto_an
+        self.datei_an = datei_an
         # Wann zuletzt ueber welche unbekannte Art gemeckert wurde.
         self._gemeckert: dict[str, float] = {}
         self.weg_an = weg_an
@@ -122,6 +125,76 @@ class Endpunkt:
             "wach": True,
             "oberflaechen": self.traeger.wie_viele() if self.traeger else 0,
         })
+
+    async def _datei(self, anfrage: web.Request) -> web.Response:
+        """Eine Datei, die jemand aus der App herueberschickt.
+
+        WARUM HTTP UND NICHT DER DRAHT: Der traegt 4 MB je Nachricht, und
+        base64 blaeht um ein Drittel auf -- eine 5-MB-Datei passt nicht
+        mehr. In Stuecke zerlegen hiesse, im Protokoll eine
+        Zusammensetz-Logik zu fuehren samt der Frage, was bei einem
+        abgebrochenen Stueck geschieht. Das kann HTTP schon.
+
+        ANMELDUNG: Derselbe Geraeteschluessel wie am Draht, hier im
+        Kopf "X-Sarvis-Schluessel". Nicht als Abfrage in der Adresse:
+        Adressen landen in Protokollen und im Verlauf des Browsers,
+        Koepfe nicht.
+
+        Bewusst KEINE Ausnahme fuer "ist ja nur eine Datei": Wer
+        hochladen darf, fuellt Sarvis' Eingang und damit seinen Kontext.
+        """
+        schluessel = anfrage.headers.get("X-Sarvis-Schluessel", "")
+        name = await asyncio.to_thread(geraete.pruefen, schluessel)
+        if name is None:
+            # Dieselbe Antwort wie am Draht und ebenso ohne Hinweis,
+            # WAS falsch war.
+            return web.json_response({"fehler": "kein Zugang"}, status=401)
+
+        if anfrage.content_length and \
+                anfrage.content_length > config.DATEI_MAX:
+            return web.json_response(
+                {"fehler": "zu gross",
+                 "hoechstens": config.DATEI_MAX}, status=413)
+
+        try:
+            teile = await anfrage.multipart()
+            feld = await teile.next()
+        except Exception:
+            feld = None
+        if feld is None or feld.name != "datei":
+            return web.json_response(
+                {"fehler": "kein Feld 'datei'"}, status=400)
+
+        dateiname = feld.filename or "datei"
+        if not eingang.endung_erlaubt(dateiname):
+            # Die Endungsliste ist eine Positivliste. Was hier auflaeuft,
+            # ist entweder wirklich unerwuenscht oder eine Endung, an die
+            # niemand gedacht hat -- deshalb wird sie mitgeteilt, statt
+            # nur "nein" zu sagen.
+            return web.json_response(
+                {"fehler": "diese Art Datei nehme ich nicht",
+                 "endung": Path(dateiname.lower()).suffix},
+                status=415)
+
+        # Stueckweise lesen und dabei mitzaehlen: Ohne das koennte ein
+        # Client ohne content_length beliebig viel schicken.
+        roh = bytearray()
+        while True:
+            brocken = await feld.read_chunk(64 * 1024)
+            if not brocken:
+                break
+            roh += brocken
+            if len(roh) > config.DATEI_MAX:
+                return web.json_response({"fehler": "zu gross"}, status=413)
+        if not roh:
+            return web.json_response({"fehler": "leer"}, status=400)
+
+        pfad = await asyncio.to_thread(
+            eingang.ablegen, dateiname, bytes(roh), name)
+        if self.datei_an is not None:
+            await self.datei_an(pfad, name)
+        return web.json_response({"gut": True, "name": pfad.name,
+                                  "bytes": len(roh)})
 
     # --- WebSocket -------------------------------------------------------
 
@@ -328,6 +401,7 @@ class Endpunkt:
         app = web.Application(client_max_size=NACHRICHT_MAX)
         app.router.add_get("/", self._seite)
         app.router.add_get("/leben", self._leben)
+        app.router.add_post("/datei", self._datei)
         app.router.add_get("/draht", self._draht)
         if WEB.is_dir():
             app.router.add_static("/dabei/", WEB, name="dabei")

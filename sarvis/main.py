@@ -47,7 +47,7 @@ from .ohren import Ohren  # noqa: E402
 # einen Horch, der auf den Strom einer Oberflaeche wartet.
 from .weckwort import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
-from .werkzeuge import erinnern  # noqa: E402
+from .werkzeuge import eingang, erinnern  # noqa: E402
 from .gedaechtnis import (entscheidung_verpasst,  # noqa: E402
                           entscheidungen_nachtrag,
                           klingt_nach_entscheidung)
@@ -190,6 +190,8 @@ class Sarvis:
                                          # gegenüber einer Zeile, die
                                          # dieselbe Sache erneut anbietet.
                                          entscheidungen_nachtrag(),
+                                         eingang.eingang_zeile(
+                                             self._eingang_gesehen),
                                          self._anstupser,
                                          schutz.arbeitsordner_zeile())
                              if z),
@@ -198,6 +200,10 @@ class Sarvis:
         # Entscheidung und nichts wurde festgehalten. Siehe
         # gedaechtnis.entscheidung_verpasst.
         self._anstupser = ""
+        # Bis zu welchem Zeitpunkt die Dateien im Eingang schon erwaehnt
+        # wurden. Alles Neuere kommt in den Vorspann -- Sascha soll eine
+        # Datei schicken und weiterreden koennen, ohne sie anzusagen.
+        self._eingang_gesehen = time.time()
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         # Was Sarvis von sich aus sagen will: Timer, fertige Auftraege.
         # Eine Schlange und EIN Sprecher -- siehe von_selbst_sagen().
@@ -917,6 +923,12 @@ class Sarvis:
         # festgehalten? Dann steht beim naechsten Zuruf ein Hinweis im
         # Vorspann. Kein Modellaufruf, keine Wartezeit -- nur eine Zeile,
         # die beim naechsten Mal garantiert ankommt.
+        # Die Eingangszeile hat ihren Zweck erfuellt, sobald sie einmal
+        # mitgelaufen ist. Bliebe sie stehen, meldete sie dieselbe Datei
+        # in jedem weiteren Zuruf -- und wuerde damit genau das, was der
+        # Auftragshinweis vorher getan hat.
+        self._eingang_gesehen = time.time()
+
         if klang_entschieden and erinnern.schreibstand() == stand_vorher:
             self._anstupser = entscheidung_verpasst(gesagt)
             print("  (Entscheidungswort gefallen, nichts gemerkt — "
@@ -1102,6 +1114,7 @@ class Sarvis:
                                         sprache_an=self._sprache_vom_netz,
                                         strom_an=self._strom_vom_netz,
                                         auto_an=self._auto_vom_netz,
+                                        datei_an=self._datei_vom_netz,
                                         weg_an=self._oberflaeche_weg)
         await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
         print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
@@ -1118,6 +1131,22 @@ class Sarvis:
         self._antwort_an(geraet)
         self.anzeige.untertitel("du", text)
         self.schlange.put_nowait(("weckwort", text))
+
+    async def _datei_vom_netz(self, pfad, geraet: str) -> None:
+        """Eine Datei ist hereingekommen.
+
+        Hier passiert bewusst fast nichts. Sarvis faengt NICHT von sich
+        aus an, sie vorzulesen: Wer eine Datei schickt, tut das
+        meistens mitten in einem Satz und will danach etwas Bestimmtes
+        wissen. Ein Assistent, der ungefragt eine Preisliste vortraegt,
+        ist eine Zumutung.
+
+        Er soll nur WISSEN, dass sie da ist -- das erledigt die
+        Vorspannzeile beim naechsten Zuruf. Und die Anzeige leuchtet
+        kurz auf, damit man sieht, dass es angekommen ist.
+        """
+        self._leuchten("Dateien")
+        self.anzeige.untertitel("System", f"Datei angekommen: {pfad.name}")
 
     async def _auto_vom_netz(self, an: bool, geraet: str) -> None:
         """Die Oberflaeche steckt jetzt im Auto -- oder eben nicht mehr."""

@@ -61,6 +61,13 @@ DATEN = _aus_umgebung("SARVIS_DATEN", Path("/srv/data/sarvis"))
 # Sein Werktisch: Berichte als Seite, Auswertungen, Zwischenstaende.
 ABLAGE = DATEN / "erzeugt"
 
+# Was von aussen HEREINKOMMT -- Dateien, die jemand aus der App
+# herueberschickt. Getrennt von ABLAGE, weil die Herkunft der
+# Unterschied ist: In ABLAGE liegt, was Sarvis selbst gebaut hat, hier
+# liegt, was ihm gegeben wurde. Beim Aufraeumen ist das der Unterschied
+# zwischen "kann er neu erzeugen" und "ist weg".
+EINGANG = DATEN / "eingang"
+
 # Das Gedaechtnis -- Markdown, von Hand lesbar. Der einzige hier
 # genannte Ort, dessen Verlust unersetzlich ist: Der Rest erzeugt sich
 # neu, das hier ist alles, was Sarvis ueber Sascha weiss.

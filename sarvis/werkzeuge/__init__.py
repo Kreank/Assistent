@@ -13,9 +13,9 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, bericht, dokument, erinnern, fachdaten, finanzen,
-               google, kacheln, lesen, medien, musik, programme, projekte,
-               rechner, telegram, unterwegs, verlauf, wetter, zeit)
+from . import (auftrag, bericht, dokument, eingang, erinnern, fachdaten,
+               finanzen, google, kacheln, lesen, medien, musik, programme,
+               projekte, rechner, telegram, unterwegs, verlauf, wetter, zeit)
 
 SERVER = "sarvis"
 
@@ -69,6 +69,7 @@ def bauen(sagen, leuchten=None, melden=None):
     werkstatt = auftrag.Werkstatt(sagen=sagen, melden=melden, leuchten=leuchten)
     alle = (zeit.werkzeuge(wecker, protokoll)
             + erinnern.werkzeuge(protokoll, leuchten)
+            + eingang.werkzeuge(protokoll, leuchten)
             + verlauf.werkzeuge(protokoll, leuchten))
     alle += kacheln.werkzeuge(protokoll, leuchten)
     alle += bericht.werkzeuge(protokoll, leuchten)

@@ -12,10 +12,48 @@ Werkzeugstufen, Befehlsmuster, der Systemprompt.
 import os
 from pathlib import Path  # noqa: F401  -- von unten noch gebraucht
 
-from .orte import (ABLAGE, DATEN, ENTWICKLUNG_ORTE, FRAGEN_TROTZ_FREI,
-                   FREI_DURCHSUCHEN, FREI_LESEN, FREI_SCHREIBEN, GEDAECHTNIS,
-                   PROJEKTE, PROJEKT_ORTE, PROJEKT_ORT_NAMEN, VERKNUEPFUNG,
-                   VERLAUF_ORDNER, WURZEL)  # noqa: F401  -- Re-Export
+from .orte import (ABLAGE, DATEN, EINGANG, ENTWICKLUNG_ORTE,
+                   FRAGEN_TROTZ_FREI, FREI_DURCHSUCHEN, FREI_LESEN,
+                   FREI_SCHREIBEN, GEDAECHTNIS, PROJEKTE, PROJEKT_ORTE,
+                   PROJEKT_ORT_NAMEN, VERKNUEPFUNG, VERLAUF_ORDNER,
+                   WURZEL)  # noqa: F401  -- Re-Export
+
+# --- Dateien, die hereinkommen -------------------------------------------
+# Wie gross eine einzelne Datei sein darf, die jemand herueberschickt.
+# 25 MB deckt Plaene, Angebote und lange Berichte ab. Der Draht selbst
+# koennte nur 4 MB (NACHRICHT_MAX) -- deshalb geht der Weg ueber HTTP
+# und nicht ueber das Draht-Protokoll.
+DATEI_MAX = 25 * 1024 * 1024
+
+# Was hereinkommen darf. Eine Positivliste, keine Sperrliste: Was hier
+# nicht steht, kommt nicht herein. Andersherum muesste man an jede neue
+# gefaehrliche Endung denken, und das geht einmal gut.
+#
+# Ausfuehrbares steht bewusst NICHT drin -- .exe, .sh, .bat, .ps1.
+# Sarvis kann Programme starten; eine Datei, die von aussen kommt und
+# ausgefuehrt werden koennte, ist ein Weg zu weit.
+DATEI_ENDUNGEN = {
+    # Text und Auszeichnung
+    ".txt", ".md", ".markdown", ".rst", ".log", ".csv", ".tsv",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+    ".xml", ".html", ".htm", ".svg",
+    # Code
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".scss", ".sass",
+    ".less", ".java", ".kt", ".kts", ".c", ".h", ".cpp", ".hpp", ".cs",
+    ".go", ".rs", ".rb", ".php", ".swift", ".sql", ".gradle",
+    ".dockerfile", ".diff", ".patch",
+    # Dokumente
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".odt", ".ods",
+    ".rtf", ".epub",
+    # Bilder -- Sarvis kann sie ansehen
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic",
+}
+
+# Wie viele Dateien der Eingang hoechstens haelt. Darueber faellt die
+# aelteste weg. Ohne Deckel waechst der Ordner still weiter, und
+# irgendwann sucht Sarvis in dreihundert Dateien nach der einen, die
+# gerade gemeint ist.
+EINGANG_HOECHSTENS = 60
 
 # Wie viele Eintraege die IMMER geladene Schicht hoechstens traegt.
 #
@@ -259,6 +297,9 @@ SCHNELLE_WERKZEUGE = {
     "timer_stellen", "timer_liste", "timer_abbrechen",
     "merken", "person_merken", "notiz_schreiben", "vergessen",
     "gedaechtnis_zeigen", "gedaechtnis_nachschlagen",
+    # Nur lesen, und zwar in einem Ordner, in den ausschliesslich
+    # Sascha selbst etwas legt.
+    "eingang_zeigen", "datei_lesen",
     # Ein Tastendruck bzw. ein Datagramm, das niemand beantwortet.
     "medien_steuern", "kachel_zeigen", "kachel_weg",
     "web_zeigen", "web_schliessen", "route_zeigen",
@@ -992,6 +1033,10 @@ WERKZEUG_STUFEN = {
     "notiz_schreiben":         "still",
     "gedaechtnis_nachschlagen": "still",
     "gedaechtnis_zeigen": "still",
+    # Dateien, die Sascha selbst herueberschickt hat. Nachzufragen, ob
+    # er das lesen darf, was er gerade geschickt hat, waere albern.
+    "eingang_zeigen":          "still",
+    "datei_lesen":             "still",
 
     # Etwas neben der Engine einblenden. Still, und zwar deutlich: Eine
     # Kachel zeigt nur, was Sarvis ohnehin gerade sagt -- sie geht nicht
