@@ -951,6 +951,20 @@ class Werkstatt:
         wenn sie verstreicht, wird das gemeldet, statt Erfolg zu
         behaupten.
         """
+        if a.status == "unterbrochen":
+            # Ein Neustart hat ihn erwischt; es laeuft nichts, was man
+            # anhalten koennte. Zu tun ist nur das, was bisher fehlte:
+            # den Zustand raeumen, damit die Vorspannzeile verschwindet
+            # und nicht weiter jeden Zuruf mit derselben Frage belegt.
+            a.status = "abgebrochen"
+            a.beendet = datetime.now()
+            journal(a.nummer, "beendet", status="abgebrochen",
+                    ergebnis="Vom Nutzer verworfen.")
+            self._sichern()
+            return True, (f"Auftrag {a.nummer} ist verworfen, ich frage "
+                          f"nicht mehr danach. Der Zweig {a.zweig} bleibt "
+                          "stehen — sag Bescheid, wenn er auch weg soll.")
+
         if a.aufgabe is None or a.aufgabe.done():
             a.status = "abgebrochen"
             a.beendet = datetime.now()
@@ -1149,8 +1163,10 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
 
     @tool(
         "auftrag_abbrechen",
-        "Bricht einen laufenden Auftrag ab. Was bis dahin committet wurde, "
-        "bleibt auf dem Zweig stehen.",
+        "Bricht einen laufenden Auftrag ab ODER verwirft einen, den ein "
+        "Neustart unterbrochen hat. Für 'verwirf das', 'lass es', 'brauch "
+        "ich nicht mehr' — auch wenn gerade niemand daran arbeitet. Was "
+        "committet wurde, bleibt auf dem Zweig stehen; gelöscht wird nichts.",
         {
             "type": "object",
             "properties": {
@@ -1161,9 +1177,22 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
     )
     async def auftrag_abbrechen(args):
         a = werkstatt.auftraege.get(int(args.get("nummer") or 0))
-        if a is None or a.status != "läuft":
+        # "unterbrochen" gehoert ausdruecklich dazu. Vorher stand hier nur
+        # "läuft" -- und damit gab es fuer einen unterbrochenen Auftrag
+        # ueberhaupt keinen Weg, ihn loszuwerden:
+        #
+        # Die Vorspannzeile (werkzeuge/__init__.py) weist Sarvis bei JEDEM
+        # Zuruf an, das Fortsetzen oder Verwerfen anzubieten, solange ein
+        # Auftrag auf "unterbrochen" steht. Sagte der Nutzer "verwirf das",
+        # antwortete dieses Werkzeug "Dieser Auftrag läuft nicht", der
+        # Status blieb, und beim naechsten Zuruf fragte Sarvis erneut.
+        # Gemessen: ueber vierzig Mal an einem Vormittag. Von aussen sah
+        # das aus, als habe er die Antwort vergessen -- er konnte ihr nur
+        # nicht folgen.
+        if a is None or a.status not in ("läuft", "unterbrochen"):
             return {"content": [{"type": "text", "text":
-                    "Dieser Auftrag läuft nicht."}], "is_error": True}
+                    "Diesen Auftrag gibt es nicht oder er ist längst "
+                    "beendet."}], "is_error": True}
         # Hier stand: cancel() schicken und sofort "abgebrochen" melden.
         # Das war eine Behauptung, keine Auskunft. cancel() wirkt erst,
         # wenn die Aufgabe das naechste Mal wartet -- und wenn gar keine
