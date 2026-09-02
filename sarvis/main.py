@@ -240,8 +240,10 @@ class Sarvis:
         self.horch = klang.dauerhorch()
         self.horcher = Horcher(self.ohren, self._geweckt,
                                anzeige=self.anzeige, horch=self.horch)
-        # Was in DIESEM Zug schon abgelehnt wurde. Siehe nachfragen().
+        # Was in DIESEM Zug schon abgelehnt -- und was schon erlaubt
+        # wurde. Beides gilt nur fuer den einen Zug. Siehe nachfragen().
         self._abgelehnt: dict = {}
+        self._zugestimmt: dict = {}
         # Wie oft am selben Ort hintereinander ja gesagt wurde.
         self._ja_folge: dict = {}
         self.gruesse = []            # vorbereitete Weckantworten
@@ -481,6 +483,29 @@ class Sarvis:
             print(f"  ? schon beantwortet ({frueher}) -- nicht nochmal gefragt")
             return frueher, wortlaut
 
+        # Und dasselbe fuer ein JA. Hier stand nur die Ablehnung, und das
+        # war der Fehler: Sascha bat einmal darum, Herstellerdokumente zu
+        # suchen und abzulegen. Sarvis versuchte es sieben Mal (weil ein
+        # anderer Fehler jeden Versuch scheitern liess) und fragte jedes
+        # Mal neu. Woertlich: "ich habe ihn gebeten Dokumente im Web zu
+        # suchen ... da will ich nicht 20x ja darfst du sagen."
+        #
+        # Ein Ja fuer GENAU dieselbe Anfrage im selben Zug ist keine
+        # zweite Erlaubnis, es ist dieselbe. Danach zu fragen ist keine
+        # Sorgfalt, sondern Zermuerbung -- wer zum zehnten Mal ja sagt,
+        # hoert nicht mehr hin, was er bestaetigt.
+        #
+        # Die Grenze ist FREIGABE_NIE und damit dieselbe wie fuer die
+        # Freigabe auf Zeit: Was nach aussen wirkt -- Mail, Telegram,
+        # Teilen, Vergessen -- wird jedes Mal einzeln gefragt. Dort waere
+        # ein wiederverwendetes Ja eine zweite Mail.
+        if (schluessel is not None and schluessel in self._zugestimmt
+                and werkzeug not in config.FREIGABE_NIE):
+            wortlaut = self._zugestimmt[schluessel]
+            print("  ? dasselbe wurde in diesem Zug schon erlaubt "
+                  "-- nicht nochmal gefragt")
+            return "ja", wortlaut
+
         # Zehnmal dasselbe fragen ist keine Sorgfalt mehr, sondern
         # Zermuerbung -- wer zum zehnten Mal ja sagt, hoert nicht mehr hin,
         # was er da bestaetigt. Nach dem dritten Ja am selben Ort bietet
@@ -558,6 +583,8 @@ class Sarvis:
                 print(f"  ? Antwort: {gehoert!r} -> {entschieden}")
 
                 if entschieden == "ja":
+                    if schluessel is not None:
+                        self._zugestimmt[schluessel] = gehoert
                     self._ja_folge[folge] = self._ja_folge.get(folge, 0) + 1
                     if anbieten:
                         self._ja_folge[folge] = 0
@@ -847,6 +874,7 @@ class Sarvis:
         # Neuer Zuruf, neue Lage: Was vorhin abgelehnt wurde, darf jetzt
         # wieder gefragt werden.
         self._abgelehnt = {}
+        self._zugestimmt = {}
 
         if rueckfrage.ist_stopp(gesagt):
             await self._alles_stoppen()

@@ -42,6 +42,11 @@ from . import config
 _PFAD_WERKZEUGE = ("datei_lesen", "datei_schreiben", "ordner_ansehen",
                    "ordner_durchsuchen")
 
+# Werkzeuge, die statt eines Pfades ein PROJEKT nennen. Ihr Ort ist der
+# Projektordner -- wer einen Auftrag im Projekt X freigibt, meint das
+# Projekt, nicht diesen einen Auftragstext.
+_PROJEKT_WERKZEUGE = ("auftrag_geben", "projekt_oeffnen")
+
 
 def _pfade_im_befehl(befehl: str) -> list[str]:
     """Alle Pfade eines Befehls -- dieselbe Sammlung wie in schutz.py.
@@ -86,6 +91,15 @@ def ort(werkzeug: str, eingabe: dict) -> str:
     pfad = ""
     if werkzeug in _PFAD_WERKZEUGE:
         pfad = str(e.get("pfad") or "")
+    elif werkzeug in _PROJEKT_WERKZEUGE:
+        # Diese Werkzeuge nennen kein Pfad-, sondern ein Projektfeld.
+        # Ohne diese Zeile war ihr Ort leer -- und ortlos heisst: keine
+        # Freigabe moeglich, also bei jedem Versuch neu fragen. Genau das
+        # ist am 2. September passiert, als ein Auftrag sieben Mal
+        # scheiterte und sieben Mal einzeln bestaetigt werden musste.
+        from .werkzeuge.projekte import _finden
+        ordner, _ = _finden(str(e.get("projekt") or ""))
+        pfad = str(ordner) if ordner else ""
     elif werkzeug == "befehl_ausfuehren":
         befehl = str(e.get("befehl") or "")
         pfad = _pfad_im_befehl(befehl)

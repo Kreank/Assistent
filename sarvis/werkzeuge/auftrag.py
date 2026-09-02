@@ -37,7 +37,7 @@ from claude_agent_sdk import (
 )
 
 from .. import config, schutz
-from .projekte import _pfad
+from .projekte import _finden, _pfad
 
 # Werkzeuge, die der Arbeiter benutzen darf. Alles Uebrige wird abgelehnt.
 ARBEITER_WERKZEUGE = [
@@ -526,9 +526,20 @@ class Werkstatt:
     # --- Auftrag starten ---------------------------------------------------
 
     def starten(self, projekt: str, was: str) -> tuple[Auftrag | None, str]:
-        ordner = _pfad(projekt)
-        if ordner is None or not ordner.exists():
-            return None, "Dieses Projekt finde ich nicht."
+        # _finden statt _pfad: _pfad sieht nur im Sandkasten nach, es gibt
+        # aber drei Orte (privat, arbeit, sandkasten). Ein Projekt, das
+        # projekt_anlegen unter "arbeit" angelegt hat, war fuer
+        # auftrag_geben damit unsichtbar.
+        #
+        # Gemessen am 2. September: Sascha bat darum, Herstellerdokumente
+        # zu suchen und abzulegen. Sarvis legte das Projekt unter
+        # "arbeit" an, versuchte dann sieben Mal einen Auftrag und bekam
+        # sieben Mal "Dieses Projekt finde ich nicht" -- bei jedem
+        # Versuch mit einer neuen Rueckfrage an Sascha.
+        ordner, _ort = _finden(projekt)
+        if ordner is None:
+            return None, ("Dieses Projekt finde ich nicht — weder privat "
+                          "noch unter Arbeit noch im Sandkasten.")
 
         laeuft = [a for a in self.auftraege.values()
                   if a.status == "läuft" and a.ordner == ordner]
