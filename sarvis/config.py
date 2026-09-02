@@ -302,6 +302,8 @@ SCHNELLE_WERKZEUGE = {
     "eingang_zeigen", "datei_lesen",
     # Reine Rechnerei, ohne jede Wirkung nach aussen.
     "rechnen", "umrechnen",
+    # Nur lesen bzw. eine Zeit aendern, die er selbst eingetragen hat.
+    "freie_zeit",
     # Ein Tastendruck bzw. ein Datagramm, das niemand beantwortet.
     "medien_steuern", "kachel_zeigen", "kachel_weg",
     "web_zeigen", "web_schliessen", "route_zeigen",
@@ -1041,6 +1043,7 @@ WERKZEUG_STUFEN = {
     "datei_lesen":             "still",
     "rechnen":                 "still",
     "umrechnen":               "still",
+    "freie_zeit":              "still",
 
     # Etwas neben der Engine einblenden. Still, und zwar deutlich: Eine
     # Kachel zeigt nur, was Sarvis ohnehin gerade sagt -- sie geht nicht
@@ -1190,6 +1193,7 @@ WERKZEUG_STUFEN = {
     "termine_ansehen":    "still",
     "termin_anlegen":     "fragen",
     "termin_absagen":     "fragen",
+    "termin_verschieben":      "fragen",
     "mails_ansehen":      "still",
     "mail_lesen":         "still",
     "mail_senden":        "fragen",

@@ -14,7 +14,7 @@ import asyncio
 import base64
 import mimetypes
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from email.message import EmailMessage
 
 from claude_agent_sdk import tool
@@ -969,6 +969,249 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                   f"{_im_kalender(welcher)} gelöscht.")
         return {"content": [{"type": "text", "text":
                 f"{ziel.get('summary')} ist abgesagt."}]}
+
+    @tool(
+        "termin_verschieben",
+        "Verschiebt einen Termin auf eine andere Zeit — und behält dabei "
+        "Titel, Ort, Notiz und Eingeladene. Für 'schieb den Müller auf "
+        "Donnerstag' oder 'eine Stunde später'. Nicht absagen und neu "
+        "anlegen: Das verliert die Einladung und den Verlauf.",
+        {
+            "type": "object",
+            "properties": {
+                "titel": {"type": "string",
+                          "description": "Titel des Termins, wie er im "
+                                         "Kalender steht."},
+                "neuer_beginn": {
+                    "type": "string",
+                    "description": "Neuer Beginn als JJJJ-MM-TT HH:MM. Die "
+                                   "Dauer bleibt, wenn nichts anderes "
+                                   "gesagt wird.",
+                },
+                "dauer_minuten": {
+                    "type": "integer", "minimum": 5, "maximum": 1440,
+                    "description": "Optional: neue Dauer. Ohne Angabe bleibt "
+                                   "die bisherige.",
+                },
+                "tage": {"type": "integer", "minimum": 1, "maximum": 60,
+                         "description": "In welchem Zeitraum gesucht wird. "
+                                        "Vorgabe 14."},
+                "kalender": {"type": "string",
+                             "description": "Optional ein anderer Kalender."},
+            },
+            "required": ["titel", "neuer_beginn"],
+        },
+    )
+    async def termin_verschieben(args):
+        dienst = await _hole("calendar", "v3")
+        if dienst is None:
+            return _fehlt()
+        kennung, welcher, fehler = await _kalender_id(dienst,
+                                                      args.get("kalender"))
+        if fehler:
+            return fehler
+
+        neu_roh = " ".join(str(args.get("neuer_beginn") or "").split())
+        try:
+            neu_beginn = datetime.fromisoformat(neu_roh).astimezone()
+        except ValueError:
+            return {"content": [{"type": "text", "text":
+                    f"Mit {neu_roh!r} kann ich nichts anfangen. Ich brauche "
+                    "JJJJ-MM-TT HH:MM."}], "is_error": True}
+
+        von = datetime.now().astimezone()
+        bis = von + timedelta(days=int(args.get("tage") or 14))
+        antwort = await asyncio.to_thread(
+            lambda: dienst.events().list(
+                calendarId=kennung, timeMin=von.isoformat(),
+                timeMax=bis.isoformat(), singleEvents=True,
+                orderBy="startTime", maxResults=50, q=args["titel"],
+            ).execute()
+        )
+        treffer = antwort.get("items", [])
+        if not treffer:
+            return {"content": [{"type": "text", "text":
+                    f"Keinen Termin {args['titel']!r}"
+                    f"{_im_kalender(welcher)} gefunden."}],
+                    "is_error": True}
+        if len(treffer) > 1:
+            namen = "; ".join(
+                f"{_wann(e.get('start', {}))} {e.get('summary', '')}"
+                for e in treffer[:4])
+            return {"content": [{"type": "text", "text":
+                    f"Mehrere passen: {namen}. Frag nach, welcher gemeint "
+                    "ist."}], "is_error": True}
+
+        ziel = treffer[0]
+        # Die bisherige Dauer uebernehmen, wenn keine neue genannt ist.
+        # Wer "schieb das auf drei" sagt, meint denselben Termin zu einer
+        # anderen Zeit -- nicht einen neuen von unbestimmter Laenge.
+        dauer = args.get("dauer_minuten")
+        if not dauer:
+            try:
+                a = datetime.fromisoformat(
+                    ziel["start"]["dateTime"].replace("Z", "+00:00"))
+                b = datetime.fromisoformat(
+                    ziel["end"]["dateTime"].replace("Z", "+00:00"))
+                dauer = max(5, int((b - a).total_seconds() // 60))
+            except (KeyError, TypeError, ValueError):
+                # Ganztaegige Termine haben kein dateTime.
+                dauer = 60
+        neu_ende = neu_beginn + timedelta(minutes=int(dauer))
+
+        # patch statt update: Es werden NUR Anfang und Ende geaendert.
+        # Ein update mit selbstgebautem Koerper wuerde alles ueberschreiben,
+        # was nicht mitgeschickt wird -- Eingeladene, Ort, Beschreibung,
+        # Erinnerungen. Genau das ist der Grund, warum Absagen und neu
+        # Anlegen kein Ersatz ist.
+        await asyncio.to_thread(
+            lambda: dienst.events().patch(
+                calendarId=kennung, eventId=ziel["id"],
+                body={"start": {"dateTime": neu_beginn.isoformat()},
+                      "end": {"dateTime": neu_ende.isoformat()}},
+            ).execute()
+        )
+        blinken("Kalender")
+        wann = neu_beginn.strftime("%d.%m. um %H:%M")
+        vermerken(f"termin_verschieben: {ziel.get('summary')} liegt jetzt "
+                  f"am {wann}{_im_kalender(welcher)}.")
+        return {"content": [{"type": "text", "text":
+                f"{ziel.get('summary')} liegt jetzt am {wann} Uhr."}]}
+
+    @tool(
+        "freie_zeit",
+        "Sagt, wann im Kalender noch Platz ist. Für 'wann hab ich Donnerstag "
+        "Luft', 'wo kriege ich zwei Stunden unter', 'wann kann ich den "
+        "Kunden einschieben'.",
+        {
+            "type": "object",
+            "properties": {
+                "tage": {"type": "integer", "minimum": 1, "maximum": 21,
+                         "description": "Wie viele Tage ab heute angesehen "
+                                        "werden. Vorgabe 7."},
+                "ab_tag": {"type": "string",
+                           "description": "Optional JJJJ-MM-TT: erst ab "
+                                          "diesem Tag suchen."},
+                "dauer_minuten": {
+                    "type": "integer", "minimum": 15, "maximum": 600,
+                    "description": "Wie lang die Lücke mindestens sein muss. "
+                                   "Vorgabe 60.",
+                },
+                "von_uhr": {"type": "integer", "minimum": 0, "maximum": 23,
+                            "description": "Frühester Beginn. Vorgabe 7."},
+                "bis_uhr": {"type": "integer", "minimum": 1, "maximum": 24,
+                            "description": "Spätestes Ende. Vorgabe 18."},
+                "kalender": {"type": "string",
+                             "description": "Optional ein anderer Kalender."},
+            },
+        },
+    )
+    async def freie_zeit(args):
+        dienst = await _hole("calendar", "v3")
+        if dienst is None:
+            return _fehlt()
+        kennung, welcher, fehler = await _kalender_id(dienst,
+                                                      args.get("kalender"))
+        if fehler:
+            return fehler
+
+        mindestens = int(args.get("dauer_minuten") or 60)
+        von_uhr = int(args.get("von_uhr") if args.get("von_uhr") is not None
+                      else 7)
+        bis_uhr = int(args.get("bis_uhr") or 18)
+        if bis_uhr <= von_uhr:
+            return {"content": [{"type": "text", "text":
+                    "Das Zeitfenster ergibt keinen Sinn — das Ende liegt vor "
+                    "dem Anfang."}], "is_error": True}
+
+        jetzt = datetime.now().astimezone()
+        if args.get("ab_tag"):
+            try:
+                start_tag = datetime.fromisoformat(
+                    str(args["ab_tag"])).astimezone().date()
+            except ValueError:
+                return {"content": [{"type": "text", "text":
+                        "Mit dem Tag kann ich nichts anfangen. JJJJ-MM-TT."}],
+                        "is_error": True}
+        else:
+            start_tag = jetzt.date()
+        tage = int(args.get("tage") or 7)
+
+        von = datetime.combine(start_tag, dtime(0, 0)).astimezone()
+        bis = von + timedelta(days=tage)
+        antwort = await asyncio.to_thread(
+            lambda: dienst.events().list(
+                calendarId=kennung, timeMin=von.isoformat(),
+                timeMax=bis.isoformat(), singleEvents=True,
+                orderBy="startTime", maxResults=250,
+            ).execute()
+        )
+
+        belegt = []
+        for e in antwort.get("items", []):
+            # Abgesagte zaehlen nicht als belegt -- sonst gilt eine Zeit
+            # als voll, die tatsaechlich frei ist.
+            if e.get("status") == "cancelled":
+                continue
+            if e.get("transparency") == "transparent":
+                continue          # "frei" markiert, blockiert nicht
+            a, b = e.get("start", {}), e.get("end", {})
+            if "date" in a:
+                # Ganztaegig: blockiert den ganzen Tag.
+                try:
+                    tag = date.fromisoformat(a["date"])
+                    belegt.append((
+                        datetime.combine(tag, dtime(0, 0)).astimezone(),
+                        datetime.combine(tag, dtime(23, 59)).astimezone()))
+                except ValueError:
+                    pass
+                continue
+            try:
+                belegt.append((
+                    datetime.fromisoformat(a["dateTime"]).astimezone(),
+                    datetime.fromisoformat(b["dateTime"]).astimezone()))
+            except (KeyError, TypeError, ValueError):
+                continue
+        belegt.sort()
+
+        luecken = []
+        for n in range(tage):
+            tag = start_tag + timedelta(days=n)
+            beginn = datetime.combine(tag, dtime(von_uhr, 0)).astimezone()
+            ende = datetime.combine(tag, dtime(0, 0)).astimezone() \
+                + timedelta(hours=bis_uhr)
+            # Heute zaehlt erst ab jetzt -- eine Luecke von acht Uhr
+            # anzubieten, wenn es zehn ist, waere Unsinn.
+            beginn = max(beginn, jetzt)
+            zeiger = beginn
+            for a, b in belegt:
+                if b <= zeiger or a >= ende:
+                    continue
+                if a > zeiger and (a - zeiger).total_seconds() / 60 >= mindestens:
+                    luecken.append((zeiger, min(a, ende)))
+                zeiger = max(zeiger, b)
+            if zeiger < ende and (ende - zeiger).total_seconds() / 60 >= mindestens:
+                luecken.append((zeiger, ende))
+
+        blinken("Kalender")
+        if not luecken:
+            return {"content": [{"type": "text", "text":
+                    f"In den nächsten {tage} Tagen finde ich zwischen "
+                    f"{von_uhr} und {bis_uhr} Uhr keine Lücke von "
+                    f"{mindestens} Minuten{_im_kalender(welcher)}."}]}
+        _TAGE = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+                 "Samstag", "Sonntag")
+        zeilen = []
+        for a, b in luecken[:12]:
+            minuten = int((b - a).total_seconds() // 60)
+            lang = (f"{minuten // 60} Std." if minuten >= 120
+                    else f"{minuten} Min.")
+            zeilen.append(f"{_TAGE[a.weekday()]} {a:%d.%m.}: "
+                          f"{a:%H:%M} bis {b:%H:%M} ({lang})")
+        mehr = (f"\n… und {len(luecken) - 12} weitere"
+                if len(luecken) > 12 else "")
+        return {"content": [{"type": "text", "text":
+                "\n".join(zeilen) + mehr}]}
 
     @tool(
         "kalender_liste",
@@ -2104,7 +2347,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"Tabelle {args['name']} ist angelegt."}]}
 
-    return [termine_ansehen, termin_anlegen, termin_absagen, kalender_liste,
+    return [termine_ansehen, termin_anlegen, termin_absagen, termin_verschieben, freie_zeit, kalender_liste,
             mails_ansehen, mail_lesen, mail_anhang_holen, mail_senden,
             mail_verschieben, labels_ansehen, mail_einsortieren,
             aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken,
