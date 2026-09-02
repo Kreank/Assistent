@@ -71,6 +71,10 @@ ANMELDE_FRIST = 10.0
 NACHRICHT_MAX = 4 * 1024 * 1024
 
 
+# Wie oft hoechstens ueber DIESELBE unbekannte Art gemeckert wird.
+UNBEKANNT_PAUSE = 60.0
+
+
 class Endpunkt:
     """Haelt die Verbindungen und reicht zwischen Netz und Sarvis durch.
 
@@ -93,6 +97,8 @@ class Endpunkt:
         self.sprache_an = sprache_an
         self.strom_an = strom_an
         self.auto_an = auto_an
+        # Wann zuletzt ueber welche unbekannte Art gemeckert wurde.
+        self._gemeckert: dict[str, float] = {}
         self.weg_an = weg_an
         self.traeger: NetzTraeger | None = None
         # Wer Sarvis' Browser gerade zusieht und darin klickt. Der
@@ -256,8 +262,19 @@ class Endpunkt:
             # erkennt Dauerlaerm ohnehin selbst an seinem Ton -- dieses
             # Wort macht ihn nur sicherer, weil es Auto von "lautes
             # Zimmer" unterscheidet.
-            if self.auto_an is not None:
-                await self.auto_an(bool(m.get("an")), o.name)
+            #
+            # Auf das Feld wird ausdruecklich geprueft statt m.get("an")
+            # zu nehmen. Ein fehlendes Feld ergaebe sonst stillschweigend
+            # False -- also "nicht im Auto", und zwar genau dann, wenn
+            # jemand es "im_auto" oder "modus" genannt hat. Die Funktion
+            # bliebe aus, im Protokoll stuende nichts, und gefunden waere
+            # es erst nach der dritten erfolglosen Fahrt.
+            if "an" not in m:
+                log.warning('auto von %s ohne Feld "an" (bekam: %s) -- '
+                            "ignoriert. Tippfehler im Feldnamen?",
+                            o.name, sorted(k for k in m if k != "art"))
+            elif self.auto_an is not None:
+                await self.auto_an(bool(m["an"]), o.name)
 
         # --- Die Fernsicht ------------------------------------------------
         # Alles ab hier erreicht nur, wer angemeldet ist: _anmelden()
@@ -282,6 +299,27 @@ class Endpunkt:
 
         elif art == "rollen":
             await self.fernsicht.rollen(o, m)
+
+        else:
+            # Unbekannte Arten werden ignoriert -- das steht so im
+            # Protokoll und ist richtig: Eine neuere App darf einem
+            # aelteren Server etwas schicken, das er noch nicht kennt,
+            # ohne dass die Verbindung bricht.
+            #
+            # Ignorieren heisst aber nicht verschweigen. Wer sich beim
+            # Namen vertippt -- "auto_modus" statt "auto", "im_auto"
+            # statt "an" --, bekommt sonst NICHTS zu sehen: Die Funktion
+            # bleibt einfach aus, alles wirkt normal, und gefunden wird
+            # es erst nach der dritten erfolglosen Fahrt.
+            #
+            # Gedrosselt, weil ein Client, der eine unbekannte Art in
+            # Schleife schickt, sonst das Protokoll flutet.
+            jetzt = time.monotonic()
+            if jetzt - self._gemeckert.get(art, -UNBEKANNT_PAUSE * 2) \
+                    >= UNBEKANNT_PAUSE:
+                self._gemeckert[art] = jetzt
+                log.warning("Unbekannte Art %r von %s -- ignoriert. "
+                            "Tippfehler im Namen?", art, o.name)
 
     # --- Aufbau ----------------------------------------------------------
 
