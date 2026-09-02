@@ -23,6 +23,7 @@ Sitzungen von Claude Code am Projekt Sarvis. Die tragen die Marke "cli",
 Sarvis' eigene "sdk-py" -- geprueft an acht Dateien.
 """
 import json
+import time
 import re
 from datetime import datetime
 
@@ -39,8 +40,24 @@ TREFFER = 6
 # Wie lang ein einzelner Treffer sein darf.
 LAENGE = 220
 
-# Wie viele Sitzungsdateien hoechstens durchsucht werden, neueste zuerst.
-SITZUNGEN = 12
+# Wie weit zurueck gesucht wird -- in TAGEN, nicht in Dateien.
+#
+# Hier stand eine Dateizahl (12), und das war der falsche Massstab: Wie
+# viele Dateien ein Zeitraum ergibt, haengt nicht am Zeitraum, sondern
+# daran, wie oft Sarvis neu gestartet wurde. Gemessen am 2. September:
+# 50 Sitzungsdateien aus vier Tagen, allein 30 davon vom 30. August. Mit
+# einem Deckel von 12 endete sein Rueckblick nach knapp zwei Tagen --
+# und zwar unsichtbar, ohne dass irgendwo "aelter finde ich nichts"
+# gestanden haette. Wer neu startet, verkuerzt sein eigenes Gedaechtnis.
+#
+# Nach Tagen zu rechnen ist das, was ein Mensch meint, wenn er "letzte
+# Woche" sagt.
+SITZUNGEN_TAGE = 45
+
+# Trotzdem eine Obergrenze, aber eine grosszuegige: Sie soll nur
+# verhindern, dass die Suche bei jahrelangem Betrieb minutenlang laeuft.
+# 6,9 MB aus vier Tagen sind in Bruchteilen einer Sekunde durchsucht.
+SITZUNGEN_HOECHSTENS = 400
 
 
 def _sitzungen() -> list:
@@ -56,8 +73,14 @@ def _sitzungen() -> list:
         return []
     dateien = sorted(ordner.glob("*.jsonl"),
                      key=lambda d: d.stat().st_mtime, reverse=True)
+    grenze = time.time() - SITZUNGEN_TAGE * 86400
     eigene = []
     for datei in dateien:
+        try:
+            if datei.stat().st_mtime < grenze:
+                break          # ab hier ist alles aelter, sortiert
+        except OSError:
+            continue
         try:
             with datei.open(encoding="utf-8") as f:
                 for zeile in f:
@@ -72,7 +95,7 @@ def _sitzungen() -> list:
                     break
         except OSError:
             continue
-        if len(eigene) >= SITZUNGEN:
+        if len(eigene) >= SITZUNGEN_HOECHSTENS:
             break
     return eigene
 
