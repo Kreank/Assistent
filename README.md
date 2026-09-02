@@ -837,7 +837,7 @@ ohne ihn zu fragen.
 
 Zwei Schichten, weil sie unterschiedlich teuer sind:
 
-| | `kern.md` | `personen/`, `notizen/` |
+| | `kern.md`, `entschieden.md` | `personen/`, `notizen/` |
 |---|---|---|
 | geladen | **immer**, bei jedem Zuruf | nur wenn er nachschlägt |
 | kostet | Kontext bei *jeder* Frage | einen Werkzeugaufruf |
@@ -853,6 +853,56 @@ unschärfer.
 landet in `gemerkt.md`; was ihm von selbst auffällt, in `beobachtet.md` —
 ausdrücklich als Vermutung, zum Durchsehen und Korrigieren. Gelöscht wird
 nur auf Rückfrage.
+
+### Entscheidungen sind kein Wissen über dich
+
+Eine dritte Ablage, `entschieden.md`, und sie folgt anderen Regeln als
+die beiden oberen. Anlass war ein Fehler, der sich über Tage zog: Sascha
+sagte mehrfach, ein Auftrag solle verworfen werden. Sarvis bot ihn an
+einem einzigen Vormittag über vierzig Mal erneut an.
+
+Der Grund war nicht Vergesslichkeit. Es gab schlicht keinen Ort für eine
+Entscheidung. Das Gedächtnis kannte nur Fakten *über* dich — „gesagt"
+(du hast es ausgesprochen) und „bemerkt" (Sarvis hat es geschlossen).
+„Verwirf das" ist weder das eine noch das andere.
+
+Drei Dinge sind hier anders:
+
+**Er hält sie ohne Aufforderung fest.** Bei Vermutungen über dich ist
+Zurückhaltung richtig — falsch Geschlossenes ist schlimmer als
+Nichtwissen. Bei deinen eigenen Ansagen ist sie falsch: Da gibt es
+nichts zu erraten, und sie zu verlieren kostet dich, dass du dieselbe
+Entscheidung zweimal treffen musst.
+
+**Sie geht bei jedem Zuruf mit, über den Vorspann statt den
+Systemprompt.** Der wäre billiger, weil zwischengespeichert — aber er
+wird nur beim Start gebaut. Was du mitten im Betrieb entscheidest,
+stünde erst nach dem nächsten Neustart drin, also genau dann nicht, wenn
+es zählt. Dazu kommt: Gemessen ist, dass die Treue zu einer Vorgabe nach
+rund zehn Zügen unter zehn Prozent fällt, obwohl der Satz die ganze Zeit
+im Kontext steht. Weit oben heißt nicht präsent. Im Vorspann steht der
+Widerspruch direkt neben der Zeile, die ihn überfahren würde.
+
+**Widersprüche löst ein Zeichenvergleich, keine Einschätzung.** Jeder
+Eintrag trägt ein `[thema: …]`; eine neue Entscheidung mit demselben
+Thema löst die alte ab, die dann in den Notizen nachlesbar bleibt.
+Vorher verglich der Code die ersten vierzig Zeichen des Wortlauts —
+„Projekt X wird verworfen" und „Projekt X ist in Arbeit" haben davon
+keine zwanzig gemeinsam und standen beide im Kontext, als gälte beides.
+
+### Und wenn er es doch vergisst
+
+Der Systemprompt *verlangt* das Festhalten — aber das ist eine Bitte an
+ein Modell, das gerade mit einer Antwort beschäftigt ist. Deshalb ein
+Netz darunter, im Vorspann, den ein Programm befüllt und nicht ein
+Modell: Fiel in einem Zuruf ein Entscheidungswort und wurde nichts
+festgehalten, steht beim nächsten Zuruf eine Zeile da, die zum
+Nachtragen auffordert.
+
+Kein zweiter Modellaufruf, obwohl das naheliegend wäre. Gemessen an 294
+echten Zurufen aus den Mitschnitten fällt in **zwei** davon eine
+Entscheidung — ein Aufruf nach jedem Zug liefe zu 99 Prozent für nichts.
+Der Wortfilter kostet dagegen gar nichts.
 
 Die Vorlage besteht größtenteils aus Ausfüllhinweisen. Die werden vor dem
 Laden herausgefiltert, sonst würde Sarvis früher oder später über

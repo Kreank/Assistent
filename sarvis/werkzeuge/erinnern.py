@@ -536,7 +536,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             "properties": {
                 "art": {
                     "type": "string",
-                    "enum": ["gesagt", "bemerkt", "alles"],
+                    "enum": ["entschieden", "gesagt", "bemerkt", "alles"],
                     "description": "Welcher Teil. Vorgabe: alles.",
                 }
             },
@@ -545,7 +545,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     async def gedaechtnis_zeigen(args):
         art = args.get("art") or "alles"
         teile = []
-        for a, ueberschrift in (("gesagt", "Von dir gesagt"),
+        for a, ueberschrift in (("entschieden", "Von dir entschieden"),
+                                ("gesagt", "Von dir gesagt"),
                                 ("bemerkt", "Von mir bemerkt (Vermutungen)")):
             if art in (a, "alles"):
                 zeilen = lesen(a)
@@ -579,7 +580,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return {"content": [{"type": "text", "text":
                     "Ohne Stichwort lösche ich nichts."}], "is_error": True}
         geloescht = []
-        for art in ("gesagt", "bemerkt"):
+        for art in ("entschieden", "gesagt", "bemerkt"):
             pfad = _datei(art)
             zeilen = _zeilen(pfad)
             bleiben = [z for z in zeilen if wort not in z.lower()]
