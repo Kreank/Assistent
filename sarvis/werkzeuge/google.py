@@ -765,6 +765,20 @@ def zustand() -> str:
 
 # --- Werkzeuge ------------------------------------------------------------
 
+# Wie die Liste heisst, auf die ein Merkzettel ohne Angabe geht.
+# Bewusst nicht "Einkaufsliste": Auf den Zettel kommt auch, was
+# mitzunehmen ist oder wen man anrufen muss -- nicht nur
+# Gekauftes.
+MERKZETTEL = "Merkzettel"
+
+# Was beim Sprechen dazwischenrutscht und nicht auf den Zettel gehoert.
+# Gemessen: "Dichtungen, ähm, Dichtungen und Teflonband" ergab drei
+# Eintraege, einer davon "ähm". Nur ALLEINSTEHEND gefiltert -- "also
+# Winkel" bleibt, weil da ein Ding dransteht.
+_FUELLLAUTE = {"ähm", "ähh", "äh", "ehm", "hm", "hmm", "also", "und",
+               "dann", "noch", "ja", "genau", "warte", "moment"}
+
+
 def werkzeuge(protokoll=None, leuchten=None) -> list:
     def vermerken(text: str):
         if protokoll is not None:
@@ -1905,6 +1919,99 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"Aufgabe angelegt{wohin}: {args['titel']}{frist}."}]}
 
     @tool(
+        "merkzettel",
+        "Setzt mehrere Sachen auf einmal auf eine Liste — den Merkzettel "
+        "für den Großhandel, den Einkauf, was mitzunehmen ist. Für "
+        "'schreib Dichtungen, Teflonband und zwei Eckventile auf die "
+        "Liste'. Ohne Angabe landet alles auf 'Merkzettel'; eine andere "
+        "Liste kann genannt werden.",
+        {
+            "type": "object",
+            "properties": {
+                "sachen": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1, "maxItems": 30,
+                    "description": "Die einzelnen Dinge, jedes für sich. "
+                                   "Aus 'Dichtungen, Teflonband und zwei "
+                                   "Eckventile' werden drei Einträge.",
+                },
+                "liste": {"type": "string",
+                          "description": "Optional ein anderer Listenname."},
+            },
+            "required": ["sachen"],
+        },
+    )
+    async def merkzettel(args):
+        dienst = await _hole("tasks", "v1")
+        if dienst is None:
+            return _fehlt()
+        roh = args.get("sachen") or []
+        sachen = []
+        for e in roh:
+            e = " ".join(str(e or "").split())
+            # Doppeltes weglassen: Gesprochen kommt "Dichtungen, ähm,
+            # Dichtungen und Teflonband" durchaus vor, und zwei gleiche
+            # Zeilen auf einem Zettel helfen niemandem.
+            if not e or e.casefold() in _FUELLLAUTE:
+                continue
+            if e.casefold() not in {x.casefold() for x in sachen}:
+                sachen.append(e)
+        if not sachen:
+            return {"content": [{"type": "text", "text":
+                    "Da war nichts, was ich aufschreiben könnte."}],
+                    "is_error": True}
+
+        listen = await _listen(dienst)
+        if not listen:
+            return {"content": [{"type": "text", "text":
+                    "Es gibt keine Aufgabenliste."}], "is_error": True}
+        gewuenscht = str(args.get("liste") or "").strip() or MERKZETTEL
+        ziel, _fehler = _liste_waehlen(listen, gewuenscht)
+        if ziel is None:
+            # Die Liste gibt es noch nicht -- dann wird sie angelegt,
+            # statt auf "Meine Aufgaben" auszuweichen. Ein Merkzettel,
+            # der sich unter die Aufgaben mischt, ist keiner mehr: Im
+            # Baumarkt will man eine Liste durchgehen, nicht zwischen
+            # Terminen suchen.
+            try:
+                ziel = await asyncio.to_thread(
+                    lambda: dienst.tasklists().insert(
+                        body={"title": gewuenscht}).execute())
+                print(f"  (Aufgabenliste {gewuenscht!r} angelegt)")
+            except Exception as e:
+                return {"content": [{"type": "text", "text":
+                        f"Die Liste {gewuenscht!r} gibt es nicht und ich "
+                        f"konnte sie nicht anlegen: {e}"}], "is_error": True}
+
+        # Rueckwaerts einfuegen: Google Tasks stellt jeden neuen Eintrag
+        # nach oben. Ohne das steht die Liste hinterher verkehrt herum,
+        # und wer sie vorliest, faengt beim letzten Wort an.
+        angelegt = []
+        for e in reversed(sachen):
+            try:
+                await asyncio.to_thread(
+                    lambda t=e: dienst.tasks().insert(
+                        tasklist=ziel["id"], body={"title": t}).execute())
+                angelegt.append(e)
+            except Exception as ex:
+                return {"content": [{"type": "text", "text":
+                        f"{len(angelegt)} von {len(sachen)} sind drauf, "
+                        f"dann ging es nicht weiter: {ex}"}],
+                        "is_error": True}
+
+        blinken("Aufgaben")
+        vermerken(f"merkzettel: {len(angelegt)} Sachen auf "
+                  f"{ziel.get('title')}: {', '.join(sachen)}")
+        wohin = ziel.get("title", gewuenscht)
+        if len(sachen) == 1:
+            return {"content": [{"type": "text", "text":
+                    f"{sachen[0]} steht auf dem {wohin}."}]}
+        return {"content": [{"type": "text", "text":
+                f"{len(sachen)} Sachen stehen auf dem {wohin}: "
+                + ", ".join(sachen) + "."}]}
+
+    @tool(
         "aufgabe_abhaken",
         "Hakt eine Aufgabe ab.",
         {
@@ -2350,7 +2457,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     return [termine_ansehen, termin_anlegen, termin_absagen, termin_verschieben, freie_zeit, kalender_liste,
             mails_ansehen, mail_lesen, mail_anhang_holen, mail_senden,
             mail_verschieben, labels_ansehen, mail_einsortieren,
-            aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken,
+            aufgaben_ansehen, aufgabe_anlegen, aufgabe_abhaken, merkzettel,
             kontakt_suchen, kontakt_anlegen,
             drive_suchen, drive_lesen, drive_teilen,
             tabelle_lesen, tabelle_anhaengen, tabelle_schreiben,

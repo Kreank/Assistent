@@ -304,6 +304,8 @@ SCHNELLE_WERKZEUGE = {
     "rechnen", "umrechnen",
     # Nur lesen bzw. eine Zeit aendern, die er selbst eingetragen hat.
     "freie_zeit",
+    # Eine Zeile auf einen Zettel schreiben, den nur Sascha sieht.
+    "merkzettel",
     # Ein Tastendruck bzw. ein Datagramm, das niemand beantwortet.
     "medien_steuern", "kachel_zeigen", "kachel_weg",
     "web_zeigen", "web_schliessen", "route_zeigen",
@@ -1044,6 +1046,7 @@ WERKZEUG_STUFEN = {
     "rechnen":                 "still",
     "umrechnen":               "still",
     "freie_zeit":              "still",
+    "merkzettel":              "still",
 
     # Etwas neben der Engine einblenden. Still, und zwar deutlich: Eine
     # Kachel zeigt nur, was Sarvis ohnehin gerade sagt -- sie geht nicht
