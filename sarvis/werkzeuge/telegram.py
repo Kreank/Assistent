@@ -16,6 +16,7 @@ from pathlib import Path
 from claude_agent_sdk import tool
 
 from .. import config
+from . import eingang
 
 _klient = None
 _schloss = asyncio.Lock()
@@ -401,6 +402,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                    "telegram_lesen). Ohne Angabe wird eine "
                                    "gewöhnliche Nachricht geschickt.",
                 },
+                "anhang": {
+                    "type": "string",
+                    "description": "Eine Datei, die mitgeschickt wird. Der "
+                                   "Name reicht und muss nicht genau "
+                                   "stimmen — gesucht wird in dem, was du "
+                                   "erzeugt hast, und in dem, was Sascha "
+                                   "dir geschickt hat.",
+                },
             },
             "required": ["an", "text"],
         },
@@ -473,13 +482,34 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                         f"Nummer {bezug}. Nichts gesendet."}],
                         "is_error": True}
 
-        await k.send_message(ziel.entity, text, reply_to=bezug)
+        anhang = (args.get("anhang") or "").strip()
+        pfad = None
+        if anhang:
+            pfad, fehler = eingang.datei_finden(anhang)
+            if pfad is None:
+                # Nicht ohne Anhang senden. Eine Nachricht, die "hier ist
+                # das Angebot" sagt und nichts mitbringt, ist schlimmer
+                # als gar keine -- und niemand merkt es, weil das Senden
+                # ja "geklappt" hat.
+                return {"content": [{"type": "text", "text":
+                        f"{fehler} Ich habe NICHTS gesendet."}],
+                        "is_error": True}
+
+        if pfad is None:
+            await k.send_message(ziel.entity, text, reply_to=bezug)
+        else:
+            # force_document: Sonst macht Telegram aus einem PDF-Plan
+            # eine Bildvorschau und aus einer .md-Datei einen Textblock.
+            # Wer eine Datei schickt, will eine Datei.
+            await k.send_file(ziel.entity, str(pfad), caption=text,
+                              reply_to=bezug, force_document=True)
         blinken()
         worauf = f" als Antwort auf #{bezug}" if bezug else ""
-        vermerken(f"telegram_senden: Nachricht an {ziel.name}{worauf} ist "
-                  f"raus — „{text[:60]}“")
+        dazu = f" mit {pfad.name}" if pfad else ""
+        vermerken(f"telegram_senden: Nachricht an {ziel.name}{worauf}{dazu} "
+                  f"ist raus — „{text[:60]}“")
         return {"content": [{"type": "text", "text":
-                f"Gesendet an {ziel.name}"
+                f"Gesendet an {ziel.name}{dazu}"
                 + (" — als Antwort auf die genannte Nachricht." if bezug
                    else ".")}]}
 

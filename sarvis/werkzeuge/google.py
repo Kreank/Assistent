@@ -12,6 +12,7 @@ alles, was hinausgeht oder etwas veraendert, fragt vorher.
 """
 import asyncio
 import base64
+import mimetypes
 import re
 from datetime import datetime, timedelta
 from email.message import EmailMessage
@@ -19,6 +20,7 @@ from email.message import EmailMessage
 from claude_agent_sdk import tool
 
 from .. import config
+from . import eingang
 
 BEREICHE = [
     "https://www.googleapis.com/auth/calendar",
@@ -1231,8 +1233,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
 
     @tool(
         "mail_senden",
-        "Verschickt eine Mail. Der Text muss fertig formuliert sein — er "
-        "geht genau so hinaus.",
+        "Verschickt eine Mail, auf Wunsch mit Anhang. Der Text muss fertig "
+        "formuliert sein — er geht genau so hinaus. Für 'schick das "
+        "Angebot an Julian': erst dokument_erstellen, dann den Dateinamen "
+        "als anhang mitgeben.",
         {
             "type": "object",
             "properties": {
@@ -1241,6 +1245,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                                       "vorher kontakt_suchen benutzen."},
                 "betreff": {"type": "string"},
                 "text": {"type": "string"},
+                "anhang": {
+                    "type": "string",
+                    "description": "Eine Datei, die mitgeschickt wird. Der "
+                                   "Name reicht und muss nicht genau "
+                                   "stimmen — gesucht wird in dem, was du "
+                                   "erzeugt hast, und in dem, was Sascha "
+                                   "dir geschickt hat.",
+                },
             },
             "required": ["an", "betreff", "text"],
         },
@@ -1258,6 +1270,26 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         nachricht["To"] = an
         nachricht["Subject"] = args.get("betreff") or "(ohne Betreff)"
         nachricht.set_content(args.get("text") or "")
+
+        anhang = (args.get("anhang") or "").strip()
+        pfad = None
+        if anhang:
+            pfad, fehler = eingang.datei_finden(anhang)
+            if pfad is None:
+                # Abbrechen statt ohne Anhang senden. Eine Mail, die
+                # "im Anhang finden Sie" sagt und nichts anhaengt, ist
+                # schlimmer als gar keine -- und niemand merkt es, weil
+                # das Senden ja "geklappt" hat.
+                return {"content": [{"type": "text", "text":
+                        f"{fehler} Ich habe NICHTS gesendet."}],
+                        "is_error": True}
+            art, _ = mimetypes.guess_type(pfad.name)
+            haupt, _, unter = (art or "application/octet-stream").partition("/")
+            nachricht.add_attachment(
+                await asyncio.to_thread(pfad.read_bytes),
+                maintype=haupt, subtype=unter or "octet-stream",
+                filename=pfad.name)
+
         roh = base64.urlsafe_b64encode(nachricht.as_bytes()).decode()
 
         await asyncio.to_thread(
@@ -1265,9 +1297,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 userId="me", body={"raw": roh}).execute()
         )
         blinken("E-Mail")
+        dazu = f" mit {pfad.name}" if pfad else ""
         vermerken(f"mail_senden: Mail an {an} ist raus, Betreff "
-                  f"{args.get('betreff')!r}.")
-        return {"content": [{"type": "text", "text": f"Gesendet an {an}."}]}
+                  f"{args.get('betreff')!r}{dazu}.")
+        return {"content": [{"type": "text", "text":
+                f"Gesendet an {an}{dazu}."}]}
 
     @tool(
         "mail_verschieben",

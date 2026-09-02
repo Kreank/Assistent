@@ -288,6 +288,64 @@ def _suchen(gesucht: str, dateien: list) -> list:
     return [d for p, d in bewertet if p == beste]
 
 
+def datei_finden(bezeichnung: str) -> tuple:
+    """Welche Datei ist gemeint? Sucht im Eingang UND in der Ablage.
+
+    Rueckgabe: (Pfad, Fehlertext). Genau eines von beiden ist gesetzt.
+
+    Zwei Orte, weil es zwei Herkuenfte gibt und der Mensch sie nicht
+    auseinanderhaelt: Im Eingang liegt, was Sascha geschickt hat, in der
+    Ablage, was Sarvis selbst gebaut hat. "Schick das Angebot an Julian"
+    kann beides meinen -- das gerade erzeugte PDF oder das, was der
+    Kunde geschickt hat. Gesucht wird deshalb in beiden, neueste zuerst.
+
+    Ein absoluter Pfad wird ebenfalls angenommen, aber NUR wenn er in
+    einem der beiden Ordner liegt. Sonst waere das ein Weg, jede Datei
+    des Servers zu verschicken -- ein Gespraech koennte Sarvis dazu
+    bringen, /etc/shadow anzuhaengen.
+    """
+    bezeichnung = " ".join(str(bezeichnung or "").split())
+    if not bezeichnung:
+        return None, "Ich brauche einen Dateinamen."
+
+    orte = [_ordner()]
+    try:
+        config.ABLAGE.mkdir(parents=True, exist_ok=True)
+        orte.append(config.ABLAGE)
+    except OSError:
+        pass
+
+    # Ein Pfad? Dann muss er in einem der erlaubten Ordner liegen.
+    if "/" in bezeichnung or "\\" in bezeichnung:
+        try:
+            kandidat = Path(bezeichnung).expanduser().resolve()
+        except (OSError, RuntimeError):
+            return None, "Diesen Pfad verstehe ich nicht."
+        if not kandidat.is_file():
+            return None, f"{bezeichnung} gibt es nicht."
+        if not any(kandidat.is_relative_to(o.resolve()) for o in orte):
+            return None, ("Diese Datei liegt außerhalb von Eingang und "
+                          "Ablage — von dort verschicke ich nichts.")
+        return kandidat, ""
+
+    dateien = []
+    for o in orte:
+        try:
+            dateien += [d for d in o.glob("*") if d.is_file()]
+        except OSError:
+            continue
+    if not dateien:
+        return None, "Es liegt keine Datei bereit."
+    dateien.sort(key=lambda d: d.stat().st_mtime)
+
+    passend = _suchen(bezeichnung.lower(), dateien)
+    if not passend:
+        namen = ", ".join(d.name for d in dateien[-8:])
+        return None, (f"Zu '{bezeichnung}' finde ich keine Datei. "
+                      f"Bereit liegt: {namen}")
+    return passend[-1], ""
+
+
 def _beschreiben(pfad: Path) -> str:
     groesse = pfad.stat().st_size
     wann = datetime.fromtimestamp(pfad.stat().st_mtime)
