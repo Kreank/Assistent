@@ -205,6 +205,12 @@ class Sarvis:
         # wurden. Alles Neuere kommt in den Vorspann -- Sascha soll eine
         # Datei schicken und weiterreden koennen, ohne sie anzusagen.
         self._eingang_gesehen = time.time()
+        # Bis wann er still sein soll, und was er zuletzt gesagt hat --
+        # fuer "sei mal still" und "nochmal". Beides gehoert hierher und
+        # nicht ins Gedaechtnis: Es gilt fuer diese Stunde, nicht fuer
+        # diese Woche.
+        self._ruhe_bis = 0.0
+        self._zuletzt_gesagt = ""
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         # Was Sarvis von sich aus sagen will: Timer, fertige Auftraege.
         # Eine Schlange und EIN Sprecher -- siehe von_selbst_sagen().
@@ -672,8 +678,15 @@ class Sarvis:
 
     async def _sagen(self, text: str) -> None:
         print(f"  Sarvis : {text}")
-        self.anzeige.zustand(SPRICHT)
+        self._zuletzt_gesagt = text
         self.anzeige.untertitel("sarvis", text)
+        # Waehrend der Ruhe wird geschrieben, nicht gesprochen. Nicht
+        # verschluckt: Wer den Bildschirm ansieht, soll die Antwort
+        # trotzdem bekommen -- still heisst leise, nicht stumm.
+        if self._ruhe_bis and time.monotonic() < self._ruhe_bis:
+            return
+        self._ruhe_bis = 0.0
+        self.anzeige.zustand(SPRICHT)
         await asyncio.to_thread(self._sagen_und_warten, text)
         self.anzeige.zustand(RUHIG)
 
@@ -837,6 +850,33 @@ class Sarvis:
 
         if rueckfrage.ist_stopp(gesagt):
             await self._alles_stoppen()
+            return
+
+        # Drei Zurufe, die NICHT ans Hirn gehoeren -- aus demselben Grund
+        # wie "hör auf": Wer "nochmal" sagt, will die letzte Antwort
+        # hoeren und keine Antwort AUF das Wort "nochmal". Und wer um
+        # Ruhe bittet, will Ruhe, nicht die gesprochene Zusage, ab jetzt
+        # still zu sein.
+        if rueckfrage.ist_wieder_da(gesagt) and self._ruhe_bis:
+            self._ruhe_bis = 0.0
+            await self._sagen("Bin wieder da.")
+            return
+
+        minuten = rueckfrage.ist_ruhe(gesagt)
+        if minuten:
+            self._ruhe_bis = time.monotonic() + minuten * 60
+            # Diese eine Ansage kommt noch, sonst weiss niemand, ob es
+            # angekommen ist. Danach ist Ruhe.
+            lang = ("eine Stunde" if minuten == 60
+                    else f"{int(minuten)} Minuten")
+            await self._sagen(f"Bin {lang} still.")
+            return
+
+        if rueckfrage.ist_nochmal(gesagt):
+            if self._zuletzt_gesagt:
+                await self._sagen(self._zuletzt_gesagt)
+            else:
+                await self._sagen("Ich habe noch nichts gesagt.")
             return
 
         # Der Anstupser gilt fuer genau diesen einen Zuruf. Ob Sarvis

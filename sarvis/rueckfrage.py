@@ -509,6 +509,106 @@ _ANDERES = {"timer", "wecker", "uhr", "musik", "lied", "song", "titel",
             "wiedergabe", "programm", "programme", "fenster", "app"}
 
 
+# --- Zwei weitere Zurufe, die nicht ans Hirn gehoeren ---------------------
+#
+# Beide aus demselben Grund wie ist_stopp: Wer "nochmal" sagt, will die
+# letzte Antwort hoeren und keine Antwort AUF das Wort "nochmal". Und wer
+# "sei zehn Minuten still" sagt, will Ruhe -- nicht die gesprochene
+# Zusage, ab jetzt still zu sein.
+
+_NOCHMAL = {"nochmal", "nochmals", "wiederhol", "wiederhole", "wiederholen",
+            "wiederholung"}
+_NOCHMAL_PAARE = (("sag", "nochmal"), ("noch", "mal"), ("was", "sagtest"),
+                  ("nicht", "verstanden"), ("was", "war"))
+
+
+def ist_nochmal(text: str) -> bool:
+    """Heisst das: sag deine letzte Antwort noch einmal?
+
+    Eng gehalten. "Nochmal" kommt auch mitten in einem Auftrag vor
+    ("schick das nochmal an Julian"), und dort waere eine Wiederholung
+    falsch. Deshalb nur bei kurzen Zurufen und nur, wenn sonst nichts
+    Inhaltliches danebensteht.
+    """
+    worte = [w.strip('.,!?;:-–"\'„“»«') for w in (text or "").lower().split()]
+    menge = {w for w in worte if w}
+    if not menge or len(worte) > 4:
+        return False
+    if menge & _ANDERES:
+        return False
+    if menge & _NOCHMAL:
+        return True
+    return any(a in menge and b in menge for a, b in _NOCHMAL_PAARE)
+
+
+_RUHE_WORTE = {"ruhe", "still", "leise", "pause", "psst", "sch"}
+_RUHE_PAARE = (("sei", "still"), ("sei", "leise"), ("nicht", "reden"),
+               ("halt", "kurz"), ("mund", "halten"))
+_WIEDER_WORTE = {"weiter", "weitermachen", "weiterreden", "wieder"}
+
+# Woerter, an denen eine Frage erkennbar ist. Sie schliessen die
+# Ruhe-Bitte aus -- nicht das Wiederholen, denn "was war das" IST eine
+# Frage und genau der Fall, um den es dort geht.
+_FRAGEWOERTER = {"wie", "warum", "wieso", "weshalb", "wann", "wo", "wer",
+                 "welche", "welcher", "welches", "wieviel", "ob"}
+
+# Zahlwoerter, die gesprochen ankommen. Eine Ziffer schreibt Whisper
+# selten -- "zehn Minuten" ist der Normalfall, "10 Minuten" die Ausnahme.
+_ZAHLEN = {
+    "eine": 1, "einer": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5,
+    "fuenf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+    "elf": 11, "zwölf": 12, "zwoelf": 12, "fünfzehn": 15, "fuenfzehn": 15,
+    "zwanzig": 20, "dreißig": 30, "dreissig": 30, "vierzig": 40,
+    "fünfundvierzig": 45, "fuenfundvierzig": 45, "sechzig": 60,
+    "halbe": 30,
+}
+
+
+def ist_ruhe(text: str) -> float | None:
+    """Heisst das: sei eine Weile still? Rueckgabe: Minuten, sonst None.
+
+    Ohne genannte Dauer eine Viertelstunde -- lang genug fuer ein
+    Telefonat oder einen Kunden im Raum, kurz genug, dass ein
+    vergessenes "wieder da" nicht den halben Tag kostet.
+    """
+    roh = (text or "").lower()
+    worte = [w.strip('.,!?;:-–"\'„“»«') for w in roh.split()]
+    menge = {w for w in worte if w}
+    if not menge or len(worte) > 6:
+        return None
+    if menge & _ANDERES or menge & _WIEDER_WORTE:
+        return None
+    # Eine FRAGE ist keine Bitte. "Wie leise ist das?" enthaelt "leise"
+    # und meint das Gegenteil von Ruhe -- gemessen, das war ein echter
+    # Fehlalarm. Wer still haben will, fragt nicht danach.
+    if menge & _FRAGEWOERTER:
+        return None
+    treffer = bool(menge & _RUHE_WORTE) or any(
+        a in menge and b in menge for a, b in _RUHE_PAARE)
+    if not treffer:
+        return None
+    # "Stunde" vor "Minute" pruefen -- sonst wird aus einer Stunde eine
+    # Minute, weil beide Woerter im selben Satz stehen koennen.
+    einheit = 60.0 if ("stunde" in roh or "stunden" in roh) else 1.0
+    for w in worte:
+        if w.isdigit():
+            return min(int(w) * einheit, 480.0)
+        if w in _ZAHLEN:
+            return min(_ZAHLEN[w] * einheit, 480.0)
+    if einheit == 60.0:
+        return 60.0
+    return 15.0
+
+
+def ist_wieder_da(text: str) -> bool:
+    """Hebt die Ruhe auf: "wieder da", "du kannst wieder reden"."""
+    worte = [w.strip('.,!?;:-–"\'„“»«') for w in (text or "").lower().split()]
+    menge = {w for w in worte if w}
+    if not menge or len(worte) > 5:
+        return False
+    return bool(menge & _WIEDER_WORTE)
+
+
 def ist_stopp(text: str) -> bool:
     """Heisst dieser Zuruf: sofort aufhoeren?
 
