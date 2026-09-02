@@ -7,9 +7,11 @@ hier und traegt spaeter auch laengere Auftraege ("...und such mir
 waehrenddessen die Nachrichten raus").
 """
 import asyncio
+import calendar
+import re
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from claude_agent_sdk import tool
 
@@ -51,6 +53,20 @@ def _dauer_sagen(sekunden: int) -> str:
             text += f" und {_dauer_sagen(rest)}"
         return text
     stunden, minuten = divmod(minuten, 60)
+    # Ab zwei Tagen in TAGEN reden. "Noch 107 Stunden und 18 Minuten"
+    # ist woertlich richtig und trotzdem unbrauchbar -- niemand rechnet
+    # das im Kopf in "übernächsten Montag" um, und vorgelesen ist es
+    # eine Zumutung. Erst seit Erinnerungen ueber 24 Stunden hinaus
+    # moeglich sind, kommen solche Zahlen ueberhaupt vor.
+    if stunden >= 48:
+        tage, reststunden = divmod(stunden, 24)
+        n = zahlen.get(tage, str(tage))
+        text = f"{n} Tage"
+        # Die Stunden nur, wenn sie ins Gewicht fallen. "Sieben Tage und
+        # eine Stunde" hilft niemandem.
+        if reststunden >= 2:
+            text += f" und {_dauer_sagen(reststunden * 3600)}"
+        return text
     n = zahlen.get(stunden, str(stunden))
     text = f"{n} Stunde" + ("" if stunden == 1 else "n")
     if minuten:
@@ -68,16 +84,19 @@ class Wecker:
     laufende: dict = field(default_factory=dict)
     _naechste_nummer: int = 1
 
-    def stellen(self, sekunden: int, was: str) -> tuple[int, datetime]:
+    def stellen(self, sekunden: int, was: str,
+                wiederholt: str | None = None) -> tuple[int, datetime]:
         # Eine Dauer meint echte Zeit, keine Wanduhrzeit: astimezone()
         # haelt den Zeitversatz von jetzt fest, dann bleibt "in einer
         # Stunde" auch in der Umstellungsnacht eine Stunde. Bewusst keine
         # monotone Uhr -- die faengt bei jedem Neustart bei null an, und
         # der Timer soll den Neustart ueberleben.
         return self.stellen_bis(
-            datetime.now().astimezone() + timedelta(seconds=sekunden), was)
+            datetime.now().astimezone() + timedelta(seconds=sekunden), was,
+            wiederholt=wiederholt)
 
-    def stellen_bis(self, faellig: datetime, was: str) -> tuple[int, datetime]:
+    def stellen_bis(self, faellig: datetime, was: str,
+                    wiederholt: str | None = None) -> tuple[int, datetime]:
         """Auf einen festen Zeitpunkt stellen.
 
         Fuer genannte Uhrzeiten der genauere Weg: Der Umweg ueber eine
@@ -88,9 +107,37 @@ class Wecker:
         self._naechste_nummer += 1
 
         aufgabe = asyncio.get_running_loop().create_task(self._warten(nummer))
-        self.laufende[nummer] = {"was": was, "faellig": faellig, "aufgabe": aufgabe}
+        self.laufende[nummer] = {"was": was, "faellig": faellig,
+                                 "aufgabe": aufgabe, "wiederholt": wiederholt}
         self._sichern()
         return nummer, faellig
+
+    @staticmethod
+    def _naechster_termin(faellig: datetime, wiederholt: str) -> datetime:
+        """Wann klingelt ein wiederkehrender Timer das naechste Mal?
+
+        Gerechnet wird auf der WANDUHR, nicht in Sekunden: "jeden Morgen
+        um sieben" bleibt sieben Uhr, auch in der Nacht der Zeitumstellung.
+        86400 Sekunden dazuzuzaehlen ergaebe dort sechs oder acht.
+
+        Monatlich am 31. gibt es nicht in jedem Monat. Statt den Termin
+        auf den 1. des uebernaechsten rutschen zu lassen -- was ihn
+        stillschweigend verschoebe -- wird auf den letzten Tag des
+        Zielmonats gelegt. Wer "jeden Monat zum Abschluss" sagt, meint
+        das Monatsende, nicht den Ersten.
+        """
+        if wiederholt == "taeglich":
+            return faellig + timedelta(days=1)
+        if wiederholt == "woechentlich":
+            return faellig + timedelta(days=7)
+        if wiederholt == "monatlich":
+            jahr, monat = faellig.year, faellig.month + 1
+            if monat > 12:
+                jahr, monat = jahr + 1, 1
+            letzter = calendar.monthrange(jahr, monat)[1]
+            return faellig.replace(year=jahr, month=monat,
+                                   day=min(faellig.day, letzter))
+        return faellig + timedelta(days=1)
 
     async def _warten(self, nummer: int) -> None:
         """Wartet gegen die Wanduhr, nicht gegen eine Dauer.
@@ -114,10 +161,23 @@ class Wecker:
             return
 
         eintrag = self.laufende.pop(nummer, None)
-        self._sichern()
         if eintrag is None:
+            self._sichern()
             return
         was = eintrag["was"]
+
+        # Wiederkehrend? Dann sofort den naechsten stellen, noch bevor
+        # gesprochen wird. Erst zu reden und dann neu zu stellen hiesse:
+        # Wer den Prozess in diesen Sekunden neu startet, hat den
+        # wiederkehrenden Timer verloren -- und merkt es erst, wenn er
+        # das naechste Mal nicht klingelt.
+        wiederholt = eintrag.get("wiederholt")
+        if wiederholt:
+            self.stellen_bis(
+                self._naechster_termin(eintrag["faellig"], wiederholt),
+                was, wiederholt=wiederholt)
+        else:
+            self._sichern()
         # Erst die Benachrichtigung, dann die Stimme: Die Benachrichtigung
         # bleibt stehen, falls gerade niemand am Rechner sitzt.
         if self.melden is not None:
@@ -159,7 +219,12 @@ class Wecker:
                 config.TIMER_DATEI,
                 json.dumps(
                     [{"nummer": n, "was": e["was"],
-                      "faellig": e["faellig"].isoformat()}
+                      "faellig": e["faellig"].isoformat(),
+                      # Ohne dieses Feld ueberlebt ein wiederkehrender
+                      # Timer den ersten Neustart als EINMALIGER -- er
+                      # klingelt noch einmal und ist dann still. Das
+                      # faellt erst in der Woche darauf auf.
+                      "wiederholt": e.get("wiederholt")}
                      for n, e in self.laufende.items()],
                     ensure_ascii=False, indent=1,
                 ),
@@ -223,12 +288,23 @@ class Wecker:
                     verworfen += 1
                     print(f"  (Timer{' für ' + was if was else ''} war vor "
                           f"{stunden:.0f} Stunden fällig -- nicht mehr angesagt)")
+                # Ein WIEDERKEHRENDER Timer darf nicht mit seinem
+                # verpassten Termin sterben. "Jeden Montag" heisst jeden
+                # Montag, auch wenn Sarvis an einem davon aus war --
+                # sonst raeumt ein Wochenende ohne Server die Erinnerung
+                # stillschweigend ab.
+                wdh = e.get("wiederholt")
+                if wdh:
+                    naechster = faellig
+                    while naechster <= jetzt:
+                        naechster = self._naechster_termin(naechster, wdh)
+                    self.stellen_bis(naechster, was, wiederholt=wdh)
                 continue
             # Direkt auf den gespeicherten Zeitpunkt, nicht ueber eine
             # Dauer: Der Umweg schneidet Nachkommastellen ab und legt
             # einen Wecker auf 06:00:00 bis zu eine Sekunde daneben --
             # genau deshalb gibt es stellen_bis.
-            self.stellen_bis(faellig, was)
+            self.stellen_bis(faellig, was, wiederholt=e.get("wiederholt"))
 
         # Auch das stille Wegraeumen muss auf die Platte: Ohne das taucht
         # ein zu alter Timer bei jedem Start erneut auf und wird jedes Mal
@@ -259,12 +335,78 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         if protokoll is not None:
             protokoll.merken(text)
 
+    _WOCHENTAGE = {
+        "montag": 0, "dienstag": 1, "mittwoch": 2, "donnerstag": 3,
+        "freitag": 4, "samstag": 5, "sonnabend": 5, "sonntag": 6,
+    }
+
+    def _datum_deuten(roh: str, jetzt: datetime):
+        """Aus 'Donnerstag' oder '14.03.' einen Tag machen.
+
+        Die Rechnung gehoert hierher und nicht ins Modell -- aus demselben
+        Grund, aus dem die Uhrzeit hier umgerechnet wird: Sarvis hat sich
+        beim Selbstrechnen schon einmal um eine Minute vertan, und bei
+        einem Datum waere es ein ganzer Tag. Ein Wecker, der einen Tag
+        daneben liegt, ist schlimmer als keiner.
+
+        Rueckgabe: (date, Fehlertext).
+        """
+        roh = " ".join(str(roh or "").split()).lower().strip().rstrip(",")
+        if not roh:
+            return None, ""
+
+        # "morgen", "uebermorgen" -- kommen gesprochen oft statt eines Datums
+        if roh in ("heute",):
+            return jetzt.date(), ""
+        if roh in ("morgen",):
+            return (jetzt + timedelta(days=1)).date(), ""
+        if roh in ("uebermorgen", "übermorgen"):
+            return (jetzt + timedelta(days=2)).date(), ""
+
+        # Wochentag: immer der NAECHSTE. "Donnerstag" an einem Donnerstag
+        # meint den kommenden, nicht heute -- wer heute meint, sagt eine
+        # Uhrzeit.
+        wort = roh.replace("nächsten", "").replace("naechsten", "").strip()
+        if wort in _WOCHENTAGE:
+            heute = jetzt.weekday()
+            ziel = _WOCHENTAGE[wort]
+            vor = (ziel - heute) % 7
+            return (jetzt + timedelta(days=vor or 7)).date(), ""
+
+        # TT.MM. oder TT.MM.JJJJ
+        t = re.match(r"^(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{2,4})?$", roh)
+        if t:
+            tag, monat = int(t.group(1)), int(t.group(2))
+            jahr = t.group(3)
+            if jahr:
+                jahr = int(jahr)
+                if jahr < 100:
+                    jahr += 2000
+            else:
+                jahr = jetzt.year
+            try:
+                d = date(jahr, monat, tag)
+            except ValueError:
+                return None, f"Den {roh} gibt es nicht."
+            # Ohne Jahresangabe und schon vorbei: naechstes Jahr gemeint.
+            if not t.group(3) and d < jetzt.date():
+                try:
+                    d = date(jahr + 1, monat, tag)
+                except ValueError:
+                    return None, f"Den {roh} gibt es nicht."
+            return d, ""
+
+        return None, (f"Mit dem Datum {roh!r} kann ich nichts anfangen. "
+                      "Sag mir einen Wochentag oder ein Datum wie 14.03.")
+
     @tool(
         "timer_stellen",
-        "Stellt einen Timer, der von selbst Bescheid sagt. Entweder eine "
-        "Dauer ab jetzt (sekunden) ODER eine feste Uhrzeit (uhrzeit) angeben, "
-        "nicht beides. Bei einer genannten Uhrzeit immer 'uhrzeit' benutzen "
-        "und die Dauer NICHT selbst ausrechnen.",
+        "Stellt einen Timer oder eine Erinnerung, die von selbst Bescheid "
+        "sagt — von 'in zehn Minuten' bis 'Donnerstag früh'. Entweder eine "
+        "Dauer ab jetzt (sekunden) ODER eine Uhrzeit angeben, nicht beides. "
+        "Bei einer genannten Uhrzeit immer 'uhrzeit' benutzen und die Dauer "
+        "NICHT selbst ausrechnen. Für einen anderen Tag zusätzlich 'datum'. "
+        "Für 'jeden Montag' oder 'jeden Morgen' zusätzlich 'wiederholt'.",
         {
             "type": "object",
             "properties": {
@@ -275,14 +417,38 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                                    "übernehmen, nicht in eine plausiblere "
                                    "Einheit umrechnen.",
                     "minimum": 5,
-                    "maximum": 86400,
+                    # Hier stand 86400 -- ein Tag. Damit war "erinnere mich
+                    # Donnerstag an den Kessel" schlicht unmoeglich, und
+                    # das ist die haeufigste Bitte an einen Assistenten
+                    # ueberhaupt. Der Wecker selbst konnte es immer: Er
+                    # rechnet mit festen Zeitpunkten, sichert auf Platte
+                    # und stellt sich nach einem Neustart wieder scharf.
+                    # Nur der Weg dorthin war zugemauert. Ein Jahr ist
+                    # jetzt die Grenze, und die ist nur noch da, damit ein
+                    # verhoertes "in dreissig" nicht dreissig Jahre wird.
+                    "maximum": 31_536_000,
                 },
                 "uhrzeit": {
                     "type": "string",
                     "description": "Feste Uhrzeit als HH:MM oder HH:MM:SS, für "
-                                   "'um halb neun'. Liegt sie heute schon in "
-                                   "der Vergangenheit, gilt morgen.",
+                                   "'um halb neun'. Ohne datum gilt: heute, "
+                                   "und wenn heute schon vorbei, morgen.",
                     "pattern": r"^\d{1,2}:\d{2}(:\d{2})?$",
+                },
+                "datum": {
+                    "type": "string",
+                    "description": "Für einen anderen Tag: 'TT.MM.' oder "
+                                   "'TT.MM.JJJJ', oder ein Wochentag "
+                                   "('Donnerstag' meint den nächsten). Nur "
+                                   "zusammen mit uhrzeit. Ohne genannte "
+                                   "Uhrzeit wird es 9 Uhr früh.",
+                },
+                "wiederholt": {
+                    "type": "string",
+                    "enum": ["taeglich", "woechentlich", "monatlich"],
+                    "description": "Für 'jeden Morgen', 'jeden Montag', "
+                                   "'jeden Ersten'. Nach dem Klingeln stellt "
+                                   "sich der Timer von selbst neu.",
                 },
                 "wofuer": {
                     "type": "string",
@@ -295,6 +461,20 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
     async def timer_stellen(args):
         wofuer = (args.get("wofuer") or "").strip()
         roh = (args.get("uhrzeit") or "").strip()
+        rohdatum = (args.get("datum") or "").strip()
+        wiederholt = (args.get("wiederholt") or "").strip() or None
+
+        tag = None
+        if rohdatum:
+            tag, fehler = _datum_deuten(rohdatum, datetime.now())
+            if tag is None:
+                return {"content": [{"type": "text", "text": fehler}],
+                        "is_error": True}
+            # Ein Datum ohne Uhrzeit meint den Morgen. "Erinnere mich
+            # Donnerstag an den Kessel" um Mitternacht zu melden waere
+            # zwar woertlich richtig und trotzdem falsch.
+            if not roh:
+                roh = "09:00"
 
         if roh:
             # Die Umrechnung gehoert hierher, nicht ins Modell. Sarvis hat
@@ -310,17 +490,30 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                 jetzt = datetime.now()
                 ziel = jetzt.replace(hour=stunde, minute=minute,
                                      second=sekunde, microsecond=0)
+                if tag is not None:
+                    ziel = ziel.replace(year=tag.year, month=tag.month,
+                                        day=tag.day)
             except (ValueError, IndexError):
                 return {"content": [{"type": "text", "text":
                         f"Mit der Uhrzeit {roh!r} kann ich nichts anfangen."}],
                         "is_error": True}
             if ziel <= jetzt:
+                if tag is not None:
+                    # Ein genanntes Datum wird NICHT stillschweigend
+                    # verschoben. Wer "am 14." sagt und den 14. meint,
+                    # soll erfahren, dass der vorbei ist -- nicht einen
+                    # Wecker fuer morgen bekommen.
+                    return {"content": [{"type": "text", "text":
+                            f"Der {ziel:%d.%m.%Y um %H:%M} ist vorbei. "
+                            "Meinst du nächstes Jahr?"}], "is_error": True}
                 ziel += timedelta(days=1)   # heute vorbei -> morgen
             sekunden = int(round((ziel - jetzt).total_seconds()))
-            nummer, faellig = wecker.stellen_bis(ziel, wofuer)
+            nummer, faellig = wecker.stellen_bis(ziel, wofuer,
+                                                 wiederholt=wiederholt)
         elif args.get("sekunden") is not None:
             sekunden = int(args["sekunden"])
-            nummer, faellig = wecker.stellen(sekunden, wofuer)
+            nummer, faellig = wecker.stellen(sekunden, wofuer,
+                                             wiederholt=wiederholt)
         else:
             return {"content": [{"type": "text", "text":
                     "Ich brauche entweder eine Dauer oder eine Uhrzeit."}],
@@ -329,15 +522,25 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         # astimezone() rechnet den Zeitpunkt in die dann gueltige Ortszeit
         # um -- sonst nennt ein Dauer-Timer ueber die Umstellung hinweg
         # eine Uhrzeit, die auf keiner Uhr im Haus steht.
-        uhrzeit = faellig.astimezone().strftime('%H:%M:%S')
+        oertlich = faellig.astimezone()
+        uhrzeit = oertlich.strftime('%H:%M:%S')
+        # Bei allem, was nicht heute ist, gehoert der Tag dazu -- sonst
+        # klingt "faellig um 9 Uhr" nach morgen frueh, obwohl Donnerstag
+        # gemeint ist.
+        wann = (f"am {oertlich:%d.%m.} um {oertlich:%H:%M} Uhr"
+                if oertlich.date() != datetime.now().date()
+                else f"um {uhrzeit} Uhr")
+        wieder = {"taeglich": ", danach täglich",
+                  "woechentlich": ", danach wöchentlich",
+                  "monatlich": ", danach monatlich"}.get(wiederholt, "")
         leuchten()
         vermerken(f"timer_stellen: Timer {nummer}"
                   + (f" für {wofuer}" if wofuer else "")
-                  + f", fällig um {uhrzeit} Uhr — läuft.")
+                  + f", fällig {wann}{wieder} — läuft.")
         return {"content": [{"type": "text", "text":
                 f"Timer {nummer} läuft: {_dauer_sagen(sekunden)}"
                 + (f" für {wofuer}" if wofuer else "")
-                + f", fällig um {uhrzeit} Uhr."}]}
+                + f", fällig {wann}{wieder}."}]}
 
     @tool(
         "timer_liste",
