@@ -60,6 +60,18 @@ _THEMA = re.compile(r"\[thema:\s*([^\]]{1,60})\]\s*$")
 
 _ABLAUF = re.compile(r"\(gilt bis (\d{1,2})\.(\d{1,2})\.(\d{4})\)")
 
+# Wie oft schon etwas ins Gedaechtnis geschrieben wurde. Braucht der
+# Nachhak-Anstupser (siehe entscheidung_verpasst in gedaechtnis.py): Er
+# muss unterscheiden koennen, ob Sarvis in diesem Zug etwas festgehalten
+# hat oder nicht. Ein Zaehler statt eines Ereignisses, weil er von
+# ueberall gelesen werden kann, ohne dass jemand zuhoeren muss.
+_geschrieben = 0
+
+
+def schreibstand() -> int:
+    """Wie oft insgesamt etwas gemerkt wurde -- zum Vorher/Nachher."""
+    return _geschrieben
+
 
 _DATEIEN = {"bemerkt": BEMERKT, "entschieden": ENTSCHIEDEN}
 
@@ -358,6 +370,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def merken(args):
+        global _geschrieben
         inhalt = " ".join(str(args.get("inhalt") or "").split())
         if not inhalt:
             return {"content": [{"type": "text", "text":
@@ -404,6 +417,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         zeilen.append(eintrag)
         _schreiben(pfad, zeilen)
         umschichten(art)      # Schicht 1 bleibt klein genug, um zu wirken
+        _geschrieben += 1
 
         blinken()
         vermerken(f"merken ({art}): {inhalt}"
@@ -472,6 +486,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         },
     )
     async def notiz_schreiben(args):
+        global _geschrieben
+        _geschrieben += 1
         titel = " ".join(str(args.get("titel") or "").split())
         inhalt = str(args.get("inhalt") or "").strip()
         if not titel or not inhalt:

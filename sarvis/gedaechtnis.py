@@ -124,6 +124,65 @@ _BEIM_START: set = set()
 ENTSCHEIDUNGEN_IM_VORSPANN = 12
 
 
+# Woerter, mit denen ein Mensch etwas ABRAEUMT oder eine Regel
+# AUFSTELLT. Gemessen an 294 echten Zurufen aus Saschas Mitschnitten:
+# Diese Fassung trifft zwei davon (0,7 %), beide echt -- darunter
+# woertlich der Fall, um den es ging ("Lass du den unterbrochenen
+# Rechercheauftrag ... Ne, alles gut, lass es").
+#
+# Eine breitere erste Fassung traf vier und war zur Haelfte Fehlalarm:
+# "machen wir" und "stattdessen" stehen fast nur in ganz normalen
+# Bauanweisungen ("machen wir fuer die Datei noch einen Anhang"). Sie
+# sind deshalb wieder raus. Lieber eine Entscheidung uebersehen als bei
+# jeder zweiten Ansage nachhaken -- ein Anstupser, der staendig kommt,
+# wird ignoriert und ist dann keiner mehr.
+_ENTSCHEIDUNGSWORT = re.compile(
+    r"\b(verwirf\w*|verwerfen|wegwerfen|weglassen|"
+    r"lass(en)? (wir|es|das|du)\b|"
+    r"brauch(e|en)? (ich|wir) nicht( mehr)?|nicht mehr (nötig|noetig)|"
+    r"ab (jetzt|sofort|heute)|künftig|kuenftig|immer so|nie wieder|"
+    r"entschieden|entscheidung|streich(e|en) (wir|das)|"
+    r"nicht weiter|bleibt (dabei|so|liegen)|vergiss (das|es)|"
+    r"sein lassen|abgehakt|erledigt sich)\b", re.IGNORECASE)
+
+
+def klingt_nach_entscheidung(zuruf: str) -> bool:
+    """Fiel in diesem Zuruf ein Wort, mit dem man etwas entscheidet?
+
+    Ein Zeichenvergleich, kein Modellurteil -- er kostet nichts und darf
+    deshalb bei jedem Zuruf laufen. Er beantwortet nicht, OB eine
+    Entscheidung fiel; er sagt nur, dass es sich lohnt, danach zu fragen.
+    """
+    return bool(_ENTSCHEIDUNGSWORT.search(zuruf or ""))
+
+
+def entscheidung_verpasst(zuruf: str) -> str:
+    """Der Anstupser: Da fiel ein Entscheidungswort, festgehalten wurde nichts.
+
+    Warum das ueberhaupt noetig ist, obwohl der Systemprompt es schon
+    verlangt: Eine Anweisung im Prompt ist eine Bitte an das Modell, und
+    das Modell ist mitten in einer Antwort beschaeftigt. Der Vorspann
+    dagegen ist der einzige Kanal, den ein Programm befuellt -- er kommt
+    beim naechsten Zuruf garantiert an.
+
+    Und er kommt genau dann, wenn er noch nuetzt: Der Austausch liegt
+    einen Zug zurueck, steht also noch vollstaendig im Gespraech. Sarvis
+    kann nachtragen, ohne irgendwo nachzusehen.
+
+    Gebaut als Anstupser und nicht als zweiter Modellaufruf, weil
+    gemessen ist, wie selten das vorkommt: zwei von 294 Zurufen. Ein
+    eigener Aufruf nach jedem Zug waere zu 99 Prozent fuer nichts.
+    """
+    if not zuruf:
+        return ""
+    return ("[Im letzten Austausch fiel eine Entscheidung ("
+            + " ".join(zuruf.split())[:70]
+            + "…), und du hast nichts festgehalten. War das eine, dann "
+            "merk sie JETZT nach: merken mit art 'entschieden' und einem "
+            "thema. Sag nichts dazu, tu es einfach. War es keine, "
+            "übergeh diesen Hinweis.]")
+
+
 def entscheidungen_nachtrag() -> str:
     """ALLE geltenden Entscheidungen -- bei jedem Zuruf neu, im Vorspann.
 

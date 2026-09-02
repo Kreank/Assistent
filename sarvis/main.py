@@ -47,7 +47,10 @@ from .ohren import Ohren  # noqa: E402
 # einen Horch, der auf den Strom einer Oberflaeche wartet.
 from .weckwort import Horcher  # noqa: E402
 from .werkzeuge import google  # noqa: E402
-from .gedaechtnis import entscheidungen_nachtrag  # noqa: E402
+from .werkzeuge import erinnern  # noqa: E402
+from .gedaechtnis import (entscheidung_verpasst,  # noqa: E402
+                          entscheidungen_nachtrag,
+                          klingt_nach_entscheidung)
 from .werkzeuge import (bauen, kurzer_name, unterbrochen_zeile,  # noqa: E402
                         zustand_zeile)
 
@@ -187,9 +190,14 @@ class Sarvis:
                                          # gegenüber einer Zeile, die
                                          # dieselbe Sache erneut anbietet.
                                          entscheidungen_nachtrag(),
+                                         self._anstupser,
                                          schutz.arbeitsordner_zeile())
                              if z),
                          freigaben=self.freigaben)
+        # Ein Hinweis fuer GENAU den naechsten Zuruf: Da fiel eine
+        # Entscheidung und nichts wurde festgehalten. Siehe
+        # gedaechtnis.entscheidung_verpasst.
+        self._anstupser = ""
         self.schlange: asyncio.Queue[str] = asyncio.Queue()
         # Was Sarvis von sich aus sagen will: Timer, fertige Auftraege.
         # Eine Schlange und EIN Sprecher -- siehe von_selbst_sagen().
@@ -824,6 +832,15 @@ class Sarvis:
             await self._alles_stoppen()
             return
 
+        # Der Anstupser gilt fuer genau diesen einen Zuruf. Ob Sarvis
+        # ihn befolgt hat, entscheidet sich unten; stehenbleiben darf er
+        # nicht, sonst mahnt er dieselbe Sache in jedem weiteren Zug an.
+        self._anstupser = ""
+        # Merkposten fuer nachher: Fiel hier ein Entscheidungswort, und
+        # wie oft war bis jetzt etwas gemerkt worden?
+        klang_entschieden = klingt_nach_entscheidung(gesagt)
+        stand_vorher = erinnern.schreibstand()
+
         sammler = Satzsammler()
         erster_ton: float | None = None
         erstes_wort: float | None = None
@@ -896,6 +913,15 @@ class Sarvis:
             f"erster Ton {(erster_ton or jetzt) - t_los:.2f}s | "
             f"fertig {jetzt - t_los:.2f}s"
         )
+        # Fiel ein Entscheidungswort und wurde trotzdem nichts
+        # festgehalten? Dann steht beim naechsten Zuruf ein Hinweis im
+        # Vorspann. Kein Modellaufruf, keine Wartezeit -- nur eine Zeile,
+        # die beim naechsten Mal garantiert ankommt.
+        if klang_entschieden and erinnern.schreibstand() == stand_vorher:
+            self._anstupser = entscheidung_verpasst(gesagt)
+            print("  (Entscheidungswort gefallen, nichts gemerkt — "
+                  "ich hake beim nächsten Zuruf nach)")
+
         await self._kontext_wache()
 
     async def _kontext_wache(self) -> None:
