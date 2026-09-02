@@ -839,6 +839,13 @@ AUFTRAG_JOURNAL = DATEN / "fortschritt.jsonl"
 # koennen, wann er zuletzt gesehen wurde, nicht um eine Stoppuhr.
 AUFTRAG_LEBENSZEICHEN_SEK = 60
 
+# Wie lange auf einen Abbruch gewartet wird, bevor ehrlich gemeldet wird,
+# dass er nicht griff. cancel() wirkt erst, wenn die Aufgabe das naechste
+# Mal wartet -- das ist meist sofort, kann aber dauern, wenn sie gerade
+# in einem Werkzeug steckt. Zu lang waere hier schaedlich: Der Mensch hat
+# "Stopp" gesagt und wartet auf eine Antwort, nicht auf Gruendlichkeit.
+AUFTRAG_ABBRUCH_FRIST_SEK = 3.0
+
 # Wie viele Zuege ein Arbeiter hoechstens machen darf. Notbremse gegen
 # einen Auftrag, der sich im Kreis dreht und dabei Kontingent frisst.
 AUFTRAG_ZUEGE = 120

@@ -230,6 +230,8 @@ class Auftrag:
     # fortsetzbar, weil die Kennung erst am Ende zurueckkaeme.
     sitzung: str = ""
     zuletzt_gesehen: str = ""      # ISO-Zeit des letzten Lebenszeichens
+    # Soll beim Losschicken an die alte Sitzung angeknuepft werden?
+    fortsetzen: bool = False
     # Der Zweig, von dem abgespalten wurde. Gemessen: Beide Projekte
     # unter D:/Projekte heissen ihren Basiszweig "master", stand() hat
     # aber gegen "main" verglichen -- git brach mit "ambiguous argument"
@@ -572,10 +574,44 @@ class Werkstatt:
                 basis=basis,
                 begonnen=auftrag.begonnen.isoformat(timespec="seconds"))
         self._sichern()          # erst festhalten, dann loslaufen
-        auftrag.aufgabe = asyncio.get_running_loop().create_task(
-            self._arbeiten(auftrag)
-        )
+        # Hier stand create_task -- und diese Methode laeuft in einem
+        # Worker-Thread (auftrag_geben ruft sie ueber to_thread auf,
+        # damit das Gespraech waehrend der git-Aufrufe nicht steht). In
+        # einem Thread gibt es keinen laufenden Event-Loop:
+        # get_running_loop() warf "no running event loop", die Arbeit
+        # wurde nie angeworfen -- aber der Auftrag stand zwei Zeilen
+        # weiter oben schon als "läuft" in der Datei.
+        #
+        # Genau das war am 1. September zu sehen: Sarvis meldete einen
+        # Fehler, auftrag_status meldete "läuft seit 6 Minuten", und
+        # zuletzt_gesehen blieb leer -- weil nie jemand arbeitete.
+        # auftrag_abbrechen fand dann kein aufgabe-Objekt, uebersprang
+        # das Abbrechen und meldete trotzdem Erfolg.
+        #
+        # Das Anwerfen gehoert deshalb in den Event-Loop: losschicken().
         return auftrag, ""
+
+    def losschicken(self, auftrag) -> str:
+        """Die Arbeit wirklich anwerfen. MUSS im Event-Loop laufen.
+
+        Getrennt von starten(), weil das im Worker-Thread laeuft und dort
+        keine Aufgabe erzeugt werden kann. Rueckgabe: leer, wenn es
+        klappte, sonst der Fehler -- und dann steht der Auftrag auch
+        nicht faelschlich als laufend in der Datei.
+        """
+        try:
+            auftrag.aufgabe = asyncio.get_running_loop().create_task(
+                self._arbeiten(auftrag, fortsetzen=auftrag.fortsetzen)
+            )
+            return ""
+        except RuntimeError as e:
+            auftrag.status = "fehler"
+            auftrag.ergebnis = f"Ließ sich nicht starten: {e}"
+            auftrag.beendet = datetime.now()
+            journal(auftrag.nummer, "beendet", status="fehler",
+                    ergebnis=auftrag.ergebnis)
+            self._sichern()
+            return auftrag.ergebnis
 
     def stand(self, auftrag) -> str:
         """Wie weit ist der Auftrag wirklich gekommen? Aus Git, nicht aus Absicht.
@@ -892,10 +928,52 @@ class Werkstatt:
         a.beendet = None
         journal(a.nummer, "fortgesetzt", sitzung=a.sitzung)
         self._sichern()
-        a.aufgabe = asyncio.get_running_loop().create_task(
-            self._arbeiten(a, fortsetzen=True)
-        )
+        # Auch hier NICHT create_task: fortsetzen() wird ebenfalls ueber
+        # to_thread gerufen. Siehe die lange Begruendung in starten().
+        a.fortsetzen = True
         return a, ""
+
+    async def abbrechen(self, a) -> tuple[bool, str]:
+        """Anhalten, warten, NACHSEHEN. Rueckgabe: (wirklich weg?, Text).
+
+        Die drei Schritte sind der ganze Punkt. Vorher wurde nur der
+        erste getan und der dritte behauptet.
+
+        Fall eins: Es lief nie etwas. Genau das war am 1. September der
+        Zustand -- die Aufgabe wurde wegen "no running event loop" nie
+        erzeugt, der Auftrag stand aber als "läuft" in der Datei. Dann
+        gibt es nichts abzubrechen, wohl aber einen Eintrag geradezu-
+        ruecken. Und das gehoert gesagt, nicht verschwiegen: Wer denkt,
+        er habe etwas gestoppt, sieht nicht nach.
+
+        Fall zwei: Es laeuft wirklich. cancel() wirkt erst, wenn die
+        Aufgabe das naechste Mal wartet. Deshalb eine kurze Frist -- und
+        wenn sie verstreicht, wird das gemeldet, statt Erfolg zu
+        behaupten.
+        """
+        if a.aufgabe is None or a.aufgabe.done():
+            a.status = "abgebrochen"
+            a.beendet = datetime.now()
+            journal(a.nummer, "beendet", status="abgebrochen",
+                    ergebnis="Es lief nichts -- Eintrag berichtigt.")
+            self._sichern()
+            return True, (f"Auftrag {a.nummer} steht jetzt auf abgebrochen. "
+                          "Gearbeitet hat daran allerdings nie jemand — der "
+                          "Eintrag stand nur so in der Liste. Der Zweig "
+                          f"{a.zweig} bleibt.")
+
+        a.aufgabe.cancel()
+        await asyncio.wait([a.aufgabe],
+                           timeout=config.AUFTRAG_ABBRUCH_FRIST_SEK)
+        if not a.aufgabe.done():
+            return False, (f"Auftrag {a.nummer} reagiert nicht auf den "
+                           f"Abbruch. Er läuft noch. Ich fasse nach.")
+        if a.status == "läuft":          # sollte _arbeiten gesetzt haben
+            a.status = "abgebrochen"
+            a.beendet = datetime.now()
+            self._sichern()
+        return True, (f"Auftrag {a.nummer} ist gestoppt, nachgesehen. "
+                      f"Der Zweig {a.zweig} bleibt.")
 
     def alles_abbrechen(self) -> int:
         """Jeden laufenden Auftrag anhalten. Rueckgabe: wie viele es waren.
@@ -996,6 +1074,12 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         if auftrag is None:
             return {"content": [{"type": "text", "text": fehler}],
                     "is_error": True}
+        # Erst HIER, im Event-Loop, faengt die Arbeit wirklich an.
+        fehler = werkstatt.losschicken(auftrag)
+        if fehler:
+            return {"content": [{"type": "text", "text":
+                    f"Auftrag {auftrag.nummer} ließ sich nicht starten: "
+                    f"{fehler}"}], "is_error": True}
         if leuchten:
             leuchten("Aufträge")
         vermerken(f"auftrag_geben: Auftrag {auftrag.nummer} läuft im Projekt "
@@ -1080,11 +1164,18 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         if a is None or a.status != "läuft":
             return {"content": [{"type": "text", "text":
                     "Dieser Auftrag läuft nicht."}], "is_error": True}
-        if a.aufgabe is not None:
-            a.aufgabe.cancel()
-        vermerken(f"auftrag_abbrechen: Auftrag {a.nummer} abgebrochen.")
-        return {"content": [{"type": "text", "text":
-                f"Auftrag {a.nummer} abgebrochen. Der Zweig {a.zweig} bleibt."}]}
+        # Hier stand: cancel() schicken und sofort "abgebrochen" melden.
+        # Das war eine Behauptung, keine Auskunft. cancel() wirkt erst,
+        # wenn die Aufgabe das naechste Mal wartet -- und wenn gar keine
+        # Aufgabe existierte, passierte ueberhaupt nichts. Beides sah von
+        # aussen gleich aus: Erfolgsmeldung, und auftrag_status sagte
+        # danach weiter "läuft". Der Nutzer hat es gemerkt, nicht Sarvis.
+        weg, text = await werkstatt.abbrechen(a)
+        vermerken(f"auftrag_abbrechen: {text}")
+        antwort = {"content": [{"type": "text", "text": text}]}
+        if not weg:
+            antwort["is_error"] = True
+        return antwort
 
     @tool(
         "auftrag_fortsetzen",
@@ -1105,6 +1196,11 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         if a is None:
             return {"content": [{"type": "text", "text": fehler}],
                     "is_error": True}
+        fehler = werkstatt.losschicken(a)
+        if fehler:
+            return {"content": [{"type": "text", "text":
+                    f"Auftrag {a.nummer} ließ sich nicht fortsetzen: "
+                    f"{fehler}"}], "is_error": True}
         # Hier stand blinken() -- eine Funktion, die es in diesem Modul
         # nie gab. Der NameError traf JEDEN Aufruf, und zwar NACH dem
         # Neustart des Arbeiters: Sarvis meldete "hat nicht geklappt",
