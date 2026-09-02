@@ -71,10 +71,63 @@ ANREDEN = {"hey", "hallo", "he", "ey", "hej", "hi", "hai", "hey,",
            "ok", "okay", "sag", "yo"}
 
 # Gemessene Aehnlichkeit zu "sarvis":
-#   sarvis 1.00 · jarvis 0.83 · charvis 0.77 · sabis 0.73 · servus 0.67
-#   service 0.62 | serviert 0.57 · server 0.50 · alex 0.20
-# 0.60 trennt genau zwischen Verhoerern und normalen Woertern.
-WECKWORT_AEHNLICHKEIT = 0.60
+#   sarvis 1.00 · savis 0.91 · jarvis/sarwis/harvis/sirvis 0.83
+#   charvis 0.77 · sabis 0.73
+#   servus/cervis 0.67 | service 0.62 · survive 0.62 · sarg 0.60
+#   serviert 0.57 · server 0.50 · alex 0.20
+#
+# 0.60 stand hier und war zu tief: "service" liegt mit 0.62 DARUEBER.
+# Das Wort faellt im Radio alle paar Minuten, und jedes Mal wachte er
+# auf -- keine Pechstraehne, sondern die Schwelle selbst. Dasselbe gilt
+# fuer "servus" (0.67) und "survive" (0.62).
+#
+# 0.70 ist der saubere Schnitt: Ein einzelner verhoerter Buchstabe in
+# einem Sechs-Zeichen-Namen ergibt 0.83, zwei ergeben 0.73 bis 0.77 --
+# alle echten Verhoerer liegen also darueber. Alles darunter ist bereits
+# ein anderes Wort. 0.80 waere zu hoch: Damit fielen "charvis" (0.77)
+# und "sabis" (0.73) heraus, und das sind gemessene Verhoerer des
+# eigenen Namens.
+WECKWORT_AEHNLICHKEIT = 0.70
+
+# Sonderfall: Anrede und Name kleben zusammen -- Whisper schreibt
+# gesprochenes "Hey Sarvis" gern als ein Wort, "HiService" ist der
+# haeufigste. Nach dem Abschneiden der Anrede bleibt "service" (0.62)
+# uebrig und faellt durch die Schwelle oben.
+#
+# Hier darf es lockerer sein, weil die Form selbst schon das Signal ist:
+# Ein Radiosprecher sagt "Service" als eigenes Wort, nie mit einer
+# angeklebten Anrede davor. Wer "hiservice" sagt, meinte "Hey Sarvis".
+WECKWORT_AEHNLICHKEIT_KLEBT = 0.60
+
+# --- Dauerlaerm: Radio im Auto, Fernseher im Zimmer ----------------------
+# Ein Abschnitt endet normalerweise durch Stille. Im Auto kommt die nie:
+# Das Radio redet durch, der Abschnitt lief bis zur Notbremse nach 90
+# Sekunden -- und dann stand ein "Hey Sarvis" irgendwo MITTEN in dem
+# Klumpen. Geprueft wird aber nur der Anfang (aus gutem Grund, siehe
+# erkennen()). Ergebnis: Im Auto wurde er nicht spaet geweckt, sondern
+# gar nicht. Genau das ist im Fahrtenbuch protokolliert.
+#
+# Deshalb: Kommt keine Pause, wird der Abschnitt trotzdem alle paar
+# Sekunden angehoert, statt weiterzuwachsen.
+LAERM_STUECK_SEK = 6.0
+
+# Wie lange nach dem letzten Schnitt noch "es ist laut hier" gilt.
+# Gebraucht fuer den Fall, den man sonst uebersieht: Sarvis hat gerade
+# geantwortet, also ist das Nachhoerfenster offen -- und in diesem
+# Fenster zaehlt JEDER Satz als Zuruf, ohne Weckwort. Im Auto ist "jeder
+# Satz" das Radio. Gemessen: drei Minuten Radiotext gingen als Auftrag
+# durch, weil im offenen Fenster nicht gekappt wurde.
+#
+# Ohne Gedaechtnis liesse sich das nicht verhindern: Nach dem Wecken
+# beginnt ein frischer Abschnitt, und der weiss von sich aus nichts
+# davon, dass es hier seit Minuten laut ist.
+LAERM_GEDAECHTNIS_SEK = 60.0
+
+# Wie viel vom Ende eines gekappten Stuecks im naechsten wieder vorne
+# steht. Ohne das zerbricht ein "Hey Sarvis" genau an der Schnittkante:
+# "Hey" im einen Stueck, "Sarvis" im naechsten, und keins von beiden
+# reicht. Anderthalb Sekunden fassen die Anrede samt Namen bequem.
+LAERM_UEBERLAPPUNG_SEK = 1.5
 
 VAD_SCHWELLE = 0.5             # ab wann gilt ein Block als Sprache
 

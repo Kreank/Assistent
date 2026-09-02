@@ -263,6 +263,12 @@ class LokalHorch:
     block = 480          # Silero rechnet in Rahmen dieser Groesse
 
     MAX_RUECKSTAND = 200   # = 6,0 Sekunden
+    # Waehrend jemand spricht, darf mehr auflaufen. Der Deckel wirft die
+    # AELTESTEN Bloecke weg -- und das ist mitten im Satz genau dessen
+    # Anfang, also die Stelle, an der das Weckwort steht. Lieber warten
+    # und den Satz ganz haben. Diese harte Grenze bleibt trotzdem: Ein
+    # Faden, der wirklich haengt, soll den Speicher nicht auffressen.
+    MAX_RUECKSTAND_HART = 800   # = 24 Sekunden
 
     def __init__(self):
         import queue as _q
@@ -272,6 +278,11 @@ class LokalHorch:
         self._strom = None
         self._samples = 0
         self._meldung = None
+        self._schont = False
+
+    def schonen(self, an: bool) -> None:
+        """Solange jemand spricht: nichts wegwerfen (siehe Deckel oben)."""
+        self._schont = bool(an)
 
     def oeffnen(self) -> None:
         import sounddevice as sd
@@ -298,8 +309,10 @@ class LokalHorch:
                 self._meldung = ("Mikro meldet einen Aussetzer -- ein "
                                  "Stueck Aufnahme fehlt")
             rueckstand = self._eingang.qsize()
-            if rueckstand > self.MAX_RUECKSTAND:
-                while self._eingang.qsize() > self.MAX_RUECKSTAND // 2:
+            deckel = (self.MAX_RUECKSTAND_HART if self._schont
+                      else self.MAX_RUECKSTAND)
+            if rueckstand > deckel:
+                while self._eingang.qsize() > deckel // 2:
                     try:
                         self._eingang.get_nowait()
                     except _q.Empty:

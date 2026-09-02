@@ -51,6 +51,10 @@ RATE = 16000
 # 200 Bloecke sind 6,0 Sekunden -- so lange darf der Server hinterher
 # sein, bevor das Zuhoeren zum Vorlesen von Vergangenheit wird.
 MAX_RUECKSTAND = 200
+# Waehrend jemand spricht, darf mehr auflaufen -- weggeworfen wird das
+# AELTESTE, und das ist mitten im Satz dessen Anfang, wo das Weckwort
+# steht. Die harte Grenze bleibt fuer den Fall, dass wirklich etwas haengt.
+MAX_RUECKSTAND_HART = 800
 
 
 class NetzHorch:
@@ -67,6 +71,7 @@ class NetzHorch:
         self._meldung: str | None = None
         self._schloss = threading.Lock()
         self._pausiert = False
+        self._schont = False
         # Wer gerade sendet. Nur EINE Oberflaeche zur Zeit -- zwei
         # Mikrofone in einen Strom zu mischen ergaebe Kauderwelsch, und
         # der VAD saehe dauernd Sprache.
@@ -102,9 +107,10 @@ class NetzHorch:
         if not roh or len(roh) % 2:
             return
         werte = np.frombuffer(roh, dtype="<i2").astype("float32") / 32768.0
-        if self._eingang.qsize() > MAX_RUECKSTAND:
+        deckel = MAX_RUECKSTAND_HART if self._schont else MAX_RUECKSTAND
+        if self._eingang.qsize() > deckel:
             weg = 0
-            while self._eingang.qsize() > MAX_RUECKSTAND // 2:
+            while self._eingang.qsize() > deckel // 2:
                 try:
                     self._eingang.get_nowait()
                     weg += 1
@@ -113,6 +119,10 @@ class NetzHorch:
             self._meldung = (f"Horcher kommt nicht nach: {weg} Bloecke "
                              "verworfen, Aelteres zuerst")
         self._eingang.put(werte)
+
+    def schonen(self, an: bool) -> None:
+        """Solange jemand spricht: nichts wegwerfen (siehe Deckel oben)."""
+        self._schont = bool(an)
 
     def geht(self, geraet: str) -> None:
         """Die sendende Oberflaeche ist weg."""

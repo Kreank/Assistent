@@ -1068,6 +1068,7 @@ class Sarvis:
         self.endpunkt = server.Endpunkt(zuruf_an=self._zuruf_vom_netz,
                                         sprache_an=self._sprache_vom_netz,
                                         strom_an=self._strom_vom_netz,
+                                        auto_an=self._auto_vom_netz,
                                         weg_an=self._oberflaeche_weg)
         await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
         print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
@@ -1084,6 +1085,10 @@ class Sarvis:
         self._antwort_an(geraet)
         self.anzeige.untertitel("du", text)
         self.schlange.put_nowait(("weckwort", text))
+
+    async def _auto_vom_netz(self, an: bool, geraet: str) -> None:
+        """Die Oberflaeche steckt jetzt im Auto -- oder eben nicht mehr."""
+        self.horcher.im_auto(an, geraet)
 
     async def _strom_vom_netz(self, daten: str, rate: int, geraet: str) -> None:
         """Ein Stueck Dauerstrom fuers Weckwort.

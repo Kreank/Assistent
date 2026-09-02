@@ -81,16 +81,18 @@ class Endpunkt:
     """
 
     def __init__(self, zuruf_an=None, sprache_an=None, strom_an=None,
-                 weg_an=None):
+                 auto_an=None, weg_an=None):
         """zuruf_an(text, geraet)        -- eine getippte Zeile kam an
         sprache_an(proben, geraet)    -- eine fertige Aufnahme kam an
         strom_an(daten, rate, geraet) -- ein Stueck Dauerstrom kam an
+        auto_an(an, geraet)             -- die Oberflaeche sitzt im Auto
         weg_an(geraet)                -- eine Oberflaeche ist gegangen
         Alle vier werden in der Ereignisschleife von Sarvis gerufen.
         """
         self.zuruf_an = zuruf_an
         self.sprache_an = sprache_an
         self.strom_an = strom_an
+        self.auto_an = auto_an
         self.weg_an = weg_an
         self.traeger: NetzTraeger | None = None
         # Wer Sarvis' Browser gerade zusieht und darin klickt. Der
@@ -242,6 +244,20 @@ class Endpunkt:
 
         elif art == "hier":
             pass  # Lebenszeichen, aiohttp haelt die Verbindung selbst wach
+
+        elif art == "auto":
+            # Die Oberflaeche sagt, ob sie gerade im Auto steckt.
+            #
+            # Warum das nicht bei der Anmeldung steht: Die laeuft einmal
+            # beim Verbinden. Ein- und ausgestiegen wird mitten in einer
+            # Verbindung, oft Stunden spaeter.
+            #
+            # Was der Server damit macht, steht im Horcher. Kurz: Er
+            # erkennt Dauerlaerm ohnehin selbst an seinem Ton -- dieses
+            # Wort macht ihn nur sicherer, weil es Auto von "lautes
+            # Zimmer" unterscheidet.
+            if self.auto_an is not None:
+                await self.auto_an(bool(m.get("an")), o.name)
 
         # --- Die Fernsicht ------------------------------------------------
         # Alles ab hier erreicht nur, wer angemeldet ist: _anmelden()

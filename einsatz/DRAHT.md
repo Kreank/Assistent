@@ -623,10 +623,65 @@ Ob es sich lohnt, hängt vom Gerät ab:
   laufen und sendet nur, wenn wirklich jemand spricht.
 
 Die Schwellen der Erkennung sind gemessen und feinjustiert (sarvis 1,00 ·
-jarvis 0,83 · service 0,62 · serviert 0,57, Grenze 0,60). Sie lösen das,
+jarvis 0,83 · charvis 0,77 · sabis 0,73 · servus 0,67 · service 0,62 ·
+serviert 0,57, **Grenze 0,70**). Die Grenze lag bis 09/2026 auf 0,60 und
+damit unter „service" — im Auto weckte ihn die Radiowerbung. 0,70 trennt
+sauber: Ein verhörter Buchstabe im Namen ergibt 0,83, zwei ergeben 0,73
+bis 0,77; darunter liegt nur noch Fremdwortschatz. Sie lösen das,
 woran openWakeWord scheiterte: Dessen Fertigmodelle sind auf englische
 Aussprache trainiert und erreichten für „Hey Sarvis" von einer deutschen
 Stimme nur 0,09 bis 0,13.
+
+### Wenn nie eine Pause kommt: Dauerlärm
+
+Ein Abschnitt endet normalerweise durch Stille. Im Auto kommt die nie —
+das Radio redet durch. Der Abschnitt wuchs deshalb bis zur Notbremse nach
+90 Sekunden, und ein „Hey Sarvis" stand dann irgendwo **mitten** in
+diesem Klumpen. Geprüft wurde aber nur der Anfang. Ergebnis: Im Auto
+wurde er nicht spät geweckt, sondern gar nicht.
+
+Drei Dinge greifen jetzt ineinander:
+
+1. **Gekappt statt gewachsen.** Kommt keine Pause, wird alle sechs
+   Sekunden (`LAERM_STUECK_SEK`) trotzdem hineingehört — mit
+   anderthalb Sekunden Überlappung, damit ein Weckwort nicht an der
+   Schnittkante zerbricht.
+2. **In einem gekappten Stück wird auch mitten im Satz gesucht** — dort
+   aber ausschließlich nach *Anrede plus Name* („hey sarvis"), nie nach
+   dem Namen allein, und mit der strengen Ähnlichkeit. Findet er das
+   Weckwort ganz am Stückrand, wartet er einmal auf das nächste Stück,
+   statt mit leerem Zuruf aufzuwachen.
+3. **Der Rückstands-Deckel schont laufende Sprache.** Er warf die
+   ältesten Blöcke weg — mitten im Satz also dessen Anfang, wo das
+   Weckwort steht. Solange geredet wird, darf jetzt mehr auflaufen
+   (`MAX_RUECKSTAND_HART`).
+
+Im offenen Nachhörfenster wird **nicht** gekappt: Wer angesprochen wurde
+und diktiert, macht Denkpausen und darf ausholen.
+
+### `auto` — die Oberfläche sitzt im Fahrzeug
+
+```json
+{ "art": "auto", "an": true }
+```
+
+Wird bei jedem Wechsel geschickt und einmal direkt nach dem `willkommen`
+(bei der Anmeldung allein reicht es nicht — ein- und ausgestiegen wird
+mitten in einer Verbindung, oft Stunden später).
+
+Die Nachricht lockert genau eine Sache: die **Suche** nach dem Weckwort.
+Im Auto darf es auch mitten im Satz stehen, nicht nur am Anfang — auch
+wenn der Lärm gerade nicht laut genug für einen Schnitt war. Am
+Schreibtisch bleibt es bei der strengen Regel.
+
+Was sie ausdrücklich **nicht** tut: den Schnitt erzwingen. Wo geschnitten
+wird, entscheidet allein die Messung (kommt eine Pause oder nicht). Das
+Signal sagt, wo das Handy steckt, nicht wie laut es dort ist — und im
+Auto mit ausgeschaltetem Radio ist es still. Würde es den Schnitt
+steuern, wäre ausgerechnet unterwegs kein Diktat mehr möglich.
+
+Die Nachricht ist rückwärtskompatibel: Ein Server, der sie nicht kennt,
+ignoriert sie (siehe „Rahmen").
 
 **Damit hat eine Android-App wieder einen Grund**: Ein Foreground Service
 darf das Mikrofon offenhalten, wenn der Bildschirm gesperrt ist — ein

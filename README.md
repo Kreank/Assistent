@@ -85,16 +85,47 @@ Whisper verhört den Namen zuverlässig. Gemessene Ähnlichkeit zu
 
 | erkannt | | | |
 |---|---|---|---|
-| sarvis 1,00 | jarvis 0,83 | charvis 0,77 | sabis 0,73 |
-| servus 0,67 | service 0,62 | serviert 0,57 | server 0,50 |
+| sarvis 1,00 | savis 0,91 | jarvis 0,83 | charvis 0,77 |
+| sabis 0,73 | servus 0,67 | service 0,62 | serviert 0,57 |
 
-Die Schwelle steht auf **0,60** (`WECKWORT_AEHNLICHKEIT`) und trennt
-damit genau zwischen Verhörern und normalen Wörtern — „alex" liegt bei
-0,20.
+Die Schwelle steht auf **0,70** (`WECKWORT_AEHNLICHKEIT`). Sie stand
+lange auf 0,60 — und damit *unter* „service" (0,62). Im Auto sagt das
+Radio dieses Wort alle paar Minuten, und jedes Mal wachte er auf. Das
+war keine Pechsträhne, sondern die Schwelle selbst; „servus" (0,67) und
+„survive" (0,62) lagen genauso darüber.
+
+0,70 ist der saubere Schnitt: Ein einzelner verhörter Buchstabe in einem
+Sechs-Zeichen-Namen ergibt 0,83, zwei ergeben 0,73 bis 0,77 — alle
+echten Verhörer liegen darüber, alle Fremdwörter darunter. Höher wäre
+schlechter: Bei 0,80 fielen „charvis" und „sabis" heraus, und das ist
+er selbst.
 
 Davor darf eine Anrede stehen: hey, hallo, he, ey, ok, sag, yo und
 einige mehr. „hi" und „hai" stehen mit in der Liste, weil Whisper
 gesprochenes „hey" oft so schreibt.
+
+### Wenn nie eine Pause kommt
+
+Im Auto endet ein Abschnitt nie durch Stille — das Radio redet durch. Er
+wuchs deshalb bis zur Notbremse nach 90 Sekunden, und ein „Hey Sarvis"
+stand dann mitten in diesem Klumpen, während nur der Anfang geprüft wird.
+Sarvis wurde im Auto also nicht spät geweckt, sondern gar nicht.
+
+Kommt keine Pause, wird jetzt alle sechs Sekunden trotzdem hineingehört
+(`LAERM_STUECK_SEK`), mit anderthalb Sekunden Überlappung gegen einen
+Schnitt mitten im Weckwort. In einem solchen Stück darf das Weckwort auch
+mitten im Satz stehen — dort aber nur als *Anrede plus Name*, nie als
+Name allein. Fällt der Schnitt zwischen „Hey Sarvis" und die Frage,
+wartet er einmal auf das nächste Stück, statt mit leerem Zuruf
+aufzuwachen.
+
+Im offenen Nachhörfenster wird nicht gekappt: Wer diktiert, darf
+ausholen.
+
+Dasselbe gilt bei Fernseher oder Werkstattradio. Zusätzlich sagt die
+Android-App über den Draht Bescheid, wenn sie im Fahrzeug steckt
+(`{"art": "auto"}`) — dann greift die Lockerung auch, wenn der Lärm
+nicht laut genug für einen Schnitt war.
 
 ### Menschen machen Pausen
 

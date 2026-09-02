@@ -110,13 +110,51 @@ def _halluziniert(text: str) -> bool:
     return any(m in t for m in _HALLUZINATIONEN)
 
 
-def _klingt_wie_name(wort: str) -> bool:
-    """Ist dieses eine Wort der Name? Whisper verhoert ihn gern."""
-    return SequenceMatcher(None, wort, config.NAME).ratio() \
-        >= config.WECKWORT_AEHNLICHKEIT
+def _klingt_wie_name(wort: str, schwelle: float | None = None) -> bool:
+    """Ist dieses eine Wort der Name? Whisper verhoert ihn gern.
+
+    schwelle nur fuer den Klebefall unten -- siehe config.
+    """
+    if schwelle is None:
+        schwelle = config.WECKWORT_AEHNLICHKEIT
+    return SequenceMatcher(None, wort, config.NAME).ratio() >= schwelle
 
 
-def erkennen(text: str) -> str | None:
+def _mitten_drin(worte: list) -> str | None:
+    """Anrede und Name IRGENDWO im Text -- nur fuer gekappte Laermstuecke.
+
+    Normalerweise gilt: Das Weckwort steht am Anfang, sonst gar nicht.
+    Diese Regel ist teuer gelernt und bleibt der Normalfall -- "der
+    Sarvis laeuft ganz gut" soll ihn nicht wecken.
+
+    Im Dauerlaerm geht sie aber nicht auf. Dort schneidet der Horcher
+    blind alle paar Sekunden ein Stueck heraus, weil das Radio keine
+    Pause macht. Wo dein Satz in diesem Stueck liegt, ist Zufall: Vor
+    dir lief eine Werbung, hinter dir laufen die Nachrichten weiter. Auf
+    den Anfang zu bestehen hiesse, dich im Auto grundsaetzlich zu
+    ueberhoeren.
+
+    Zwei Sicherungen halten das eng:
+
+    Erstens ist NUR "<Anrede> <Name>" erlaubt, nie der Name allein. Ein
+    Radiobeitrag ueber einen Butler namens Jarvis weckt ihn also nicht;
+    es muesste jemand im Radio woertlich "hey jarvis" sagen.
+
+    Zweitens gilt hier die STRENGE Aehnlichkeit. Der lockere Klebefall
+    (siehe erkennen) bleibt dem Satzanfang vorbehalten -- mitten im
+    Fremdtext ist jede Lockerung ein Risiko ohne Gegenwert.
+
+    Was danach kommt, ist der Zuruf. Dass daran hinten noch ein Stueck
+    Radio klebt, laesst sich nicht vermeiden -- ein verunreinigter Zuruf
+    ist immer noch besser als gar keiner.
+    """
+    for i in range(1, len(worte) - 1):
+        if worte[i] in config.ANREDEN and _klingt_wie_name(worte[i + 1]):
+            return " ".join(worte[i + 2:]).strip()
+    return None
+
+
+def erkennen(text: str, mitten: bool = False) -> str | None:
     """Faengt der Satz mit dem Weckwort an? Dann kommt der Rest zurueck.
 
     Entscheidend ist die POSITION, nicht die Aehnlichkeit ganzer Wort-
@@ -141,12 +179,17 @@ def erkennen(text: str) -> str | None:
     # Deshalb die Anrede abschneiden und den Rest pruefen.
     for anrede in config.ANREDEN:
         if worte[0].startswith(anrede) and len(worte[0]) > len(anrede) + 2:
-            if _klingt_wie_name(worte[0][len(anrede):]):
+            if _klingt_wie_name(worte[0][len(anrede):],
+                                config.WECKWORT_AEHNLICHKEIT_KLEBT):
                 return " ".join(worte[1:]).strip()
 
     if len(worte) >= 2 and worte[0] in config.ANREDEN \
             and _klingt_wie_name(worte[1]):
         return " ".join(worte[2:]).strip()
+
+    # Nur bei einem Stueck, das der Dauerlaerm erzwungen hat.
+    if mitten:
+        return _mitten_drin(worte)
 
     return None
 
@@ -191,6 +234,15 @@ class Horcher:
         self._diktat = False      # dieser Abschnitt laeuft als Diktat
         self._frage_offen = False  # er hat gefragt und wartet auf Antwort
         self._gemeckert: dict[str, float] = {}   # wann welche Stoerung zuletzt
+        # Weckwort gefallen, aber der Satz war zu Ende des Stuecks noch
+        # nicht fertig -- dann wird EINMAL weitergesammelt statt geweckt.
+        self._zuruf_unfertig = False
+        # Sitzt die sendende Oberflaeche im Auto? Die App sagt es uns
+        # ueber den Draht ({"art": "auto", "an": true}) -- bei jedem
+        # Wechsel und einmal direkt nach dem Willkommen.
+        self._auto = False
+        # Bis wann noch "es ist laut hier" gilt -- siehe config.
+        self._laerm_bis = 0.0
 
     # --- Steuerung ---------------------------------------------------------
 
@@ -323,11 +375,48 @@ class Horcher:
         self._gemeckert[was] = jetzt
         print(text)
 
+    def _schonen(self, an: bool) -> None:
+        """Der Quelle sagen, ob sie bei Rueckstand wegwerfen darf.
+
+        Sie wirft sonst die AELTESTEN Bloecke weg -- und die aeltesten
+        sind, waehrend jemand spricht, der Anfang seines Satzes. Genau
+        dort steht das Weckwort. Solange geredet wird, soll sie deshalb
+        lieber warten; ihre harte Grenze greift trotzdem, falls wirklich
+        ein Faden haengt.
+        """
+        if an == getattr(self, "_schont", False):
+            return
+        self._schont = an
+        try:
+            self.horch.schonen(an)
+        except Exception:
+            pass          # eine Quelle, die das nicht kennt, darf das
+
+    def _weiterhoeren(self) -> None:
+        """Wie _verwerfen -- aber der Abschnitt laeuft weiter.
+
+        Beim Kappen im Dauerlaerm hoert der Sprecher nicht auf. Ein Rest
+        bleibt als Ueberlappung stehen, damit ein Weckwort auf der
+        Schnittkante im naechsten Stueck vollstaendig vorkommt.
+
+        Und der VAD wird hier ausdruecklich NICHT zurueckgesetzt. Sein
+        Gedaechtnis stimmt ja gerade: Es wird tatsaechlich weiter
+        geredet. Ruecksetzen wuerde die Vorhersage genau dann verwerfen,
+        wenn sie richtig ist.
+        """
+        rest = int(config.LAERM_UEBERLAPPUNG_SEK * RATE / BLOCK)
+        self._puffer = self._puffer[-rest:] if rest else []
+        self._laerm_bis = (time.perf_counter()
+                           + config.LAERM_GEDAECHTNIS_SEK)
+        self._stille = 0.0
+        self._begonnen = time.perf_counter() - config.LAERM_UEBERLAPPUNG_SEK
+
     def _verwerfen(self):
         self._puffer = []
         self._redet = False
         self._stille = 0.0
         self._diktat = False
+        self._schonen(False)
         # Silero ist ein Netz mit Gedaechtnis. Ohne Ruecksetzen bleibt es
         # nach einem laengeren Abschnitt auf "Sprache" haengen und meldet
         # 0.91, obwohl der Pegel bei null liegt -- gemessen. Der Abschnitt
@@ -422,9 +511,13 @@ class Horcher:
                 self._begonnen = jetzt
             self._stille = 0.0
             self._puffer.append(block)
-            # Notbremse: wer minutenlang redet, meint nicht uns.
+            # Es redet jemand -- ab hier nichts mehr wegwerfen.
+            self._schonen(True)
             if jetzt - self._begonnen > self._deckel():
-                self._pruefen()
+                # Beim Laerm-Deckel wird nur ein Stueck herausgeschnitten
+                # und es geht weiter -- der Sprecher hoert ja nicht auf.
+                # Bei der Notbremse ist der Abschnitt wirklich zu Ende.
+                self._pruefen(gekappt=self._laerm_deckel())
             return
 
         if not self._redet:
@@ -448,9 +541,45 @@ class Horcher:
         geprueft, das Nachhoerfenster war da laengst zu, und die ganze
         Rede verschwand ohne ein Wort Antwort.
         """
-        if self.hoert_nach(self._begonnen):
-            return config.WECKWORT_MAX_ANGESPROCHEN_SEK
-        return config.WECKWORT_MAX_SEK
+        # Frueher stand hier WECKWORT_MAX_SEK (90 s). Das war zu lang:
+        # Bei Dauerlaerm wuchs der Abschnitt so weit, dass ein Weckwort
+        # darin nur noch in der Mitte vorkam -- und dort wurde nie
+        # gesucht. Jetzt wird alle paar Sekunden hineingehoert.
+        return (config.LAERM_STUECK_SEK if self._laerm_deckel()
+                else config.WECKWORT_MAX_ANGESPROCHEN_SEK)
+
+    def _laerm_deckel(self) -> bool:
+        """Gilt der kurze Laerm-Deckel -- oder die lange Notbremse?
+
+        Eine Wahrheit fuer zwei Fragen: wann abgeschnitten wird, UND ob
+        das Abgeschnittene ein Laermstueck ist. Die beiden aus getrennten
+        Bedingungen abzuleiten ging schief -- im Auto galt der kurze
+        Deckel, das Stueck wurde aber nicht als Laerm behandelt, und das
+        Radio ging als Antwort im Nachhoerfenster durch. Gemessen.
+        """
+        return self.im_laerm() or not self.hoert_nach(self._begonnen)
+
+    def im_laerm(self) -> bool:
+        """Ist es hier gerade dauerhaft laut? Gemessen, nicht vermutet.
+
+        Ausschliesslich die Messung: Zuletzt musste ein Abschnitt
+        abgeschnitten werden, weil keine Pause kam.
+
+        Das Auto-Signal der App zaehlt hier bewusst NICHT mit. Es sagt,
+        wo das Handy steckt, nicht wie laut es dort ist -- und im Auto
+        mit ausgeschaltetem Radio ist es still. Wer das Signal hier
+        mitzaehlen liesse, zerhackte genau dort jedes Diktat, wo es am
+        ehesten gebraucht wird: unterwegs, mit freien Haenden.
+
+        Im Auto greift die Messung ohnehin von selbst. Bevor Sascha ihn
+        anspricht, ist das Nachhoerfenster zu; dort wird schon nach ein
+        paar Sekunden Dauerlaerm geschnitten, und ab dann gilt der
+        Merker auch im offenen Fenster.
+
+        Wofuer das Signal dient, steht in im_auto(): Es lockert die
+        SUCHE nach dem Weckwort, nicht den Schnitt.
+        """
+        return time.perf_counter() < self._laerm_bis
 
     def _stille_grenze(self) -> float:
         """Wie lange Stille diesen Satz beendet -- je nachdem, wie lange
@@ -480,14 +609,17 @@ class Horcher:
             return config.WECKWORT_STILLE_LANG_SEK
         return config.WECKWORT_STILLE_SEK
 
-    def _pruefen(self) -> None:
+    def _pruefen(self, gekappt: bool = False) -> None:
         stueck = self._puffer
         dauer = sum(len(b) for b in stueck) / RATE
         # Wann dieser Abschnitt BEGANN -- nicht, wann er endet. Daran
         # haengt unten, ob das Nachhoerfenster offen war.
         begonnen = self._begonnen
-        self._verwerfen()
+        if not gekappt:
+            self._verwerfen()
         if dauer < config.WECKWORT_MIN_SEK:
+            if gekappt:
+                self._weiterhoeren()
             return
 
         # Ueber ein langes Stueck rechnet Whisper spuerbar -- zwei Minuten
@@ -497,12 +629,13 @@ class Horcher:
         # der einen dazu bringt, noch mal von vorn anzufangen.
         zeigt = (dauer >= config.WECKWORT_LANG_AB_SEK
                  and self.anzeige is not None
-                 and not self._spricht_gerade)
+                 and not self._spricht_gerade
+                 and not gekappt)     # im Laerm liefe die Anzeige dauernd
         if zeigt:
             self.anzeige.zustand(DENKT)
         geweckt = False
         try:
-            geweckt = self._deuten(stueck, begonnen)
+            geweckt = self._deuten(stueck, begonnen, gekappt)
         finally:
             # Wurde geweckt, fuehrt die Schleife die Anzeige weiter. Sonst
             # zurueck -- aber wohin? Steht eine Rueckfrage offen, gehoert
@@ -510,9 +643,29 @@ class Horcher:
             # "wartet auf dich", waehrend er tatsaechlich weiter wartete.
             if zeigt and not geweckt:
                 self.anzeige.zustand(FRAGT if self._frage_offen else RUHIG)
+            # Erst jetzt entscheidet sich, wie viel vom Stueck stehen
+            # bleibt. Beim Wecken hat _deuten schon abgeraeumt; steht ein
+            # angefangener Zuruf offen, bleibt ALLES stehen und waechst
+            # beim naechsten Mal weiter -- sonst nur die Ueberlappung.
+            if gekappt and not geweckt:
+                if self._zuruf_unfertig:
+                    # Der Puffer bleibt und waechst -- aber die Uhr fuer
+                    # den naechsten Schnitt laeuft neu an. Ohne das waere
+                    # sie sofort wieder abgelaufen und dasselbe Stueck
+                    # ginge im Kreis durch Whisper.
+                    self._begonnen = time.perf_counter()
+                else:
+                    self._weiterhoeren()
 
-    def _deuten(self, stueck: list, begonnen: float) -> bool:
-        """Was war das? True, wenn daraus ein Zuruf wurde."""
+    def _deuten(self, stueck: list, begonnen: float,
+                gekappt: bool = False) -> bool:
+        """Was war das? True, wenn daraus ein Zuruf wurde.
+
+        gekappt heisst: Dieses Stueck endete nicht durch Stille, sondern
+        wurde aus einem Dauerlaerm herausgeschnitten. Dann steht darin
+        fast sicher Fremdtext, und es gelten zwei andere Regeln -- siehe
+        unten.
+        """
         aufnahme = np.concatenate(stueck)
         try:
             # Der Name als Hinweis -- hier zaehlt er am meisten.
@@ -530,10 +683,44 @@ class Horcher:
         if self._eigen_echo(text, begonnen):
             return False
 
-        zuruf = erkennen(text)
+        # Mitten im Satz suchen darf er in zwei Faellen: wenn das Stueck
+        # aus Dauerlaerm herausgeschnitten wurde (gemessen), oder wenn
+        # die App sagt, dass gefahren wird (gewusst). Sonst nie.
+        mitten = gekappt or self._auto
+        zuruf = erkennen(text, mitten=mitten)
         wie = "Weckwort"
+        if zuruf is not None and mitten and not erkennen(text):
+            wie = "Weckwort im Lärm" if gekappt else "Weckwort im Auto"
+
+        # Der Schnitt faellt blind -- er kann mitten zwischen "Hey
+        # Sarvis" und die Frage fallen. Dann steht das Weckwort da, aber
+        # der Zuruf ist leer, und Sarvis wachte auf, um nichts zu hoeren.
+        # Gemessen: Schnitt bei 19,6 s, Zuruf ab 19,7 s -- er sagte "Ja?"
+        # und die Frage war weg.
+        #
+        # Deshalb einmal weitersammeln statt wecken: Beim naechsten
+        # Durchgang ist das Stueck laenger und enthaelt beides. Nur
+        # EINMAL, sonst wuechse der Puffer bei jedem halben Weckwort
+        # immer weiter.
+        vorher_unfertig = self._zuruf_unfertig
+        self._zuruf_unfertig = False
+        if (gekappt and zuruf is not None and not vorher_unfertig
+                and len(zuruf.split()) < 2):
+            self._zuruf_unfertig = True
+            print(f"  * Weckwort am Stückrand: {text[-40:]!r} "
+                  f"— warte auf den Rest")
+            return False
 
         if zuruf is None:
+            if gekappt:
+                # Kein Weckwort in einem Laermstueck heisst: Das war
+                # nicht fuer uns. Der Nachhoer-Zweig darunter darf hier
+                # NICHT greifen -- er nimmt jeden Satz als Zuruf, und in
+                # einem Laermstueck ist jeder Satz das Radio. Sonst
+                # unterhielte sich Sarvis mit den Nachrichten.
+                self._meckern("laerm", f"  (Dauerlärm, kein Weckwort: "
+                                       f"{text[:60]!r})")
+                return False
             # Hat Sarvis gerade geantwortet, ist der naechste Satz die
             # Fortsetzung -- dann waere ein erneutes "Hey Sarvis" albern.
             # Er fragt ja selbst, wie er dienen kann; die Antwort darauf
@@ -576,10 +763,38 @@ class Horcher:
         self._nachhoeren_bis = 0.0
         print(f"\n  * {wie}: {text!r}")
         self.pausiert = True     # bis der Durchgang durch ist
+        # Die Laerm-Ueberlappung enthaelt das Weckwort noch einmal --
+        # sonst wird derselbe Zuruf im naechsten Stueck ein zweites Mal
+        # erkannt und Sarvis antwortet doppelt. Gemessen im Trockenlauf.
+        # Dass die Pause das nebenbei auch abfangen wuerde, reicht nicht:
+        # Darauf soll sich das hier nicht verlassen muessen.
+        self._verwerfen()
         self.wecken(zuruf)
         return True
 
     # --- Nachhoeren ---------------------------------------------------------
+
+    def im_auto(self, an: bool, geraet: str = "") -> None:
+        """Die Oberflaeche meldet, dass sie im Auto steckt.
+
+        Dauerlaerm erkennt der Horcher ohnehin selbst -- daran, dass ein
+        Abschnitt nie durch Stille endet. Dafuer braucht er dieses Wort
+        nicht.
+
+        Wofuer er es braucht: Auch eine ruhige Fahrt ist laut genug, dass
+        ein Zuruf zwischen Motor und Fahrbahn liegt, ohne dass der
+        Abschnitt je gekappt wuerde. Dann darf er das Weckwort auch
+        mitten im Satz suchen statt nur am Anfang -- dieselbe Lockerung
+        wie im gemessenen Laerm, nur ausgeloest durch Wissen statt durch
+        Messung.
+
+        Am Schreibtisch bleibt es bei der strengen Regel.
+        """
+        an = bool(an)
+        if an != self._auto:
+            wo = f" ({geraet})" if geraet else ""
+            print(f"  (Auto: {'ein' if an else 'aus'}{wo})")
+        self._auto = an
 
     def frage_offen(self, an: bool) -> None:
         """Steht gerade eine Rueckfrage offen?
