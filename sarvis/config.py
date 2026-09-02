@@ -300,6 +300,8 @@ SCHNELLE_WERKZEUGE = {
     # Nur lesen, und zwar in einem Ordner, in den ausschliesslich
     # Sascha selbst etwas legt.
     "eingang_zeigen", "datei_lesen",
+    # Reine Rechnerei, ohne jede Wirkung nach aussen.
+    "rechnen", "umrechnen",
     # Ein Tastendruck bzw. ein Datagramm, das niemand beantwortet.
     "medien_steuern", "kachel_zeigen", "kachel_weg",
     "web_zeigen", "web_schliessen", "route_zeigen",
@@ -1037,6 +1039,8 @@ WERKZEUG_STUFEN = {
     # er das lesen darf, was er gerade geschickt hat, waere albern.
     "eingang_zeigen":          "still",
     "datei_lesen":             "still",
+    "rechnen":                 "still",
+    "umrechnen":               "still",
 
     # Etwas neben der Engine einblenden. Still, und zwar deutlich: Eine
     # Kachel zeigt nur, was Sarvis ohnehin gerade sagt -- sie geht nicht

@@ -15,7 +15,8 @@ from .. import config
 
 from . import (auftrag, bericht, dokument, eingang, erinnern, fachdaten,
                finanzen, google, kacheln, lesen, medien, musik, programme,
-               projekte, rechner, telegram, unterwegs, verlauf, wetter, zeit)
+               projekte, rechnen, rechner, telegram, unterwegs, verlauf,
+               wetter, zeit)
 
 SERVER = "sarvis"
 
@@ -70,6 +71,7 @@ def bauen(sagen, leuchten=None, melden=None):
     alle = (zeit.werkzeuge(wecker, protokoll)
             + erinnern.werkzeuge(protokoll, leuchten)
             + eingang.werkzeuge(protokoll, leuchten)
+            + rechnen.werkzeuge(protokoll, leuchten)
             + verlauf.werkzeuge(protokoll, leuchten))
     alle += kacheln.werkzeuge(protokoll, leuchten)
     alle += bericht.werkzeuge(protokoll, leuchten)
