@@ -38,6 +38,7 @@ Ohne Client-ID werden diese Werkzeuge gar nicht erst gebaut -- lieber
 keine als sechs, die nur "kein Zugang" sagen koennen. Das ist dieselbe
 Entscheidung wie bei den Finanz-Werkzeugen.
 """
+import asyncio
 import json
 import time
 
@@ -149,10 +150,25 @@ def _rufen(methode: str, weg: str, **args) -> tuple[int, dict]:
     try:
         with httpx.Client(timeout=ZEITGRENZE) as c:
             a = c.request(methode, f"{API}{weg}", headers=kopf, **args)
+        if a.status_code >= 400:
+            # Warum das in die Konsole geht und nicht nur in die Antwort:
+            # Am Morgen des 03.09. meldete Sarvis zweimal "das ging
+            # nicht", waehrend die Musik tat, was sie sollte. Im
+            # Protokoll stand nur sein Satz -- welchen Code Spotify
+            # geschickt hatte, war nicht mehr feststellbar. Eine Zeile
+            # hier haette die halbe Suche erspart.
+            grund = ""
+            try:
+                grund = str((a.json().get("error") or {}).get("message", ""))
+            except ValueError:
+                pass
+            print(f"  (Spotify {methode} {weg}: {a.status_code}"
+                  + (f" — {grund}" if grund else "") + ")")
         if a.status_code == 204 or not a.content:
             return a.status_code, {}
         return a.status_code, a.json()
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError) as e:
+        print(f"  (Spotify {methode} {weg}: {type(e).__name__} — {e})")
         return 0, {}
 
 
@@ -167,6 +183,55 @@ def _kein_geraet() -> dict:
             "Es läuft gerade auf keinem Gerät Spotify. Mach es "
             "irgendwo auf — auf dem Rechner, dem Handy oder einer Box —, "
             "dann kann ich dort abspielen."}], "is_error": True}
+
+
+# WARUM HIER NACHGESEHEN WIRD, STATT DEM STATUSCODE ZU GLAUBEN
+#
+# Gemessen am Morgen des 03.09.: "Mach die Musik aus" hat die Musik
+# ausgemacht -- Sarvis meldete "das ging nicht". Beim Wiedereinschalten
+# dasselbe umgekehrt: "Spotify meldet einen Fehler", waehrend die Musik
+# schon lief. Sascha musste ihm sagen, dass es geklappt hatte.
+#
+# Spotify ist mit Fehlercodes grosszuegig. Ein Geraet, das ueber Connect
+# nicht sauber als "aktiv" gemeldet ist, fuehrt den Befehl trotzdem aus
+# und antwortet mit 404 oder 403. Wer dem Code glaubt, sagt das Gegenteil
+# dessen, was der Nutzer gerade hoert -- und das ist der teuerste Fehler,
+# den ein Assistent machen kann: Er widerspricht der Wirklichkeit im Raum.
+#
+# Deshalb: Bei jeder Fehlermeldung wird EINMAL nachgesehen, wie es
+# wirklich steht. Der Zustand entscheidet, nicht die Zahl.
+_ZIELZUSTAND = {
+    "pause":           ("is_playing", False),
+    "weiter":          ("is_playing", True),
+    "zufall_an":       ("shuffle_state", True),
+    "zufall_aus":      ("shuffle_state", False),
+    "wiederholen_an":  ("repeat_state", ("context", "track")),
+    "wiederholen_aus": ("repeat_state", ("off",)),
+}
+
+
+async def _hat_gewirkt(was: str) -> bool | None:
+    """Ist trotz Fehlermeldung passiert, was passieren sollte?
+
+    True/False, oder None wenn es sich nicht feststellen laesst -- etwa
+    bei "naechster Titel", wo ohne den Zustand von vorher kein Vergleich
+    moeglich ist. None heisst: bei der ehrlichen Fehlermeldung bleiben.
+    """
+    ziel = _ZIELZUSTAND.get(was)
+    if ziel is None:
+        return None
+    feld, soll = ziel
+    # Spotify braucht einen Moment, bis der neue Zustand ueberall steht.
+    # Ohne diese Pause liest man den alten und meldet einen Fehlschlag,
+    # der gerade dabei ist, keiner zu sein.
+    await asyncio.sleep(0.6)
+    stand, d = _rufen("GET", "/me/player")
+    if stand != 200 or not d:
+        return None
+    ist = d.get(feld)
+    if ist is None:
+        return None
+    return (ist in soll) if isinstance(soll, tuple) else (bool(ist) is soll)
 
 
 def _dauer(ms) -> str:
@@ -272,8 +337,12 @@ def werkzeuge(protokoll, leuchten=None):
 
         if not was:
             stand, _ = _rufen("PUT", weg)
-            if stand == 404:
-                return _kein_geraet()
+            if stand not in (200, 202, 204):
+                if not await _hat_gewirkt("weiter"):
+                    return (_kein_geraet() if stand == 404 else
+                            {"content": [{"type": "text", "text":
+                             "Das Fortsetzen ging nicht."}],
+                             "is_error": True})
             return {"content": [{"type": "text", "text": "Läuft wieder."}]}
 
         sorte = {"titel": "track", "album": "album",
@@ -356,9 +425,11 @@ def werkzeuge(protokoll, leuchten=None):
                     f"{was} kenne ich nicht."}], "is_error": True}
 
         stand, _ = _rufen(methode, weg)
-        if stand == 404:
-            return _kein_geraet()
         if stand not in (200, 202, 204):
+            if await _hat_gewirkt(was):
+                return {"content": [{"type": "text", "text": "Erledigt."}]}
+            if stand == 404:
+                return _kein_geraet()
             return {"content": [{"type": "text", "text":
                     "Ging nicht."}], "is_error": True}
         return {"content": [{"type": "text", "text": "Erledigt."}]}
