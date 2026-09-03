@@ -37,3 +37,45 @@ Oberfläche hinge in einer Endlosschleife aus Verbinden und Verlieren.
 
 Ein eigener Block für WebSockets. Caddy erkennt das Upgrade selbst und
 reicht es durch.
+
+## Google neu anmelden -- auf dem Server, nicht auf Windows
+
+`google_anmelden.bat` im Projektwurzelordner ist aus der Zeit, als Sarvis
+auf Saschas Rechner lief. Sie hilft hier nicht: Sie schreibt den Zugang
+in den Windows-Projektordner, gebraucht wird er aber in
+`/srv/data/sarvis/google_token.json`. Der Server hat dafür keinen
+Browser, also kann der übliche Weg -- Fenster auf, bestätigen, fertig --
+nicht laufen.
+
+`google_anmelden_server.py` teilt ihn deshalb in zwei Schritte:
+
+    docker exec sarvis python \
+      /srv/storage/projects/sarvis/einsatz/google_anmelden_server.py link
+
+Der ausgegebene Link geht an Sascha, er bestätigt im Browser und landet
+auf einer **Fehlerseite** (`localhost:8123` gibt es auf seinem Rechner
+nicht). Das ist der Normalfall, nicht der Fehler -- gebraucht wird nur
+die Adresszeile dieser Seite:
+
+    docker exec -e OAUTHLIB_INSECURE_TRANSPORT=1 -e OAUTHLIB_RELAX_TOKEN_SCOPE=1 \
+      sarvis python \
+      /srv/storage/projects/sarvis/einsatz/google_anmelden_server.py \
+      code "<die zurückkopierte Adresse>"
+
+Die beiden Umgebungsvariablen sind nötig, nicht optional: `oauthlib`
+verweigert `http` grundsätzlich (bei `localhost` unbegründet), und
+Google gibt die Bereiche in anderer Reihenfolge zurück, als sie
+angefragt wurden. Ohne sie bricht der Eintausch ab -- und ein
+Google-Code gilt nur einmal, der Link muss dann neu geholt werden.
+
+Danach greift es sofort: Sarvis hängt seinen Merker am Änderungsstempel
+der Tokendatei, ein Neustart ist nicht nötig.
+
+## Warum das alle sieben Tage passiert
+
+Das Google-Projekt steht im **Testing**-Modus, und dort wirft Google den
+Auffrisch-Schlüssel nach sieben Tagen weg -- er meldet dann
+`invalid_grant: Token has been expired or revoked`, und kein Auffrischen
+hilft mehr, nur die Neuanmeldung oben. Dauerhaft beendet ist das erst,
+wenn der Zustimmungsbildschirm in der Google Cloud Console auf
+**In Produktion** steht.

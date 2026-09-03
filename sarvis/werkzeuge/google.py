@@ -70,7 +70,7 @@ def _dienst(name: str, fassung: str):
     """Einen API-Zugang bauen und merken, solange die Tokendatei dieselbe ist.
 
     Vorher wurde ein einmal gebauter Dienst fuer immer behalten. Nach den
-    sieben Testing-Tagen half dann auch google_anmelden.bat nicht: Die
+    sieben Testing-Tagen half dann auch eine neue Anmeldung nicht: Die
     schreibt eine neue Tokendatei, laeuft aber in einem eigenen Prozess --
     das laufende Sarvis hielt weiter den Dienst mit dem toten Zugang und
     scheiterte bis zum Neustart. Deshalb haengt der Merker jetzt am
@@ -743,12 +743,14 @@ def _fehlt():
     """
     if not config.GOOGLE_TOKEN.exists():
         return {"content": [{"type": "text", "text":
-                "Google ist nicht angemeldet. Einmalig google_anmelden.bat "
-                "ausführen."}], "is_error": True}
+                "Google ist nicht angemeldet. Das wird auf dem Server "
+                "nachgeholt — der Weg steht in einsatz/LIESMICH.md."}],
+                "is_error": True}
     return {"content": [{"type": "text", "text":
             "Der Google-Zugang ist abgelaufen — im Testing-Modus passiert "
-            "das alle sieben Tage. Sag dem Nutzer, er soll "
-            "google_anmelden.bat ausführen; das dauert zwanzig Sekunden."}],
+            "das alle sieben Tage. Sag dem Nutzer, dass die Neuanmeldung "
+            "auf dem Server nachgeholt werden muss; die Windows-Datei "
+            "google_anmelden.bat hilft dabei nicht."}],
             "is_error": True}
 
 
@@ -757,9 +759,9 @@ def zustand() -> str:
     if not config.GOOGLE_ZUGANG.exists():
         return "keine Zugangsdaten"
     if not config.GOOGLE_TOKEN.exists():
-        return "nicht angemeldet — google_anmelden.bat ausführen"
+        return "nicht angemeldet — einsatz/google_anmelden_server.py link"
     if _zugangsdaten() is None:
-        return "Zugang abgelaufen — google_anmelden.bat ausführen"
+        return "Zugang abgelaufen — einsatz/google_anmelden_server.py link"
     return "angemeldet"
 
 
