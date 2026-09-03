@@ -221,6 +221,30 @@ REINREDEN = True
 # seiner eigenen Rueckfrage, was albern ist.
 NACHHOEREN_SEK = 18.0
 
+# Dasselbe Fenster, aber im Auto. Achtzehn Sekunden ohne Weckwort sind
+# am Schreibtisch richtig und im Auto eine Einladung ans Radio: Dort
+# redet dauernd jemand, und jeder Satz in einem offenen Fenster gilt als
+# Zuruf. Gemessen am Morgen des 03.09.: Das Fenster war zwar meistens
+# schon zu, aber die Faelle, in denen es offen stand, waren durchweg
+# Fremdtext.
+#
+# Kurz heisst nicht nutzlos: Der Fall, fuer den das Fenster gebaut ist --
+# er hat gerade gefragt, du antwortest -- passiert in den ersten Sekunden.
+NACHHOEREN_AUTO_SEK = 6.0
+
+# Wie lange er nach einem NACKTEN Weckwort still weiterhoert.
+#
+# Der Hintergrund steht ausfuehrlich in weckwort.py (_nur_weckwort).
+# Kurz: Whisper bekommt "Hey Sarvis" als Hotword mit und gibt bei
+# Rauschen genau dieses Wort zurueck -- der Hinweis kommt als Text
+# heraus. Am Morgen des 03.09. war jeder einzelne der zwoelf Fehlstarts
+# wortgleich "Hey Sarvis" und sonst nichts.
+#
+# Statt darauf mit "Zu Diensten" zu antworten, hoert er kurz still zu.
+# Kam der Ruf von dir, folgt der Satz sofort und wird bearbeitet. Kam er
+# aus dem Radio, folgt nichts, und niemand hat etwas gemerkt.
+WECKWORT_NACKT_SEK = 8.0
+
 # Notbremse gegen Dauerbeschallung -- ein laufender Fernseher soll den
 # Puffer nicht endlos fuellen. Stand auf 9 Sekunden, und das war keine
 # Notbremse, sondern eine Wortmeldung: Wer einen Gedanken ausformuliert,

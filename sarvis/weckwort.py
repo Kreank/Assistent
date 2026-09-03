@@ -704,11 +704,43 @@ class Horcher:
         # immer weiter.
         vorher_unfertig = self._zuruf_unfertig
         self._zuruf_unfertig = False
-        if (gekappt and zuruf is not None and not vorher_unfertig
+        if (mitten and zuruf is not None and not vorher_unfertig
                 and len(zuruf.split()) < 2):
             self._zuruf_unfertig = True
             print(f"  * Weckwort am Stückrand: {text[-40:]!r} "
                   f"— warte auf den Rest")
+            return False
+
+        # NACKTES WECKWORT IM LAERM ODER AUTO -- der haeufigste Fehlstart.
+        #
+        # Whisper bekommt "Hey Sarvis" als Hotword mit (siehe oben, die
+        # hoeren()-Zeile). Bei Rauschen und Fremdgeplapper gibt es genau
+        # diesen Hinweis als Text zurueck -- der Prompt kommt heraus, wo
+        # nichts hineinging. Das ist kein Verhoeren, sondern ein bekanntes
+        # Verhalten des Modells, dieselbe Familie wie die Abspann-Saetze
+        # in _HALLUZINATIONEN.
+        #
+        # GEMESSEN am Morgen des 03.09. im Auto: zwoelf Fehlstarts in
+        # zwanzig Minuten, und ALLE ZWOELF lauteten wortgleich "Hey
+        # Sarvis" und sonst nichts. Kein einziger trug einen Zuruf. Er
+        # antwortete zwoelfmal "Zu Diensten", "Schieß los", "Sag an" --
+        # in ein Auto, in dem niemand ihn gerufen hatte.
+        #
+        # Warum es hier nicht reicht, den Text zu verwerfen: Manchmal ist
+        # der Ruf echt. Man sagt "Hey Sarvis", holt Luft und fragt dann.
+        # Deshalb wird nicht verworfen, sondern STILL zugehoert -- ein
+        # kurzes Fenster, in dem der naechste Satz ohne Weckwort gilt.
+        # Kommt er, wird er bearbeitet; kommt nichts, hat es niemand
+        # gemerkt. Der Fehlstart kostet dann Rechenzeit statt Aufmerksam-
+        # keit, und das ist der billigere Fehler.
+        #
+        # Nur im Laerm und im Auto. Am Schreibtisch, wo ein Stueck durch
+        # Stille begrenzt ist, ist ein nacktes "Hey Sarvis" fast immer
+        # echt -- dort bleibt es beim gesprochenen "Ja?".
+        if mitten and zuruf is not None and not zuruf.strip():
+            self.nachhoeren(config.WECKWORT_NACKT_SEK)
+            print(f"  (nur das Weckwort, kein Zuruf: {text!r} "
+                  f"— {config.WECKWORT_NACKT_SEK:.0f}s still zugehört)")
             return False
 
         if zuruf is None:
@@ -810,8 +842,16 @@ class Horcher:
         """Kurzes Fenster, in dem kein Weckwort noetig ist."""
         if not self._laeuft:
             return
+        # Im Auto ist das Standardfenster kuerzer. Achtzehn Sekunden
+        # ohne Weckwort sind am Schreibtisch richtig; im Auto redet in
+        # dieser Zeit das Radio weiter, und jeder Satz im offenen
+        # Fenster gilt als Zuruf. Eine ausdrueckliche Angabe (etwa nach
+        # einer Rueckfrage) sticht das -- dort ist DEINE Antwort gemeint
+        # und soll nicht an der Fahrt scheitern.
+        vorgabe = (config.NACHHOEREN_AUTO_SEK if self._auto
+                   else config.NACHHOEREN_SEK)
         self._nachhoeren_bis = time.perf_counter() + (
-            config.NACHHOEREN_SEK if sekunden is None else sekunden
+            vorgabe if sekunden is None else sekunden
         )
 
     def hoert_nach(self, zeitpunkt: float | None = None) -> bool:
