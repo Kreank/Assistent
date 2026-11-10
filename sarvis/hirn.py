@@ -124,6 +124,16 @@ class Hirn:
                 effort="low",
                 # Wortweise Ausgabe, damit der Mund frueh anfangen kann.
                 include_partial_messages=True,
+                # Alle Werkzeuge von Anfang an laden statt erst suchen.
+                # GEMESSEN 10.11.2026 an allen Gespraechen seit dem
+                # Umzug: 70 von 317 Werkzeugaufrufen waren ToolSearch --
+                # jedes Mal eine ganze Modellrunde, bevor das eigentliche
+                # Werkzeug laufen durfte. "Wie sieht es auf dem Server
+                # aus" brauchte so 10 s bis zum ersten Ton. Und weil vor
+                # der Suche noch nichts gesagt war, sprang der System-
+                # Wartesatz an, und danach sagte er seinen eigenen:
+                # "Sekunde. Moment, ich seh mir das an."
+                env={"ENABLE_TOOL_SEARCH": "false"},
             )
         )
         await self.klient.connect()
@@ -154,6 +164,20 @@ class Hirn:
             befehl = str(e.get("command") or "")
             return (schutz.befehl_stufe(befehl), "befehl_ausfuehren",
                     {"befehl": befehl})
+
+        # Sarvis' eigenes Versandwerkzeug. Ein blosser Name ("das
+        # Angebot") sucht nur in Eingang und Ablage -- still. Erst ein
+        # Pfad auf den Server wird gemessen.
+        if werkzeug == "datei_schicken":
+            was = str(e.get("pfad") or "").strip()
+            if not was or not ("/" in was or was.startswith("~")):
+                return "still", werkzeug, e
+            try:
+                ziel = str(schutz.pfad_aufloesen(was))
+            except (OSError, RuntimeError):
+                ziel = was
+            return (schutz.versenden_stufe(ziel), "datei_schicken",
+                    {**e, "pfad": ziel})
 
         pfad = str(e.get("file_path") or e.get("path") or "")
         if werkzeug in ("Write", "Edit"):

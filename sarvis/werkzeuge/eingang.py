@@ -382,6 +382,38 @@ def eingang_zeile(seit: float) -> str:
             "nicht.]")
 
 
+# Bilder gehen nicht als Text, sondern als BILD ins Gespraech -- Claude
+# sieht sie dann wirklich. Vorher lief ein Foto durch _aus_text und kam
+# als Zeichensalat an.
+BILD_ENDUNGEN = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
+                 ".heic", ".heif"}
+# Laengste Kante, auf die verkleinert wird. Mehr nutzt das Modell nicht,
+# und ein Handyfoto mit 4000 px und 6 MB liegt ueber der Grenze der API.
+BILD_KANTE = 1568
+
+
+def bild_von(pfad: Path) -> tuple:
+    """Ein Bild als (jpeg_bytes, Hinweis) -- verkleinert ueber PyAV.
+
+    PyAV liegt ohnehin im Bild (ElevenLabs-MP3). Pillow nachzuziehen
+    hiesse einen Image-Neubau mit 1,5 GB CUDA-Raedern -- fuer etwas, das
+    PyAV in 0,1 s kann (gemessen 10.11.2026: 1783x1190 PNG -> 103 KB).
+    """
+    import av
+    with av.open(str(pfad)) as c:
+        bild = next(c.decode(video=0))
+    w, h = bild.width, bild.height
+    s = min(1.0, BILD_KANTE / max(w, h))
+    w2, h2 = max(2, int(w * s) // 2 * 2), max(2, int(h * s) // 2 * 2)
+    cc = av.CodecContext.create("mjpeg", "w")
+    cc.width, cc.height, cc.pix_fmt = w2, h2, "yuvj420p"
+    cc.options = {"qscale": "4"}
+    g = bild.reformat(width=w2, height=h2, format="yuvj420p")
+    daten = b"".join(bytes(x) for x in cc.encode(g))
+    daten += b"".join(bytes(x) for x in cc.encode(None))
+    return daten, f"{w}x{h} Pixel"
+
+
 def werkzeuge(protokoll=None, leuchten=None) -> list:
     def blinken():
         if leuchten:
@@ -412,7 +444,8 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     @tool(
         "datei_lesen",
         "Liest eine hereingeschickte Datei und gibt ihren Inhalt zurück — "
-        "Text, Code, PDF, Word, Excel. Ohne Namen die zuletzt "
+        "Text, Code, PDF, Word, Excel; Fotos und Bilder SIEHST du "
+        "(kommen als Bild). Ohne Namen die zuletzt "
         "angekommene. Der Name muss nicht genau stimmen, ein Stück davon "
         "reicht ('das Angebot', 'die Preisliste').",
         {
@@ -442,6 +475,30 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             pfad = dateien[-1]
 
         blinken()
+        if pfad.suffix.lower() in BILD_ENDUNGEN:
+            import base64
+            try:
+                daten, mass = await __import__("asyncio").to_thread(
+                    bild_von, pfad)
+            except Exception as e:
+                return {"content": [{"type": "text", "text":
+                        f"Das Bild {pfad.name} ließ sich nicht öffnen "
+                        f"({type(e).__name__}). Bei HEIC hilft es, am Handy "
+                        "'als JPG teilen' zu wählen."}], "is_error": True}
+            vermerken(f"datei_lesen: Bild {pfad.name} ({mass})")
+            return {"content": [
+                {"type": "text", "text": f"--- {pfad.name} ({mass}) ---"},
+                {"type": "image", "data": base64.b64encode(daten).decode(),
+                 "mimeType": "image/jpeg"}]}
+        if pfad.suffix.lower() in {".mp3", ".m4a", ".ogg", ".opus", ".wav",
+                                   ".aac", ".flac", ".mp4", ".mov", ".webm",
+                                   ".3gp", ".mkv", ".zip"}:
+            return {"content": [{"type": "text", "text":
+                    f"{pfad.name} liegt im Eingang ({pfad.stat().st_size // 1024} KB) "
+                    f"unter {pfad}. Hineinlesen kann ich so etwas nicht direkt; "
+                    "weiterschicken (mail_senden, telegram_senden, "
+                    "datei_schicken) geht, ein ZIP kann ich mit der Shell "
+                    "entpacken."}]}
         text = await __import__("asyncio").to_thread(text_von, pfad)
         vermerken(f"datei_lesen: {pfad.name} ({len(text)} Zeichen)")
         return {"content": [{"type": "text", "text":

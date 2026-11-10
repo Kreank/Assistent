@@ -245,6 +245,42 @@ def schreiben_stufe(pfad: str) -> str:
     return "fragen"
 
 
+def pfad_aufloesen(was: str) -> Path:
+    """"~/x" heisst SASCHAS Benutzerordner, nicht den des Containers.
+
+    Im Container ist HOME /srv/data/sarvis/home -- expanduser() fuehrte
+    "~/Screenshot.png" also in Sarvis' eigenes Zuhause, wo es die Datei
+    nicht gibt (gemessen 10.11.2026).
+    """
+    was = str(was or "").strip()
+    if was == "~" or was.startswith("~/"):
+        was = str(config.PROJEKT_ORTE["privat"]) + was[1:]
+    return Path(was).expanduser().resolve()
+
+
+def versenden_stufe(pfad: str) -> str:
+    """Eine Datei (oder einen Ordner als ZIP) aufs Handy schicken.
+
+    Milder als lesen_stufe, und zwar aus der Sache: Beim Versenden sieht
+    das MODELL den Inhalt gar nicht -- die Bytes gehen am Gespraech
+    vorbei direkt an Saschas Geraet. Ein PDF muss deshalb nicht erst
+    "pruefbar" sein, bevor es still raus darf.
+
+    Streng bleibt, was Zugangsdaten enthaelt: Die gehen ueber eine
+    Adresse ohne Anmeldung (nur 192 Bit Zufall, siehe netz/blaetter.py),
+    und ein Passwort soll nicht nebenbei in einem Download-Ordner landen.
+    """
+    if not pfad:
+        return "fragen"
+    if _passt(pfad, NIE_LESEN):
+        return "nie"
+    if heikel(pfad) or _unter(pfad, config.FRAGEN_TROTZ_FREI):
+        return "fragen"
+    if _unter(pfad, list(config.FREI_LESEN) + list(config.FREI_DURCHSUCHEN)):
+        return "frei"
+    return "fragen"
+
+
 # Befehle, die nur hinsehen. Ohne diese Liste fragt Sarvis vor jedem
 # "git status" nach, und dann schaltet man ihn nach zehn Minuten ab.
 NUR_SCHAUEN = (

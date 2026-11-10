@@ -40,7 +40,7 @@ from . import config
 # und ortlos heisst laut _unter() UEBERALL. Ein "ja, such hier eine
 # halbe Stunde lang" gab damit auch D:\Strato Server frei.
 _PFAD_WERKZEUGE = ("datei_lesen", "datei_schreiben", "ordner_ansehen",
-                   "ordner_durchsuchen")
+                   "ordner_durchsuchen", "datei_schicken")
 
 # Werkzeuge, die statt eines Pfades ein PROJEKT nennen. Ihr Ort ist der
 # Projektordner -- wer einen Auftrag im Projekt X freigibt, meint das

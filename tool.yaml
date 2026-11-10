@@ -1,0 +1,46 @@
+name: sarvis
+zweck: "Saschas persönlicher Sprachassistent mit Gedächtnis, Kalender, Mail, Musik und Werkzeugen (Web-App)"
+status: aktiv
+repo: git@github.com:Kreank/Assistent.git
+
+erreichbar:
+  adresse: sarvis.tech-artist.de
+  port: 8900                   # Host-Netz, lauscht selbst nur auf 127.0.0.1
+  wer: oeffentlich
+login: eigen                   # Geräteschlüssel je Gerät (geraete.json)
+gesund: /leben
+
+daten:
+  personenbezogen: ja
+  inhalt: "Gesprächsverlauf, Gedächtnis (Personen, Notizen), Aufträge, Sprachaufnahmen/Stimmen, Google-/Spotify-Zugänge"
+datenfluss:
+  - dienst: Anthropic (Claude)
+    was: "Gesprächsinhalte, Gedächtnisauszüge und Werkzeug-Ergebnisse (inkl. Mails, Termine, Finanzen)"
+  - dienst: ElevenLabs
+    was: "Antworttexte für die Sprachausgabe"
+  - dienst: Google (Gmail, Kalender, Drive, Kontakte, Aufgaben)
+    was: "Lesen von Mails/Terminen/Dateien, Anlegen von Aufgaben"
+  - dienst: Telegram
+    was: "Nachrichten und Kontakte lesen/suchen (Konto angemeldet laut Startprotokoll)"
+  - dienst: Spotify
+    was: "Musiksteuerung, Suchanfragen"
+  - dienst: Wetter/Orte/Tanken (Open-Meteo, Nominatim, Tankerkönig)
+    was: "Ortsangaben und Suchbegriffe"
+
+geheimnisse:                   # in /srv/data/sarvis/.env und /srv/data/sarvis/claude.env, nicht im Projektstamm
+  - CLAUDE_CODE_OAUTH_TOKEN
+  - TELEGRAM_API_ID
+  - TELEGRAM_API_HASH
+  - FD_API_SCHLUESSEL
+  - ELEVENLABS_SCHLUESSEL
+  - SPOTIFY_CLIENT_ID
+  - SPOTIFY_CLIENT_SECRET
+  - FRITZBOX_ADRESSE
+  - FRITZBOX_BENUTZER
+  - FRITZBOX_KENNWORT
+  - TANKERKOENIG_KEY
+  # dazu Dateien: google_token.json, google_zugang.json, spotify_token.json, geraete.json
+
+sicherung:
+  ordner: /srv/data/sarvis
+  postgres: null

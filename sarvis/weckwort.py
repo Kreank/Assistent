@@ -110,6 +110,43 @@ def _halluziniert(text: str) -> bool:
     return any(m in t for m in _HALLUZINATIONEN)
 
 
+# Woerter, mit denen ein deutscher Satz praktisch nie ENDET. Bewusst
+# ohne die abtrennbaren Vorsilben (an, auf, aus, mit, zu, ab ...) --
+# "Mach das Licht an" und "Hoer auf" sind fertig. Ebenso ohne das/die/der
+# ("Was ist das") und ohne Pronomen ("Was ist mit ihm").
+_HAENGT_NOCH = {
+    "und", "oder", "aber", "also", "sondern", "denn", "dass", "weil",
+    "wenn", "ob", "falls", "damit", "obwohl", "bevor", "nachdem", "sowie",
+    "der", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+    "ne", "nen", "mein", "meine", "meinen", "meinem", "meiner",
+    "dein", "deine", "deinen", "deinem", "deiner", "unser", "unsere",
+    "von", "vom", "zum", "zur", "im", "beim", "für", "über", "unter",
+    "zwischen", "gegen", "ohne", "wegen", "seit", "bis", "als", "wie",
+    "möchte", "möchten", "will", "würde", "würdest", "soll", "sollst",
+    "muss", "müsste", "kann", "könnte", "könntest", "wollte",
+    "äh", "ähm", "öhm", "hm", "zwar", "sozusagen", "quasi",
+}
+
+
+def _klingt_unfertig(text: str) -> bool:
+    """Hoert sich das an wie ein Satz, der noch weitergeht?
+
+    Nur am Ende ablesbar, und nur in die sichere Richtung: Lieber einmal
+    einen fertigen Satz drei Sekunden halten als einen halben losschicken.
+    Ein Satzzeichen am Ende (. ? !) gilt als fertig -- Whisper setzt es
+    bei abgebrochener Rede meist nicht.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t.endswith(("...", "…", ":", ",", " -", "–")):
+        return True
+    if t[-1] in ".?!":
+        return False
+    letztes = t.split()[-1].strip("\"'„“»«").lower()
+    return letztes in _HAENGT_NOCH
+
+
 def _klingt_wie_name(wort: str, schwelle: float | None = None) -> bool:
     """Ist dieses eine Wort der Name? Whisper verhoert ihn gern.
 
@@ -237,6 +274,10 @@ class Horcher:
         # Weckwort gefallen, aber der Satz war zu Ende des Stuecks noch
         # nicht fertig -- dann wird EINMAL weitergesammelt statt geweckt.
         self._zuruf_unfertig = False
+        # Ein angefangener Satz, auf dessen Rest gewartet wird -- und bis
+        # wann. Siehe config.UNFERTIG_WARTEN_SEK.
+        self._gehalten = ""
+        self._gehalten_bis = 0.0
         # Sitzt die sendende Oberflaeche im Auto? Die App sagt es uns
         # ueber den Draht ({"art": "auto", "an": true}) -- bei jedem
         # Wechsel und einmal direkt nach dem Willkommen.
@@ -477,8 +518,23 @@ class Horcher:
             except Exception:
                 pass
 
+    def _gehaltenes_losschicken(self) -> None:
+        """Der Rest kam nicht -- dann geht der Anfang so los, wie er ist."""
+        zuruf, self._gehalten = self._gehalten, ""
+        self._nachhoeren_bis = 0.0
+        print(f"\n  * Kein Rest gekommen, geht so los: {zuruf!r}")
+        self.pausiert = True
+        self._verwerfen()
+        self.wecken(zuruf)
+
     def _block(self, block: np.ndarray) -> None:
         jetzt = time.perf_counter()
+        # Wartet ein angefangener Satz, und es kam nichts mehr nach?
+        # Solange gerade geredet wird, nicht -- das ist ja der Rest.
+        if (self._gehalten and not self._redet
+                and jetzt >= self._gehalten_bis):
+            self._gehaltenes_losschicken()
+            return
         try:
             # Silero will 16-Bit-PCM: predict() teilt intern durch 32767.
             # Mit Fliesskomma-Werten aus sounddevice kommt dabei praktisch
@@ -784,13 +840,39 @@ class Horcher:
             # deuten() nicht kennt und das deshalb hier stumm verschwand.
             # Woertlich passiert: dreimal "YouTube" gesagt, dreimal
             # verworfen, ohne eine Zeile in der Konsole.
+            # Haengt ein angefangener Satz in der Luft, ist auch ein
+            # einzelnes Wort sein Rest ("... erinnern an" -- "Morgen.").
             if (len(text.split()) < 2
                     and not self._frage_offen
+                    and not self._gehalten
                     and rueckfrage.deuten(text) == rueckfrage.UNKLAR):
                 print(f"  (zu kurz fuer einen Zuruf, verworfen: {text!r})")
                 return False
             zuruf = text.strip()
             wie = "Nachhören"
+
+        # Der Rest eines angefangenen Satzes: vorne anhaengen. Kam statt
+        # dessen ein neues "Hey Sarvis", hat er von vorn angefangen --
+        # dann gilt der neue Anlauf, der alte Anfang ist verbraucht.
+        if self._gehalten:
+            if wie == "Nachhören":
+                zuruf = f"{self._gehalten} {zuruf}"
+            self._gehalten = ""
+
+        # Klingt das nach mehr? Dann noch nicht wecken, sondern warten.
+        # Nicht bei einer offenen Rueckfrage (dort ist "Ja" fertig) und
+        # nicht im Laermstueck (dort entscheidet der Schnitt, nicht er).
+        if (not gekappt and not self._frage_offen
+                and _klingt_unfertig(zuruf)):
+            self._gehalten = zuruf
+            self._gehalten_bis = (time.perf_counter()
+                                  + config.UNFERTIG_WARTEN_SEK)
+            self._nachhoeren_bis = max(self._nachhoeren_bis,
+                                       self._gehalten_bis)
+            print(f"  … klingt unfertig, warte auf den Rest: "
+                  f"{zuruf[-50:]!r}")
+            self._verwerfen()
+            return False
 
         self._nachhoeren_bis = 0.0
         print(f"\n  * {wie}: {text!r}")

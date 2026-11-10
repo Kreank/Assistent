@@ -1894,9 +1894,15 @@ function blattZeigen(m) {
     // Ein PDF liesse sich rahmen -- aber nicht in einem sandbox-iframe
     // ohne Skripte, denn Chromes eigener Betrachter ist selbst eine
     // Anwendung. Also ehrlich: ein Satz und ein Knopf.
-    text.innerHTML = `<p>Diese Datei liegt für dich bereit. `
+    // Ein Bild zeigen wir gleich -- ein <img> fuehrt nichts aus, und
+    // die Adresse ist dieselbe wie die zum Herunterladen.
+    const bild = BILD_ENDUNG.test(name)
+      ? `<img class="vorschau" alt="" src="${sicher(adresse)}">` : '';
+    text.innerHTML = bild + `<p>Diese Datei liegt für dich bereit. `
       + `<strong>${sicher(name)}</strong>${gross ? ' · ' + sicher(gross) : ''}</p>`
-      + `<p>Sie bleibt sieben Tage abrufbar.</p>`;
+      + `<p>Du findest sie auch später oben unter „Dateien“.</p>`;
+    // Die Liste nachziehen, damit sie dort sofort steht.
+    setTimeout(dateienLaden, 300);
   } else {
     // Unbekannte Sorte: still ueberspringen, wie ueberall am Draht.
     return;
@@ -2012,6 +2018,8 @@ function empfangen(m) {
       document.getElementById('geraet').textContent = m.geraet || '';
       document.getElementById('tor').classList.add('weg');
       localStorage.setItem('sarvis-schluessel', schluessel);
+      dateienLaden();
+      geteiltAbholen();
       break;
     case 'zustand':
       if (m.strom) break;            // gehört einem Vorgang, nicht dem Ring
@@ -2821,5 +2829,198 @@ if (localStorage.getItem('sarvis-horchen')) {
 }
 requestAnimationFrame(schlag);
 if (schluessel) { document.getElementById('tor').classList.add('weg'); verbinden(); }
+// An der WURZEL registriert -- unter /dabei/ reichte er nur bis /dabei/
+// und sah das Teilen aus dem Android-Menue nie (POST /teilen).
 if ('serviceWorker' in navigator)
-  navigator.serviceWorker.register('/dabei/waechter.js').catch(() => {});
+{
+  navigator.serviceWorker.register('/waechter.js', { scope: '/' }).catch(() => {});
+  // Den alten unter /dabei/ abmelden -- er speicherte jede Antwort.
+  navigator.serviceWorker.getRegistrations().then(alle => alle
+    .filter(r => r.scope.endsWith('/dabei/')).forEach(r => r.unregister()))
+    .catch(() => {});
+}
+
+// =====================================================================
+// Dateien: hin (Büroklammer, Einfügen, Ziehen, Teilen) und her (Ablage)
+// =====================================================================
+const BILD_ENDUNG = /\.(jpe?g|png|gif|webp|bmp)$/i;
+const FEHLER_DATEI = {
+  401: 'kein Zugang — Schlüssel prüfen',
+  413: 'zu groß',
+  415: 'diese Art Datei nimmt er nicht',
+};
+
+function hinweis(text) {
+  S.untertitel = text; S.wer = 'du'; S.hervor = 4; zeigeUntertitel();
+}
+
+/* Eine Datei hochladen, mit Fortschritt. XMLHttpRequest statt fetch,
+ * weil nur er den Upload-Fortschritt meldet -- bei 40 MB über Mobilfunk
+ * ist "es passiert nichts" sonst nicht von "es hängt" zu unterscheiden. */
+function einsHochladen(datei) {
+  return new Promise(fertig => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/datei');
+    x.setRequestHeader('X-Sarvis-Schluessel', schluessel);
+    x.upload.onprogress = e => {
+      if (e.lengthComputable && e.total > 300000)
+        hinweis(`Schicke ${datei.name} … ${Math.round(e.loaded / e.total * 100)} %`);
+    };
+    x.onload = () => {
+      let a = {}; try { a = JSON.parse(x.responseText); } catch {}
+      if (x.status === 200 && a.gut) { fertig(true); return; }
+      const warum = FEHLER_DATEI[x.status] || a.fehler || `Fehler ${x.status}`;
+      const dazu = a.endung ? ` (${a.endung})` : '';
+      hinweis(`${datei.name}: ${warum}${dazu}`);
+      fertig(false);
+    };
+    x.onerror = () => { hinweis(`${datei.name}: Verbindung abgebrochen`); fertig(false); };
+    const form = new FormData();
+    form.append('datei', datei, datei.name || 'datei');
+    x.send(form);
+  });
+}
+
+async function hochladen(dateien) {
+  const liste = Array.from(dateien || []).filter(d => d && d.size !== undefined);
+  if (!liste.length) return;
+  if (!schluessel) { hinweis('Erst verbinden, dann schicken.'); return; }
+  let gut = 0;
+  for (const d of liste) {
+    hinweis(`Schicke ${d.name} …`);
+    if (await einsHochladen(d)) gut++;
+  }
+  if (gut) {
+    const was = gut === 1 ? liste[0].name : `${gut} Dateien`;
+    hinweis(`${was} ist bei Sarvis — frag ihn einfach dazu.`);
+    document.getElementById('zeile').focus();
+  }
+  dateienLaden();
+}
+
+// Büroklammer
+document.getElementById('anhang').addEventListener('click', () =>
+  document.getElementById('dateiwahl').click());
+document.getElementById('dateiwahl').addEventListener('change', e => {
+  hochladen(e.target.files);
+  e.target.value = '';      // dieselbe Datei zweimal hintereinander geht sonst nicht
+});
+
+// Einfügen (Strg+V) -- ein Bildschirmfoto direkt an Sarvis.
+document.addEventListener('paste', e => {
+  const dateien = e.clipboardData && e.clipboardData.files;
+  if (dateien && dateien.length) { e.preventDefault(); hochladen(dateien); }
+});
+
+// Ziehen und Loslassen am Rechner.
+let ziehTiefe = 0;
+const ziehfeld = document.getElementById('ziehfeld');
+const hatDateien = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+document.addEventListener('dragenter', e => {
+  if (!hatDateien(e)) return;
+  e.preventDefault(); ziehTiefe++; ziehfeld.hidden = false;
+});
+document.addEventListener('dragover', e => { if (hatDateien(e)) e.preventDefault(); });
+document.addEventListener('dragleave', e => {
+  if (!hatDateien(e)) return;
+  if (--ziehTiefe <= 0) { ziehTiefe = 0; ziehfeld.hidden = true; }
+});
+document.addEventListener('drop', e => {
+  if (!hatDateien(e)) return;
+  e.preventDefault(); ziehTiefe = 0; ziehfeld.hidden = true;
+  hochladen(e.dataTransfer.files);
+});
+
+/* Teilen aus dem Android-Menü. Der Service Worker hat die Dateien in
+ * einen eigenen Zwischenspeicher gelegt (er kennt den Schlüssel nicht,
+ * der liegt hier im localStorage) -- jetzt holen wir sie ab und
+ * schicken sie mit Schlüssel hoch. */
+async function geteiltAbholen() {
+  const such = new URLSearchParams(location.search);
+  if (!such.has('geteilt')) return;
+  history.replaceState(null, '', '/');
+  if (such.get('geteilt') === 'verpasst') {
+    hinweis('Das Teilen kam nicht durch — bitte noch einmal teilen.');
+    return;
+  }
+  if (!('caches' in window)) return;
+  const lager = await caches.open('sarvis-teilen');
+  const schluesselListe = await lager.keys();
+  const dateien = []; let text = '';
+  for (const anfrage of schluesselListe) {
+    const antwort = await lager.match(anfrage);
+    if (antwort) {
+      if (antwort.headers.get('X-Text')) text = await antwort.text();
+      else {
+        const name = decodeURIComponent(antwort.headers.get('X-Name') || 'geteilt');
+        const blob = await antwort.blob();
+        dateien.push(new File([blob], name, { type: blob.type }));
+      }
+    }
+    await lager.delete(anfrage);
+  }
+  if (dateien.length) await hochladen(dateien);
+  // Geteilter Text oder Link: ins Eingabefeld, damit man noch sagen
+  // kann, was damit passieren soll -- nicht blind abschicken.
+  if (text) { const z = document.getElementById('zeile'); z.value = text; z.focus(); }
+}
+
+/* Die Ablage. */
+let ablageDaten = { von_sarvis: [], von_dir: [] };
+const zeitDeutsch = sek => {
+  const d = new Date(sek * 1000), heute = new Date();
+  const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === heute.toDateString() ? `heute ${uhr}`
+    : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + uhr;
+};
+
+async function dateienLaden() {
+  if (!schluessel) return;
+  try {
+    const a = await fetch('/dateien', { headers: { 'X-Sarvis-Schluessel': schluessel },
+                                        cache: 'no-store' });
+    if (!a.ok) return;
+    ablageDaten = await a.json();
+  } catch { return; }
+  const gesehen = Number(localStorage.getItem('sarvis-dateien-gesehen') || 0);
+  const neu = (ablageDaten.von_sarvis || []).filter(d => d.seit > gesehen).length;
+  const marke = document.getElementById('dateienneu');
+  marke.textContent = neu; marke.hidden = !neu;
+  if (!document.getElementById('ablage').hidden) ablageMalen();
+}
+
+function ablageMalen() {
+  const gesehen = Number(localStorage.getItem('sarvis-dateien-gesehen') || 0);
+  const von = ablageDaten.von_sarvis || [], hin = ablageDaten.von_dir || [];
+  const zeile = (d, link) => {
+    const neben = `${menge(d.bytes)}<br>${zeitDeutsch(d.seit)}`;
+    const name = sicher(d.datei || d.titel || 'Datei');
+    if (!link) return `<div class="datei"><span class="name">${name}</span>`
+      + `<span class="neben">${neben}</span></div>`;
+    const adresse = String(d.adresse || '');
+    if (!adresse.startsWith('/blatt/')) return '';
+    return `<a class="datei${d.seit > gesehen ? ' neu' : ''}" href="${sicher(adresse)}" `
+      + `download="${name}"><span class="name">${name}</span>`
+      + `<span class="neben">${neben}</span><span class="pfeil">&#8595;</span></a>`;
+  };
+  document.querySelector('#ablage .liste').innerHTML =
+    '<h3>Von Sarvis</h3>' + (von.length ? von.map(d => zeile(d, true)).join('')
+      : '<div class="leer">Noch nichts. Sag einfach „schick mir …“.</div>')
+    + '<h3>Von dir geschickt</h3>' + (hin.length ? hin.map(d => zeile(d, false)).join('')
+      : '<div class="leer">Noch nichts — Büroklammer unten, Einfügen oder Teilen.</div>');
+}
+
+document.getElementById('dateienknopf').addEventListener('click', () => {
+  const el = document.getElementById('ablage');
+  el.hidden = !el.hidden;
+  if (el.hidden) return;
+  ablageMalen();
+  dateienLaden();
+  // Ab jetzt gilt alles bis hierhin als gesehen.
+  const neuestes = Math.max(0, ...(ablageDaten.von_sarvis || []).map(d => d.seit));
+  if (neuestes) localStorage.setItem('sarvis-dateien-gesehen', String(neuestes));
+  document.getElementById('dateienneu').hidden = true;
+});
+document.getElementById('ablagezu').addEventListener('click', () => {
+  document.getElementById('ablage').hidden = true;
+});

@@ -442,6 +442,7 @@ gerade **alles** fertig geworden ist.
 | `klick` | `x`, `y`, `knopf` | dort hineinklicken |
 | `taste` | `text`, `sonder` | dort tippen |
 | `rollen` | `x`, `y`, `hoch` | dort scrollen |
+| `auto` | `an` | die Oberfläche sitzt im Fahrzeug (siehe unten) |
 
 <!-- /draht:hinaus -->
 
@@ -715,7 +716,7 @@ Antwort und ohne Hinweis, was falsch war.
 
 | | |
 |---|---|
-| Höchstens je Datei | **25 MB** (`config.DATEI_MAX`) |
+| Höchstens je Datei | **100 MB** (`config.DATEI_MAX`, seit 10.11.2026; vorher 25 MB) |
 | Zu groß | **413** `{"fehler": "zu gross", "hoechstens": 26214400}` |
 | Leere Datei | **400** `{"fehler": "leer"}` |
 | Falsches Feld | **400** `{"fehler": "kein Feld 'datei'"}` |
@@ -729,7 +730,8 @@ durch die Hintertür.
 - Text: `.txt .md .markdown .rst .log .csv .tsv .json .yaml .yml .toml .ini .cfg .conf .env .xml .html .htm .svg`
 - Code: `.py .js .ts .tsx .jsx .css .scss .sass .less .java .kt .kts .c .h .cpp .hpp .cs .go .rs .rb .php .swift .sql .gradle .dockerfile .diff .patch`
 - Dokumente: `.pdf .docx .doc .xlsx .xls .pptx .odt .ods .rtf .epub`
-- Bilder: `.png .jpg .jpeg .gif .webp .bmp .heic`
+- Bilder: `.png .jpg .jpeg .gif .webp .bmp .heic .heif` — Sarvis **sieht** sie (`datei_lesen` liefert ein Bild, kein Text)
+- Seit 10.11.2026 außerdem: `.zip .ics .vcf .gpx .kml .kmz .ppt .odp`, Audio `.mp3 .m4a .ogg .opus .wav .aac .flac`, Video `.mp4 .mov .webm .3gp .mkv` — angenommen und weiterschickbar, aber nicht hineingelesen
 
 Alles andere: **415** `{"fehler": "diese Art Datei nehme ich nicht", "endung": ".sh"}`
 
@@ -769,6 +771,74 @@ stimmen — „schau mal ins Angebot von Müller" findet `Angebot.docx`,
 
 Der Eingang hält die **60 jüngsten** Dateien; darüber fällt die älteste
 weg. Die App muss also nichts aufräumen.
+
+## Dateien abholen (seit 10.11.2026)
+
+Sarvis schickt Dateien mit dem Werkzeug `datei_schicken` — selbst
+Erzeugtes **und** jede Datei vom Server (Benutzerordner, Projekte,
+Sarvis' Daten; ein Ordner kommt als ZIP). Am Draht ist das nichts Neues:
+ein `blatt` der Sorte `datei`, wie bei `dokument_erstellen`. Neu sind
+zwei Dinge.
+
+### 1. Jede Dateiart, nicht nur PDF/Word/Excel
+
+`datei` kann jetzt **jeder** Dateiname sein (`foto.jpg`, `Plan.zip`,
+`README.md`). Die Oberfläche bietet ihn zum Herunterladen an wie bisher.
+Endet `datei` auf `.jpg .jpeg .png .gif .webp .bmp`, **darf** sie das
+Bild zusätzlich als Vorschau zeigen — dieselbe `adresse` als Bildquelle.
+Ausgeliefert wird immer als Anhang (`Content-Disposition: attachment`),
+HTML/SVG/JS nie mit ihrem echten Typ.
+
+Frist: Verschicktes bleibt **30 Tage** abrufbar (Berichte weiter 7).
+
+### 2. Die Dateiliste: `GET /dateien`
+
+Ein Blatt geht nur an Oberflächen, die **gerade verbunden** sind. Was
+kam, während die App zu war, holt sie hier ab — beim `willkommen` und
+nach jedem Datei-Blatt.
+
+```
+GET /dateien
+X-Sarvis-Schluessel: <Geräteschlüssel>
+```
+
+```json
+{
+  "von_sarvis": [
+    {"kennung": "…", "titel": "Angebot Müller", "datei": "Angebot.pdf",
+     "adresse": "/blatt/…", "bytes": 48211, "seit": 1794350000.1,
+     "bis": 1796942000.1}
+  ],
+  "von_dir": [
+    {"datei": "2026-11-10-2205-Plan.pdf", "bytes": 226503,
+     "seit": 1794350000.0}
+  ]
+}
+```
+
+- `von_sarvis`: neueste zuerst, nur noch gültige, ohne Berichte (`html`).
+  `adresse` wie beim Blatt — ohne Schlüssel abrufbar, Schutz ist die Kennung.
+- `von_dir`: was in Sarvis' Eingang liegt (höchstens 60), **ohne**
+  Download-Adresse — nur zur Anzeige.
+- `seit`/`bis` sind Unix-Sekunden. Was „neu“ ist, merkt sich die
+  Oberfläche selbst (die Web-App: `localStorage` `sarvis-dateien-gesehen`).
+- Ohne/falscher Schlüssel: **401** `{"fehler": "kein Zugang"}`.
+
+## Teilen aus dem Handy-Menü (Web-App)
+
+Die PWA trägt im Manifest ein `share_target` (`POST /teilen`,
+multipart, Dateifeld `dateien`, dazu `title`/`text`/`url`). Der Service
+Worker — seit 10.11.2026 an der **Wurzel** (`/waechter.js`, Scope `/`) —
+fängt den POST ab, legt die Dateien in den Cache `sarvis-teilen` und
+leitet auf `/?geteilt=1`; die Seite lädt sie mit Schlüssel über
+`POST /datei` hoch. Geteilter Text landet im Eingabefeld, nicht als
+Zuruf. Kommt der POST doch beim Server an (Worker noch nicht aktiv),
+antwortet er **303** nach `/?geteilt=verpasst` und nimmt nichts an —
+dort fehlt der Schlüssel.
+
+Eine native App braucht das nicht: Sie meldet sich selbst als
+Teilen-Ziel an (Android `ACTION_SEND`/`ACTION_SEND_MULTIPLE`) und lädt
+direkt über `POST /datei`.
 
 ### `auto` — die Oberfläche sitzt im Fahrzeug
 

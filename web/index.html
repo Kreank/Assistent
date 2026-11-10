@@ -401,6 +401,49 @@ body{display:flex;flex-direction:column;
 #tippen button{background:rgba(255,255,255,.09);border:none;border-radius:11px;
   color:var(--schrift);padding:0 18px;font-size:15px;font-weight:600}
 
+/* --- Dateien: Knopf, Ablage, Ziehfeld ------------------------------ */
+#dateienknopf{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);
+  border-radius:8px;color:rgba(232,241,253,.75);font:inherit;font-size:11px;
+  letter-spacing:.08em;padding:5px 10px;cursor:pointer;position:relative}
+#dateienneu{display:inline-block;min-width:16px;margin-left:6px;padding:0 4px;
+  border-radius:8px;background:#ffb347;color:#04080f;font-weight:700;
+  letter-spacing:0;text-align:center}
+#dateienneu[hidden]{display:none}
+#anhang{flex:0 0 auto;padding:0 13px !important;font-size:18px !important}
+#ablage{position:absolute;inset:8px;z-index:10;display:flex;flex-direction:column;
+  gap:8px;padding:10px 12px 12px;border:1px solid rgba(126,224,168,.34);
+  border-radius:14px;background:rgba(6,11,20,.96);backdrop-filter:blur(6px);
+  box-shadow:0 18px 50px rgba(0,0,0,.55)}
+#ablage[hidden]{display:none}
+#ablage .leiste{display:flex;align-items:center;gap:10px}
+#ablage .was{flex:1 1 auto;min-width:0}
+#ablage .titel{font-size:13px;font-weight:600;color:#7ee2a0}
+#ablage .dazu{font-size:11px;color:rgba(232,241,253,.42)}
+#ablagezu{font:inherit;font-size:12px;padding:6px 12px;border-radius:8px;
+  border:1px solid rgba(232,241,253,.22);background:transparent;
+  color:rgba(232,241,253,.62);cursor:pointer}
+#ablage .platz{flex:1 1 auto;min-height:0;overflow-y:auto}
+#ablage h3{margin:14px 2px 6px;font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:rgba(232,241,253,.45);font-weight:500}
+#ablage h3:first-child{margin-top:2px}
+#ablage .datei{display:flex;align-items:center;gap:10px;padding:9px 10px;
+  border-radius:10px;background:rgba(255,255,255,.04);margin-bottom:6px;
+  color:var(--schrift);text-decoration:none}
+#ablage a.datei:active{background:rgba(126,224,168,.14)}
+#ablage .datei .name{flex:1 1 auto;min-width:0;font-size:13.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ablage .datei .neben{flex:0 0 auto;font-size:11px;color:rgba(232,241,253,.45);
+  text-align:right}
+#ablage .datei .pfeil{flex:0 0 auto;color:#7ee2a0;font-size:15px}
+#ablage .datei.neu .name{color:#ffd8a8}
+#ablage .leer{font-size:13px;color:rgba(232,241,253,.45);padding:6px 2px}
+#ziehfeld{position:absolute;inset:8px;z-index:12;display:flex;align-items:center;
+  justify-content:center;border:2px dashed rgba(0,229,255,.6);border-radius:14px;
+  background:rgba(4,8,16,.82);color:#00e5ff;font-size:15px;letter-spacing:.06em}
+#ziehfeld[hidden]{display:none}
+#blatt .text img.vorschau{display:block;max-width:100%;max-height:55vh;
+  margin:0 auto 12px;border-radius:9px}
+
 /* --- Anmeldung ------------------------------------------------------ */
 #tor{position:fixed;inset:0;background:var(--grund);display:flex;
   flex-direction:column;align-items:center;justify-content:center;gap:16px;
@@ -483,6 +526,7 @@ body{display:flex;flex-direction:column;
 <div id="kopf">
   <span id="ampel"></span><span id="lage">nicht verbunden</span>
   <span id="geraet"></span>
+  <button id="dateienknopf" type="button" title="Dateien von und an Sarvis">Dateien<span id="dateienneu" hidden></span></button>
 </div>
 
 <div id="buehne">
@@ -542,6 +586,19 @@ body{display:flex;flex-direction:column;
               referrerpolicy="no-referrer"></iframe>
     </div>
   </div>
+  <!-- Die Ablage: alles, was Sarvis geschickt hat, und alles, was du
+       ihm geschickt hast. Kommt vom Server (GET /dateien) -- ein Blatt
+       geht nur an verbundene Oberflaechen, die Liste holt nach, was
+       kam, waehrend die App zu war. -->
+  <div id="ablage" hidden>
+    <div class="leiste">
+      <div class="was"><div class="titel">Dateien</div>
+        <div class="dazu">Von Sarvis bleiben sie 30 Tage abrufbar</div></div>
+      <button id="ablagezu" type="button">Schließen</button>
+    </div>
+    <div class="platz"><div class="liste"></div></div>
+  </div>
+  <div id="ziehfeld" hidden>Loslassen — geht an Sarvis</div>
   <div id="untertitel"></div>
 </div>
 
@@ -557,6 +614,9 @@ body{display:flex;flex-direction:column;
        und sie geht im EIGENEN Browser auf. -->
   <button id="fernsicht" type="button">Browser mitsehen</button>
   <form id="tippen">
+    <button id="anhang" type="button" title="Datei oder Foto an Sarvis schicken"
+            aria-label="Datei schicken">&#128206;</button>
+    <input id="dateiwahl" type="file" multiple hidden>
     <input id="zeile" placeholder="… oder tippen" autocomplete="off"
            enterkeyhint="send">
     <button type="submit">Los</button>

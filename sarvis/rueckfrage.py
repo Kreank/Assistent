@@ -302,6 +302,13 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "ordner_ansehen":
         return f"Soll ich nachsehen, was in {schutz.sprechbar(e.get('pfad'))} liegt?"
 
+    if werkzeug == "datei_schicken":
+        pfad = e.get("pfad") or ""
+        if schutz.heikel(pfad):
+            return (f"Achtung: {schutz.sprechbar(pfad)} enthält vermutlich "
+                    "Zugangsdaten. Soll ich sie dir trotzdem schicken?")
+        return f"Soll ich dir {schutz.sprechbar(pfad)} schicken?"
+
     if werkzeug == "datei_schreiben":
         pfad = e.get("pfad") or ""
         vorhanden = ""
@@ -653,7 +660,7 @@ def genauer(werkzeug: str, eingabe: dict) -> str | None:
         return (f"Er würde {schutz.absicht_lang(e.get('befehl'))}. "
                 "Soll ich?")
     if werkzeug in ("datei_lesen", "datei_schreiben", "ordner_ansehen",
-                    "ordner_durchsuchen"):
+                    "ordner_durchsuchen", "datei_schicken"):
         return (f"Es geht um {schutz.sprechbar(e.get('pfad'))}. "
                 "Soll ich das machen?")
     return None

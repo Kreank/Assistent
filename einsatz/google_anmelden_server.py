@@ -62,6 +62,12 @@ def code(rueck: str) -> int:
     pruefwert = json.loads(MERKER.read_text(encoding="utf-8"))["pruefwert"]
     fluss = _fluss()
     fluss.code_verifier = pruefwert
+    # Die zurueckkopierte Adresse ist http://localhost:8123 -- oauthlib
+    # verweigert sie sonst mit "OAuth 2 MUST utilize https". Unbedenklich:
+    # Ueber diese Adresse laeuft nichts, sie traegt nur den Code zu uns.
+    # Am 10.11.2026 genau daran gescheitert.
+    import os
+    os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
     try:
         fluss.fetch_token(authorization_response=rueck)
     except Exception as e:

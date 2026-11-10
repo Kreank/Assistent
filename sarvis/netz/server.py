@@ -196,6 +196,59 @@ class Endpunkt:
         return web.json_response({"gut": True, "name": pfad.name,
                                   "bytes": len(roh)})
 
+    async def _dateien(self, anfrage: web.Request) -> web.Response:
+        """Was es fuer die App zum Herunterladen gibt -- und was sie schickte.
+
+        Ein Blatt geht nur an Oberflaechen, die gerade verbunden sind. Was
+        Sarvis verschickt, waehrend die App zu ist, waere sonst nur noch in
+        seinem Satz "liegt bereit" vorhanden. Diese Liste holt die App beim
+        Verbinden und nach jedem Datei-Blatt.
+
+        Mit Geraeteschluessel im Kopf wie /datei: Die Liste selbst ist die
+        Sammlung der geheimen Adressen.
+        """
+        schluessel = anfrage.headers.get("X-Sarvis-Schluessel", "")
+        if await asyncio.to_thread(geraete.pruefen, schluessel) is None:
+            return web.json_response({"fehler": "kein Zugang"}, status=401)
+        from . import blaetter
+
+        def von_dir():
+            try:
+                alle = sorted((d for d in config.EINGANG.glob("*")
+                               if d.is_file()),
+                              key=lambda d: d.stat().st_mtime, reverse=True)
+            except OSError:
+                return []
+            return [{"datei": d.name, "bytes": d.stat().st_size,
+                     "seit": d.stat().st_mtime} for d in alle[:60]]
+
+        von_sarvis = await asyncio.to_thread(blaetter.dateien)
+        geschickt = await asyncio.to_thread(von_dir)
+        return web.json_response({"von_sarvis": von_sarvis,
+                                  "von_dir": geschickt},
+                                 headers={"Cache-Control": "no-store"})
+
+    async def _waechter(self, anfrage: web.Request) -> web.StreamResponse:
+        """Der Service Worker an der WURZEL -- sonst reicht er nur bis /dabei/.
+
+        Unter /dabei/waechter.js registriert, galt er nur fuer /dabei/ und
+        sah weder die Seite noch das Teilen (POST /teilen). Fuers Teilen
+        aus dem Android-Menue muss er genau diesen Aufruf abfangen.
+        """
+        return web.FileResponse(WEB / "waechter.js", headers={
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": "no-cache"})
+
+    async def _teilen(self, anfrage: web.Request) -> web.Response:
+        """Rueckfall, wenn das Teilen am Service Worker vorbeiging.
+
+        Normal faengt waechter.js diesen POST ab und reicht die Datei an
+        die Seite, die sie MIT Schluessel hochlaedt. Kommt er hier an,
+        war der Worker noch nicht aktiv -- dann nichts annehmen (es fehlt
+        der Schluessel) und zur Seite zurueck.
+        """
+        raise web.HTTPSeeOther("/?geteilt=verpasst")
+
     # --- WebSocket -------------------------------------------------------
 
     async def _draht(self, anfrage: web.Request) -> web.WebSocketResponse:
@@ -402,6 +455,9 @@ class Endpunkt:
         app.router.add_get("/", self._seite)
         app.router.add_get("/leben", self._leben)
         app.router.add_post("/datei", self._datei)
+        app.router.add_get("/dateien", self._dateien)
+        app.router.add_get("/waechter.js", self._waechter)
+        app.router.add_post("/teilen", self._teilen)
         app.router.add_get("/draht", self._draht)
         if WEB.is_dir():
             app.router.add_static("/dabei/", WEB, name="dabei")

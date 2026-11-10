@@ -102,7 +102,18 @@ TYPEN = {
     # traegt zusaetzlich eine BOM, weil Excel nur darauf hoert.
     "csv": ("text/csv; charset=utf-8", True),
     "text": ("text/plain; charset=utf-8", True),
+    # Alles andere, was datei_schicken vom Server holt -- Fotos, ZIPs,
+    # Plaene. Der Inhaltstyp wird beim Ausliefern aus dem Namen geraten;
+    # geschickt wird IMMER als Anhang, nie zum Anzeigen im Browser: Eine
+    # HTML- oder SVG-Datei vom Server wuerde sonst auf unserer Domain
+    # ausgefuehrt.
+    "beliebig": ("application/octet-stream", True),
 }
+
+# Was aus dem Server verschickt wurde, bleibt laenger abrufbar als ein
+# Bericht: Man laedt es nicht immer sofort herunter, und die App fuehrt
+# eine Liste aller empfangenen Dateien (siehe DRAHT.md, "Dateien").
+FRIST_VERSAND_TAGE = 30.0
 
 # Die Kopfzeilen, die JEDES Blatt bekommt.
 #
@@ -235,6 +246,13 @@ async def _ausliefern(anfrage: web.Request) -> web.StreamResponse:
                             "liegt nicht mehr da.")
 
     art, anhang = TYPEN.get(str(eintrag.get("typ")), TYPEN["html"])
+    if eintrag.get("typ") == "beliebig":
+        geraten, _ = mimetypes.guess_type(str(eintrag.get("datei") or datei.name))
+        # Nie als HTML/SVG/JS ausliefern -- auch nicht als Anhang mit
+        # passendem Typ. nosniff + octet-stream ist die sichere Seite.
+        if geraten and not any(t in geraten for t in
+                                ("html", "svg", "javascript", "xml")):
+            art = geraten
     koepfe = dict(KOEPFE)
     if anhang:
         # Ein PDF im Rahmen anzuzeigen waere schoener, aber der Rahmen
@@ -256,6 +274,30 @@ async def _ausliefern(anfrage: web.Request) -> web.StreamResponse:
 def anmelden(app: web.Application) -> None:
     """Die Route eintragen. Ruft netz/server.py beim Aufbau."""
     app.router.add_get("/blatt/{kennung}", _ausliefern)
+
+
+def dateien() -> list:
+    """Alle noch abrufbaren DATEIEN (keine Berichte), neueste zuerst.
+
+    Fuer GET /dateien: Die App fuehrt daraus ihre Liste "von Sarvis". Ohne
+    sie waere ein Download, der kam, waehrend die App zu war, verloren --
+    das Blatt geht nur an verbundene Oberflaechen.
+    """
+    liste = []
+    for kennung, e in _aufraeumen(_laden()).items():
+        if e.get("typ") == "html":
+            continue
+        datei = Path(e.get("pfad") or "")
+        try:
+            groesse = datei.stat().st_size
+        except OSError:
+            continue
+        liste.append({"kennung": kennung, "titel": e.get("titel") or "",
+                      "datei": e.get("datei") or datei.name,
+                      "adresse": adresse(kennung), "bytes": groesse,
+                      "seit": e.get("seit") or 0, "bis": e.get("bis") or 0})
+    liste.sort(key=lambda x: x["seit"], reverse=True)
+    return liste
 
 
 def raten(dateiname: str) -> str:

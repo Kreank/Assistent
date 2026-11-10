@@ -189,7 +189,7 @@ sarvis.tech-artist.de {
     encode gzip
 
     request_body {
-        max_size 8MB
+        max_size 8MB   # Upload /datei: 100 MB, siehe /etc/caddy/Caddyfile (10.11.2026)
     }
 
     reverse_proxy 127.0.0.1:8900 {

@@ -13,7 +13,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, bericht, dokument, eingang, erinnern, fachdaten,
+from . import (auftrag, bericht, dokument, eingang, versand, erinnern, fachdaten,
                finanzen, google, kacheln, lesen, medien, musik, programme,
                projekte, rechnen, rechner, telegram, unterwegs, verlauf,
                wetter, zeit)
@@ -83,6 +83,8 @@ def bauen(sagen, leuchten=None, melden=None, ohren=None):
     # Blaetter und Dateien -- dieselbe Familie wie Kachel und
     # Seite, nur groesser beziehungsweise zum Behalten.
     alle += dokument.werkzeuge(protokoll, leuchten)
+    # Dateien aufs Handy -- Erzeugtes UND was auf dem Server liegt.
+    alle += versand.werkzeuge(protokoll, leuchten)
     alle += projekte.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)

@@ -9,6 +9,33 @@
   "background_color": "#04080f",
   "theme_color": "#04080f",
   "icons": [
-    { "src": "/dabei/symbol.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
-  ]
+    {
+      "src": "/dabei/symbol.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/teilen",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "dateien",
+          "accept": [
+            "*/*",
+            "image/*",
+            "application/pdf",
+            "video/*",
+            "audio/*"
+          ]
+        }
+      ]
+    }
+  }
 }

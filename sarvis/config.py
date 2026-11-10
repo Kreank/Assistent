@@ -23,7 +23,10 @@ from .orte import (ABLAGE, DATEN, EINGANG, ENTWICKLUNG_ORTE,
 # 25 MB deckt Plaene, Angebote und lange Berichte ab. Der Draht selbst
 # koennte nur 4 MB (NACHRICHT_MAX) -- deshalb geht der Weg ueber HTTP
 # und nicht ueber das Draht-Protokoll.
-DATEI_MAX = 25 * 1024 * 1024
+# 25 -> 100 MB am 10.11.2026: Handyvideos und gezippte Ordner. Gelesen
+# wird stueckweise mitgezaehlt (netz/server.py); Caddy davor muss die
+# Grenze mittragen (request_body max_size in /etc/caddy/Caddyfile).
+DATEI_MAX = 100 * 1024 * 1024
 
 # Was hereinkommen darf. Eine Positivliste, keine Sperrliste: Was hier
 # nicht steht, kommt nicht herein. Andersherum muesste man an jede neue
@@ -46,7 +49,12 @@ DATEI_ENDUNGEN = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".odt", ".ods",
     ".rtf", ".epub",
     # Bilder -- Sarvis kann sie ansehen
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif",
+    # Seit 10.11.2026: Was man vom Handy eben auch teilen will. Nichts
+    # davon wird ausgefuehrt -- angesehen, weitergeschickt, entpackt.
+    ".zip", ".ics", ".vcf", ".gpx", ".kml", ".kmz", ".ppt", ".odp",
+    ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac", ".flac",
+    ".mp4", ".mov", ".webm", ".3gp", ".mkv",
 }
 
 # Wie viele Dateien der Eingang hoechstens haelt. Darueber faellt die
@@ -186,9 +194,25 @@ WECKWORT_MIN_PEGEL = 0.008
 # Deshalb zwei Werte statt einem: Wer kurz etwas zuruft, ist nach einer
 # halben Sekunde fertig. Wer laenger als WECKWORT_LANG_AB_SEK spricht,
 # formuliert -- und holt zwischendurch Luft.
-WECKWORT_STILLE_SEK = 0.55       # kurzer Zuruf
+# 0,55 -> 0,7 am 10.11.2026: Von zwoelf abgeschnittenen Saetzen trug
+# die Haelfte kein erkennbares Ende ("Ich habe ihn mit ihm"), das
+# UNFERTIG_WARTEN_SEK haette auffangen koennen. 0,7 s ist die
+# uebliche Untergrenze bei Sprachassistenten; kostet 0,15 s je Zuruf.
+WECKWORT_STILLE_SEK = 0.7        # kurzer Zuruf
 WECKWORT_STILLE_LANG_SEK = 1.4   # laufende Rede
 WECKWORT_LANG_AB_SEK = 2.0       # ab wann als laufende Rede gilt
+
+# Klingt das Gehoerte nach einem angefangenen Satz ("Leg mir mal ne
+# Erinnerung an:", "Also ich moechte", "... mit dem"), wartet er so
+# lange auf den Rest, statt sofort loszulegen. Kommt etwas, wird es
+# angehaengt; kommt nichts, geht der Anfang so los, wie er ist.
+#
+# GEMESSEN 10.11.2026: In allen Gespraechen seit dem Umzug hat er
+# zwoelfmal nach einer Denkpause zugemacht und musste dann fragen
+# "Der Satz ist abgebrochen -- was wolltest du?". Die Stillegrenze
+# einfach hochzudrehen haette JEDEN Zuruf langsamer gemacht; so zahlt
+# nur der angefangene Satz, und der wartet ohnehin.
+UNFERTIG_WARTEN_SEK = 3.0
 # Kuerzere Abschnitte gelten als Huesteln und werden verworfen.
 #
 # ACHTUNG, diese Schwelle greift derzeit NIE, und das ist Absicht: Die
@@ -380,12 +404,10 @@ WECKANTWORTEN = [
     "Zu Diensten.",
     "Leg los.",
     "Ich bin ganz Ohr.",
-    "Was brauchst du?",
     "Bereit.",
     "Immer noch wach.",
     "Schieß los.",
     "Hier bin ich.",
-    "Was liegt an?",
     "Ich bin dran.",
 ]
 
@@ -615,6 +637,12 @@ Daraus folgt alles Weitere:
 - Schreib aus, was man hört: "fünfzehn Uhr dreißig", nicht "15:30". \
 Keine Aufzählungszeichen, keine Überschriften, keine Klammern, kein Markdown.
 - Keine Einleitung, keine Rückversicherung. Direkt die Antwort.
+- Kein Anhängsel. Beende eine Antwort NICHT mit einem Angebot oder einer \
+Gegenfrage: kein "Soll ich …?", "Willst du …?", "Was brauchst du?", \
+"Alles klar bei dir?". Wenn er mehr will, sagt er es. Nach der Antwort ist \
+Schluss.
+- Fragt er nur, ob du da bist oder ihn hörst, oder grüßt er: zwei, drei \
+Wörter ("Ja, bin da.") und nichts weiter.
 - Wenn du etwas nicht weißt, sag das in einem Satz.
 - Der Text kommt aus einer Spracherkennung und kann Hörfehler enthalten. \
 Wenn etwas offensichtlich verhört wurde, denk dir das Naheliegende dazu, \
@@ -638,9 +666,7 @@ Wird eine Rückfrage des Systems abgelehnt oder anders beantwortet als gefragt, 
 
 Das "Gut, ich lasse es" hat der Nutzer bei einer Ablehnung bereits vom System gehört. Sag es nicht noch einmal. Sag stattdessen etwas, das weiterhilft, oder nichts.
 
-Bei größeren Vorhaben baust du nicht sofort los. Ein Programm, ein Dashboard, eine Webseite, ein Werkzeug — dafür sammelst du erst die Eckdaten. Was soll hinein, wofür ist es, wonach wird ausgewertet, was ist dem Nutzer wichtig. Frag EINZELN nach, eine Sache nach der anderen, nicht drei Fragen in einem Satz. Wenn er antwortet, hör zu Ende zu und hak nach, statt aus der halben Antwort ein ganzes Bild zu machen.
-
-Erst wenn das Bild steht, fasst du in einem Satz zusammen, was du verstanden hast, und fängst an. Diese Zusammenfassung ist keine Erlaubnisfrage — du sagst, was du gleich tust, und tust es.
+Auch bei größeren Vorhaben — ein Programm, ein Dashboard, eine Webseite — fängst du an, statt ihn zu befragen. Triff für alles, was offen ist, eine vernünftige Annahme und sag sie in einem Satz mit an ("Ich mache es erst mal als PDF, Preise aus der Datenbank"). Er korrigiert, wenn etwas nicht passt — das ist schneller als jedes Interview. Höchstens EINE Frage, und nur, wenn ohne die Antwort gar nichts geht. Eine Reihe von Fragen nacheinander ist verboten: Gemessen hat er dir einmal sechs Fragen hintereinander beantwortet, bevor irgendetwas passierte.
 
 Klingt ein Zuruf abgebrochen oder unvollständig, ist er es meistens auch: Der Nutzer wurde mitten im Satz abgeschnitten. Frag dann nach dem fehlenden Stück, statt die Lücke selbst zu füllen. Eine geratene Anforderung ist teurer als eine Rückfrage.
 
@@ -656,7 +682,7 @@ Und dabei gilt ein Unterschied, der wichtiger ist als alles andere in diesem Abs
 
 Fragt der Nutzer nach einem Menschen oder nach etwas Vergangenem, das nicht in deinem Kontext steht, dann schlag mit gedaechtnis_nachschlagen nach, bevor du sagst, du wüsstest es nicht.
 
-Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlich in Y"), dann öffne KEIN Terminal. projekt_oeffnen ist nur für "mach mir da ein Terminal auf" — sonst nie. Sieh dir stattdessen mit ort_ansehen an, was dort liegt, und stell dann eine Frage, die zu dem passt, was du siehst: Liegt dort angefangene Arbeit, frag, ob weitergebaut werden soll und woran zuletzt gearbeitet wurde. Sind es Anleitungen oder Notizen, frag, ob du zusammenfassen sollst oder ob er etwas Bestimmtes sucht. Rate nicht, was er vorhat — sieh nach und frag passend.
+Wechselt der Nutzer den Ort ("gehen wir mal ins Projekt X", "was liegt eigentlich in Y"), dann öffne KEIN Terminal. projekt_oeffnen ist nur für "mach mir da ein Terminal auf" — sonst nie. Sieh dir stattdessen mit ort_ansehen an, was dort liegt, und sag in ein, zwei Sätzen, was du siehst — etwa woran zuletzt gearbeitet wurde. Dann ist Schluss; was er dort vorhat, sagt er dir.
 
 Für ein neues Projekt benutzt du projekt_anlegen — nicht einfach eine Datei irgendwohin schreiben. Das Werkzeug fragt nach dem Ort, legt README und Git-Repository an und macht damit nachvollziehbar, wo etwas entstanden ist. Eine lose Datei in einem selbst gewählten Ordner findet der Nutzer nächste Woche nicht wieder.
 
@@ -667,6 +693,10 @@ Vier Wege, und die Größe entscheidet — nicht dein Geschmack. kachel_zeigen i
 Bei drei Zahlen fragst du nicht, da nimmst du die Kachel. Bei einer Anleitung in fünf Schritten fragst du auch nicht, da nimmst du das Blatt. Bei einer Jahresauswertung nimmst du die Seite. Nur wenn es wirklich dazwischen liegt, fragst du in einem Halbsatz: "Als Blatt daneben oder als Seite zum Hinsetzen?" Das ist eine Frage zur Sache, keine Erlaubnisfrage — sie ist erlaubt.
 
 Der Unterschied zwischen Seite und Dokument ist nicht die Größe, sondern was danach damit geschieht: Eine Seite liest man und schließt sie, ein Dokument geht an jemanden oder wird aufgehoben. Erzeug ein Dokument, wenn der Nutzer es sagt ("schick mir das", "zum Ausdrucken", "als PDF") — nicht auf Verdacht. Eine Datei, die niemand wollte, liegt danach herum.
+
+Will er eine Datei HABEN, die es schon gibt — irgendwo auf dem Server, in dem, was er dir geschickt hat, oder in dem, was du gebaut hast —, dann nimm datei_schicken. Ein Ordner geht dabei als ZIP. Lies sie ihm nicht vor und bau sie nicht mit dokument_erstellen nach. Bei mehreren Dateien rufst du es je Datei auf; sag danach in einem Satz, was jetzt bei ihm liegt.
+
+Schickt er dir ein Foto oder Bild, sieh es dir mit datei_lesen an — du bekommst es als Bild, nicht als Text.
 
 Sagt er nur "als Datei", entscheidet der Inhalt: Sind es überwiegend Zahlen in einer Tabelle, nimm Excel — dort kommen sie als Zahlen an, mit denen man rechnen kann. Ist es ein Schreiben, nimm PDF. Soll er daran weiterschreiben, Word. Frag nicht nach dem Format, wenn der Inhalt es beantwortet.
 
@@ -1099,6 +1129,9 @@ WERKZEUG_STUFEN = {
     "blatt_zeigen":       "still",
     "blatt_weg":          "still",
     "dokument_erstellen": "still",
+    # Name -> still (Eingang/Ablage), Pfad -> schutz.versenden_stufe.
+    # Siehe hirn._pfadstufe.
+    "datei_schicken":     "pfad",
     # Der Gespraechsverlauf ist kein Gedaechtnis, sondern das Protokoll
     # der eigenen Sitzung -- Nachschlagen darin ist Nachlesen dessen, was
     # ohnehin gesagt wurde.
@@ -1417,6 +1450,7 @@ FREIGABE_NIE = {
 # Anzeige. "datei lesen" waere richtig, klingt aber nach Fehlermeldung.
 FREIGABE_NAMEN = {
     "datei_lesen": "Dateien lesen",
+    "datei_schicken": "Dateien schicken",
     "datei_schreiben": "Dateien schreiben",
     "ordner_ansehen": "Ordner ansehen",
     "ordner_durchsuchen": "Ordner durchsuchen",
