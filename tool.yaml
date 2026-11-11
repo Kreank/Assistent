@@ -12,7 +12,7 @@ gesund: /leben
 
 daten:
   personenbezogen: ja
-  inhalt: "Gesprächsverlauf, Gedächtnis (Personen, Notizen), Aufträge, Sprachaufnahmen/Stimmen, Google-/Spotify-Zugänge"
+  inhalt: "Gesprächsverlauf mit Fäden und Ablage (gespraeche.db), Gedächtnis (Personen, Notizen), Aufträge, Sprachaufnahmen/Stimmen, Google-/Spotify-Zugänge, Web-Push-Abos der Geräte"
 datenfluss:
   - dienst: Anthropic (Claude)
     was: "Gesprächsinhalte, Gedächtnisauszüge und Werkzeug-Ergebnisse (inkl. Mails, Termine, Finanzen)"
@@ -26,6 +26,8 @@ datenfluss:
     was: "Musiksteuerung, Suchanfragen"
   - dienst: Wetter/Orte/Tanken (Open-Meteo, Nominatim, Tankerkönig)
     was: "Ortsangaben und Suchbegriffe"
+  - dienst: Web-Push-Dienste der Browser (Google FCM, Mozilla, Apple)
+    was: "Kurzmeldungen zu Timern/Aufträgen, Ende-zu-Ende verschlüsselt (der Dienst sieht nur Größe und Zeitpunkt)"
 
 geheimnisse:                   # in /srv/data/sarvis/.env und /srv/data/sarvis/claude.env, nicht im Projektstamm
   - CLAUDE_CODE_OAUTH_TOKEN
@@ -39,7 +41,8 @@ geheimnisse:                   # in /srv/data/sarvis/.env und /srv/data/sarvis/c
   - FRITZBOX_BENUTZER
   - FRITZBOX_KENNWORT
   - TANKERKOENIG_KEY
-  # dazu Dateien: google_token.json, google_zugang.json, spotify_token.json, geraete.json
+  # dazu Dateien: google_token.json, google_zugang.json, spotify_token.json, geraete.json,
+  #   vapid_privat.pem (Web-Push-Absenderschlüssel, 0600)
 
 sicherung:
   ordner: /srv/data/sarvis
