@@ -253,12 +253,27 @@ def sitzung_setzen(kennung: str, sitzung: str) -> None:
                   (sitzung, kennung, sitzung))
 
 
+def modelltitel_setzen(kennung: str, titel: str) -> bool:
+    """Den Titel, den Sarvis selbst vergeben hat, eintragen.
+
+    Nur solange niemand von Hand umbenannt hat (titel_von = 'auto') --
+    ein Mensch gewinnt immer, auch wenn das Modell später antwortet.
+    """
+    titel = " ".join(str(titel or "").split()).strip(" \"'„“.:")[:80]
+    if not titel:
+        return False
+    with _sperre, _verbindung() as v:
+        n = v.execute("UPDATE faeden SET titel = ?, titel_von = 'sarvis'"
+                      " WHERE id = ? AND titel_von = 'auto'",
+                      (titel, kennung)).rowcount
+    return n > 0
+
+
 def _kurztitel(text: str) -> str:
     """Ein Titel aus dem ersten Zuruf -- die ersten Wörter, nicht geraten.
 
-    Kein Modellaufruf: Er kostete jede neue Unterhaltung eine Runde und
-    eine Wartezeit, nur damit in einer Seitenleiste etwas Schöneres
-    steht. Umbenennen geht jederzeit von Hand.
+    Das ist der Platzhalter, bis Sarvis selbst benannt hat
+    (main.Assistent._selbst_benennen, config.TITEL_MODELL).
     """
     t = " ".join(str(text or "").split()).strip(" ,.;:!?-")
     if len(t) <= TITEL_LAENGE:
@@ -296,11 +311,17 @@ def eintragen(faden_id: str, wer: str, sorte: str, text: str = "",
         nummer = c.lastrowid
         v.execute("UPDATE faeden SET zuletzt = ? WHERE id = ?", (jetzt, faden_id))
         if wer == "du" and sorte == "text" and text:
+            erster = v.execute("SELECT titel FROM faeden WHERE id = ? AND"
+                               " titel_von = 'auto' AND titel = ''",
+                               (faden_id,)).fetchone() is not None
             v.execute("UPDATE faeden SET titel = ? WHERE id = ? AND"
                       " titel_von = 'auto' AND titel = ''",
                       (_kurztitel(text), faden_id))
         z = v.execute("SELECT * FROM eintraege WHERE id = ?", (nummer,)).fetchone()
-    return _eintrag_aus(z)
+    e = _eintrag_aus(z)
+    if wer == "du" and sorte == "text" and text and erster:
+        e["erster_zuruf"] = True      # nur intern, siehe main._eintragen
+    return e
 
 
 def aendern(nummer: int, text: str | None = None,

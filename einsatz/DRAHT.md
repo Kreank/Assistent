@@ -917,8 +917,10 @@ Reihenfolge auch). Immer die ganze Liste, zuletzt benutzte zuerst — ein
 Zustand, keine Änderung.
 
 - `titel` leer heißt: noch unbenannt. Anzeigen als „Neues Gespräch“. Der
-  erste Zuruf gibt ihm einen Titel (seine ersten Wörter), solange ihn
-  niemand von Hand benannt hat.
+  erste Zuruf gibt ihm sofort einen vorläufigen Titel (seine ersten
+  Wörter); wenige Sekunden später benennt Sarvis das Gespräch selbst und
+  schickt eine neue `faeden`-Liste. Beides nur, solange es niemand von Hand
+  benannt hat — ein Mensch gewinnt immer.
 - `wechselt: true` steht zwischen „Befehl angenommen“ und „Hirn ist im
   neuen Faden“. Danach kommt dieselbe Liste mit `false`. Zeigen, nicht
   blockieren: Ein Zuruf in dieser Zeit wartet auf dem Server.

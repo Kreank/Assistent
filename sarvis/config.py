@@ -620,6 +620,12 @@ STIMMFARBE = "praesent"
 # --- Hirn -----------------------------------------------------------------
 MODELL = "claude-opus-5"
 
+# Wer einem neuen Gespraech seinen Titel gibt: ein kleines Modell, einmal
+# je Gespraech, im Hintergrund nach dem ersten Zuruf (Sascha, 11.11.2026).
+# Bis es antwortet (~2,5 s gemessen), stehen die ersten Woerter da.
+# Leer = kein Modellaufruf, dann bleiben die ersten Woerter.
+TITEL_MODELL = "haiku"
+
 # Wie dienstbeflissen er auftritt. Das traegt mehr als jede Stimmfarbe:
 # dieselbe Stimme klingt mit "Sehr wohl, Meister" voellig anders als mit
 # "Mach ich". Kostet nichts und geht nicht auf die Klangqualitaet.

@@ -4,6 +4,7 @@ Stufe eins. Noch ohne Werkzeuge -- es geht erst einmal nur darum, ob sich
 das Ganze wie ein Gespraech anfuehlt oder wie ein Formular.
 """
 import asyncio
+import threading
 import json
 import os
 import random
@@ -287,12 +288,53 @@ class Sarvis:
         except Exception as fehler:
             print(f"  (Verlauf: nicht eingetragen -- {fehler})")
             return None
+        erster = e.pop("erster_zuruf", False)
         self.anzeige.eintrag(e)
         if wer == "du" and sorte == "text":
             # Der erste Zuruf gibt einem Faden seinen Titel, und jeder
             # schiebt ihn in der Liste nach oben.
             self._faeden_melden()
+            if erster:
+                self._selbst_benennen(e["faden"], text)
         return e
+
+    def _selbst_benennen(self, faden_id: str, zuruf: str) -> None:
+        """Sarvis gibt dem Gespraech einen Titel -- im Hintergrund.
+
+        Ein eigener Faden mit eigener Schleife: Das darf weder das Hirn
+        noch die Stimme auch nur eine Millisekunde aufhalten. Schlaegt es
+        fehl, bleiben die ersten Woerter stehen.
+        """
+        if not getattr(config, "TITEL_MODELL", ""):
+            return
+
+        async def fragen() -> str:
+            from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions,
+                                          TextBlock, query)
+            opt = ClaudeAgentOptions(
+                model=config.TITEL_MODELL, allowed_tools=[], max_turns=1,
+                setting_sources=[],
+                system_prompt=("Gib einem Gespraech einen kurzen deutschen "
+                               "Titel aus 2 bis 5 Woertern, der sagt, worum "
+                               "es geht. Keine Anfuehrungszeichen, kein "
+                               "Punkt. Antworte nur mit dem Titel."))
+            aus = ""
+            async for m in query(prompt=f"Erster Zuruf: {zuruf[:600]}",
+                                 options=opt):
+                if isinstance(m, AssistantMessage):
+                    aus += "".join(b.text for b in m.content
+                                   if isinstance(b, TextBlock))
+            return aus.strip().splitlines()[0] if aus.strip() else ""
+
+        def lauf() -> None:
+            try:
+                titel = asyncio.run(asyncio.wait_for(fragen(), 30))
+                if gespraeche.modelltitel_setzen(faden_id, titel):
+                    self._faeden_melden()
+            except Exception as fehler:
+                print(f"  (Gespraech nicht selbst benannt -- {fehler})")
+
+        threading.Thread(target=lauf, name="titel", daemon=True).start()
 
     def _aendern(self, nummer: int, text: str | None = None,
                  daten: dict | None = None):
