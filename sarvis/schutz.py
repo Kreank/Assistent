@@ -748,6 +748,51 @@ def entwicklung_frei(befehl: str) -> bool:
     return True
 
 
+def _loescht_wurzel(teil: str, ort: str) -> bool:
+    """Loescht dieser Schritt rekursiv einen Wurzelort -- oder etwas darueber?
+
+    NIE_BEFEHL kannte dafuer nur 'rm -rf /' und 'rm -rf ~' als ganze
+    Zeile. Gemessen am 11.11.2026 im Container lagen damit nur ein
+    gesprochenes "ja" entfernt:
+        rm -rf /*              rm -rf ~/*            rm -rf $HOME
+        rm -r -f /home/server3070      rm -fr /srv/data/sarvis
+        rm -rf /srv/storage/projects/*
+    Beschreibbar gemountet sind genau Saschas Benutzerordner, alle
+    Projekte und Sarvis' Daten samt Gedaechtnis -- also alles, was zaehlt.
+    Ein einzelnes Projekt zu loeschen bleibt "fragen"; gesperrt ist nur
+    der Wurzelort selbst, sein Inhalt als Ganzes ("/*") und alles
+    darueber.
+    """
+    if not re.match(r"^rm\b", teil):
+        return False
+    try:
+        woerter = shlex.split(teil)
+    except ValueError:
+        woerter = teil.split()
+    flaggen = [w for w in woerter[1:] if w.startswith("-")]
+    if not any(w == "--recursive" or (not w.startswith("--") and "r" in w.lower())
+               for w in flaggen):
+        return False
+    geschuetzt = {os.path.realpath(str(p)) for p in (
+        config.PROJEKT_ORTE["privat"], config.PROJEKT_ORTE["arbeit"],
+        config.DATEN, config.WURZEL, Path.home())}
+    for w in woerter[1:]:
+        if w.startswith("-") or not w:
+            continue
+        heim = _HEIM_PFAD.match(w)
+        if heim:
+            w = _heim(heim.group(1)) + (heim.group(2) or "")
+        # "/x/*" und "/x/" meinen beim Loeschen dasselbe wie "/x".
+        w = re.sub(r"(/\.?\*|/)+$", "", w) if w not in ("/", "/*") else "/"
+        if w in ("*", ".*", ""):
+            w = "."
+        ziel = os.path.realpath(os.path.join(ort, w))
+        for g in geschuetzt:
+            if g == ziel or g.startswith(ziel.rstrip("/") + "/"):
+                return True
+    return False
+
+
 def befehl_stufe(befehl: str) -> str:
     befehl = (befehl or "").strip()
     if any(re.search(m, befehl, re.IGNORECASE) for m in NIE_BEFEHL):
@@ -756,6 +801,12 @@ def befehl_stufe(befehl: str) -> str:
     # Verkettungen aufteilen: "git status && rm -rf x" ist nicht harmlos,
     # nur weil es harmlos anfaengt.
     teile = _zerlegen(befehl)
+
+    ort = _arbeitsordner
+    for teil in teile:
+        if _loescht_wurzel(teil, ort):
+            return "nie"
+        ort = _nach_cd(teil, ort)
 
     # Die harte Sperre galt bisher nur fuer die Datei-Werkzeuge, nicht
     # fuer die Shell: schreiben_stufe("...sarvis/schutz.py") war "nie",

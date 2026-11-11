@@ -50,7 +50,14 @@ class Mund:
             self.einstellung.speaker_id = config.STIMME_SPRECHER
         sprecher = ("" if config.STIMME_SPRECHER is None
                     else f", Sprecher {config.STIMME_SPRECHER}")
-        farbe = "" if self.farbe == "aus" else f", Farbe {self.farbe}"
+        # Eine unbekannte Farbe wirkt als "aus" -- dann darf die Startzeile
+        # sie nicht bestaetigen (Fund 032, zweite Haelfte).
+        if self.farbe == "aus":
+            farbe = ""
+        elif self.farbe in stimmfarbe.FARBEN:
+            farbe = f", Farbe {self.farbe}"
+        else:
+            farbe = f", Farbe {self.farbe} unbekannt -- wirkt als 'aus'"
         print(f"  Piper bereit nach {time.perf_counter() - t:.1f}s "
               f"(Tempo {config.TEMPO}{sprecher}{farbe})")
 
