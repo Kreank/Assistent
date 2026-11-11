@@ -238,8 +238,14 @@ class Sarvis:
         # sich keine, wartet er still. Der Traeger wird nachgereicht,
         # sobald die Ereignisschleife laeuft (siehe _netz_aufbauen).
         self.horch = klang.dauerhorch()
+        # anzeige_modul.aktuelle(), nicht self.anzeige: Der Horcher wird
+        # HIER gebaut, die Netz-Anzeige erst in _netz_aufbauen. Mit
+        # self.anzeige hielt er die abgeschaltete Anzeige vom Start fest
+        # (im Netz ist sie "aus") -- sein Pegel und das "denkt" bei
+        # langem Diktat kamen in der App nie an. Gemessen 11.11.2026.
         self.horcher = Horcher(self.ohren, self._geweckt,
-                               anzeige=self.anzeige, horch=self.horch)
+                               anzeige=anzeige_modul.aktuelle(),
+                               horch=self.horch)
         # Was in DIESEM Zug schon abgelehnt -- und was schon erlaubt
         # wurde. Beides gilt nur fuer den einen Zug. Siehe nachfragen().
         self._abgelehnt: dict = {}
