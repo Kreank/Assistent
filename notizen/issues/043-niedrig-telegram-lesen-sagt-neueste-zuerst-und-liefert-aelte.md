@@ -1,5 +1,7 @@
 # 043 — telegram_lesen sagt "neueste zuerst" und liefert aelteste zuerst
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

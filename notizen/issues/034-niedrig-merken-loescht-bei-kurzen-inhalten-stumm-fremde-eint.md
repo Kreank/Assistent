@@ -1,5 +1,7 @@
 # 034 — merken loescht bei kurzen Inhalten stumm fremde Eintraege
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

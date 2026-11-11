@@ -1,5 +1,7 @@
 # 024 — Leere Programmliste wird dauerhaft gemerkt -- danach behauptet Sarvis fuer immer, es gebe das Programm nicht
 
+Status: gegenstandslos (Get-StartApps/PowerShell gibt es auf dem Server nicht; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

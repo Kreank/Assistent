@@ -1,5 +1,7 @@
 # 041 — tabelle_schreiben schreibt immer nur eine Zeile, meldet aber den ganzen Bereich als gesetzt
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

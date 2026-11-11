@@ -1,5 +1,7 @@
 # 031 — Der Phaser wandert nicht: der LFO wird auf einen einzigen Mittelwert eingedampft
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

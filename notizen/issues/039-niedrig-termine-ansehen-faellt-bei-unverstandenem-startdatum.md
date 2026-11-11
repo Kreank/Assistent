@@ -1,5 +1,7 @@
 # 039 — termine_ansehen faellt bei unverstandenem Startdatum still auf heute zurueck
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

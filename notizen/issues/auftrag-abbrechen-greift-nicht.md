@@ -1,5 +1,7 @@
 # Auftrag abbrechen greift nicht — BEHOBEN 2. September 2026
 
+Status: erledigt (Commit 5754c30)
+
 **Gefunden:** 1. September 2026, abends
 **Schwere:** hoch — ein Auftrag, den der Nutzer abbricht, läuft weiter
 

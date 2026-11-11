@@ -1,5 +1,7 @@
 # 014 — Gemerkte Google-Dienste werden nie verworfen -- Neuanmeldung wirkt erst nach Neustart
 
+Status: erledigt (Commit b217416; Rest RefreshError: das SDK meldet Ausnahmen eines Werkzeugs als Fehlerergebnis ans Modell, kein Absturz)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

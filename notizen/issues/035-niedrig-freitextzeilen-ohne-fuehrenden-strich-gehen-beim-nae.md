@@ -1,5 +1,7 @@
 # 035 — Freitextzeilen ohne fuehrenden Strich gehen beim naechsten Schreiben verloren
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

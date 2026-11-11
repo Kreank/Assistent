@@ -1,5 +1,7 @@
 # 012 — Personensuche findet die Akte, liefert aber keine Inhalte
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

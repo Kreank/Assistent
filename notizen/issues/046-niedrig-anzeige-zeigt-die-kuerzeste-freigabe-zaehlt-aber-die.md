@@ -1,5 +1,7 @@
 # 046 — Anzeige zeigt die kürzeste Freigabe, zählt aber die längste herunter
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

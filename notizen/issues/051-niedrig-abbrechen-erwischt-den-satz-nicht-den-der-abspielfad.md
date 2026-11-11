@@ -1,5 +1,7 @@
 # 051 — abbrechen() erwischt den Satz nicht, den der Abspielfaden schon aus der Schlange gezogen hat
 
+Status: gegenstandslos (audio.Lautsprecher läuft nur lokal, auf dem Server spricht der NetzLautsprecher; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

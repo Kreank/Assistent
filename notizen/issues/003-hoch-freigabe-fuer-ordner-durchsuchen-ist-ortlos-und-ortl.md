@@ -1,5 +1,7 @@
 # 003 — Freigabe für "Ordner durchsuchen" ist ortlos — und ortlos heißt überall
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

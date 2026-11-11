@@ -1,5 +1,7 @@
 # 025 — Der Kommentar verspricht 'nicht stillschweigend leer' -- genau das passiert bei jedem PowerShell-Fehler ohne Ausnahme
 
+Status: gegenstandslos (PowerShell gibt es auf dem Server nicht; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

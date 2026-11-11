@@ -1,5 +1,7 @@
 # 004 — Befehls-Freigabe prüft nur den ERSTEN Pfad einer Kette
 
+Status: erledigt (Commit b217416; POSIX-Pfade seit d3ac2b2, ~/$HOME seit 55db580)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

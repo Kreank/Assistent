@@ -1,5 +1,7 @@
 # 037 — Timer-Dauern werden in Wanduhrzeit umgerechnet und ueberleben die Zeitumstellung nicht
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

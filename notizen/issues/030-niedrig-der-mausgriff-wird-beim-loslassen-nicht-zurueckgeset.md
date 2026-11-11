@@ -1,5 +1,7 @@
 # 030 — Der Mausgriff wird beim Loslassen nicht zurueckgesetzt
 
+Status: gegenstandslos (Qt-HUD wird auf dem Server nicht gestartet; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

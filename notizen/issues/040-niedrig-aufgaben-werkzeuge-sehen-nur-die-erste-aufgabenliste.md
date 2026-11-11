@@ -1,5 +1,7 @@
 # 040 — Aufgaben-Werkzeuge sehen nur die erste Aufgabenliste
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

@@ -1,5 +1,7 @@
 # 055 — Die Mindestlaenge WECKWORT_MIN_SEK kann nie greifen -- der Nachlauf ist laenger als die Schwelle
 
+Status: gegenstandslos (bewusst nicht geändert: ein verschlucktes „Ja“ wiegt schwerer als ein durchgelassenes Husten; Begründung steht bei WECKWORT_MIN_SEK in config.py)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

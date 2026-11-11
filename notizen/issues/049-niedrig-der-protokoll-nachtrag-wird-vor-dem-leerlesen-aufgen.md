@@ -1,5 +1,7 @@
 # 049 — Der Protokoll-Nachtrag wird VOR dem Leerlesen aufgenommen -- was waehrend des Abbruchs noch fertig wird, faellt still weg
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

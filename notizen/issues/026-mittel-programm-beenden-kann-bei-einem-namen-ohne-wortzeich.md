@@ -1,5 +1,7 @@
 # 026 — programm_beenden kann bei einem Namen ohne Wortzeichen ALLE Prozesse abschiessen
 
+Status: gegenstandslos (powershell.exe/Stop-Process gibt es auf dem Server nicht; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

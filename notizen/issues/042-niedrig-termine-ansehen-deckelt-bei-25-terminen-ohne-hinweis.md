@@ -1,5 +1,7 @@
 # 042 — termine_ansehen deckelt bei 25 Terminen ohne Hinweis
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

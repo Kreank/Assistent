@@ -1,5 +1,7 @@
 # 002 — auftrag_fortsetzen ruft ein blinken(), das es in dieser Datei nicht gibt
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

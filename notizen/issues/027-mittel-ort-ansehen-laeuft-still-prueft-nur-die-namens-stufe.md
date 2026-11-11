@@ -1,5 +1,7 @@
 # 027 — ort_ansehen laeuft still, prueft nur die Namens-Stufe -- liest aber Dateiinhalt vor
 
+Status: erledigt (Commit b217416; auf Linux erst wirksam seit 55db580)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

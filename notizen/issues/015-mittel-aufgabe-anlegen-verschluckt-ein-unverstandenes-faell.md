@@ -1,5 +1,7 @@
 # 015 — aufgabe_anlegen verschluckt ein unverstandenes Faelligkeitsdatum und meldet Erfolg
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

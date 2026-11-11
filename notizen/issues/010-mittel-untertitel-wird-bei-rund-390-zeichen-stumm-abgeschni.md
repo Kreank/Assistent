@@ -1,5 +1,7 @@
 # 010 — Untertitel wird bei rund 390 Zeichen stumm abgeschnitten -- und zwar hinten
 
+Status: gegenstandslos (Qt-HUD wird auf dem Server nicht gestartet; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

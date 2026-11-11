@@ -1,5 +1,7 @@
 # 047 — Nach einem Abbruch bleibt der Horcher im Zustand "Sarvis spricht" haengen
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

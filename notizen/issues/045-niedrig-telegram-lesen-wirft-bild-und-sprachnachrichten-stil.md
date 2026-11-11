@@ -1,5 +1,7 @@
 # 045 — telegram_lesen wirft Bild- und Sprachnachrichten still aus der Zaehlung
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

@@ -1,5 +1,7 @@
 # 019 — Fehlende Wortgrenze: das Wort "Termin" erzeugt eine Freigabe
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

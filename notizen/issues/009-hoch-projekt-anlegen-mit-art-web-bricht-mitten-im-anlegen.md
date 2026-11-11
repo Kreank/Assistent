@@ -1,5 +1,7 @@
 # 009 — projekt_anlegen mit art='web' bricht mitten im Anlegen ab und laesst eine halbe Projektruine zurueck
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

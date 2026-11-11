@@ -1,5 +1,7 @@
 # 020 — Die einzige harte Sperre gilt nicht für die Shell
 
+Status: erledigt (Commit b217416; Umwege über Symlink/./ seit 55db580, rekursives rm auf Wurzelorte seit 44e5fc2)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

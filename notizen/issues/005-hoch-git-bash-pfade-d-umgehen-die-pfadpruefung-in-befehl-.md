@@ -1,5 +1,7 @@
 # 005 — Git-Bash-Pfade (/d/...) umgehen die Pfadprüfung in befehl_stufe
 
+Status: gegenstandslos (Git-Bash-Schreibweise /d/... gibt es auf dem Server nicht, die Umdeutung läuft nur noch unter Windows; die Linux-Entsprechung — ~, $HOME, Symlinks — ist mit 55db580 geschlossen)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

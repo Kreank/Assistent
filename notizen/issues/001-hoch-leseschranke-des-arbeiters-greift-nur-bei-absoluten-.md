@@ -1,5 +1,7 @@
 # 001 — Leseschranke des Arbeiters greift nur bei absoluten Pfaden
 
+Status: erledigt (Commit b217416; Bash-Zweig auf Linux seit d3ac2b2, ~/$HOME/cd/.. seit 55db580)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

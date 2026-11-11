@@ -1,5 +1,7 @@
 # 013 — Zwei gleichnamige Dateien: Drive waehlt still die zuletzt geaenderte -- auch beim Teilen
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

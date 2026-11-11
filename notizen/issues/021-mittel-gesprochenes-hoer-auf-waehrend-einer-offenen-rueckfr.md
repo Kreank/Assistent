@@ -1,5 +1,7 @@
 # 021 — Gesprochenes "hoer auf" waehrend einer offenen Rueckfrage stoppt nichts
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

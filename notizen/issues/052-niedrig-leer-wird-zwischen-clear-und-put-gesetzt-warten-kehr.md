@@ -1,5 +1,7 @@
 # 052 — leer wird zwischen clear() und put() gesetzt -- warten() kehrt zurueck, obwohl noch ein Satz aussteht
 
+Status: gegenstandslos (audio.Lautsprecher läuft nur lokal, auf dem Server spricht der NetzLautsprecher; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

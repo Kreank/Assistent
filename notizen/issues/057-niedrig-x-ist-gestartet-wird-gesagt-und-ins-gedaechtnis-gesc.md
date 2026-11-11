@@ -1,5 +1,7 @@
 # 057 — "X ist gestartet" wird gesagt und ins Gedaechtnis geschrieben, ohne dass irgendetwas geprueft wurde
 
+Status: gegenstandslos (programm_starten braucht PowerShell, die es auf dem Server nicht gibt; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

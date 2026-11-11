@@ -1,5 +1,7 @@
 # 053 — Whisper laeuft im Mikrofon-Lesefaden; die Ueberlauf-Meldung von read() wird weggeworfen
 
+Status: erledigt (Commit b217416; Lesen und Verstehen laufen in getrennten Fäden)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

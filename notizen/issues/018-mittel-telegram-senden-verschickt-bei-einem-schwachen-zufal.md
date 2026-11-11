@@ -1,5 +1,7 @@
 # 018 — telegram_senden verschickt bei EINEM schwachen Zufallstreffer ohne Rueckfrage
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

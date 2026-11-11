@@ -1,5 +1,7 @@
 # 017 — aufgabe_anlegen und aufgabe_abhaken landen nicht im Protokoll
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

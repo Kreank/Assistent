@@ -1,5 +1,7 @@
 # 056 — Buchungen und Empfaenger werden hart auf sechs gekappt -- ohne jeden Hinweis, dass da mehr war
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

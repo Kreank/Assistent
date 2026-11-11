@@ -1,5 +1,7 @@
 # 038 — Beim Wiederherstellen genau der ungenaue Umweg, den stellen_bis verwirft
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

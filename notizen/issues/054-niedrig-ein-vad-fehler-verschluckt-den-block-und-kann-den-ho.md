@@ -1,5 +1,7 @@
 # 054 — Ein VAD-Fehler verschluckt den Block und kann den Horcher dauerhaft taub machen
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

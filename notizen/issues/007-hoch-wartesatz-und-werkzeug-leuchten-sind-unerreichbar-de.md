@@ -1,5 +1,7 @@
 # 007 — Wartesatz und Werkzeug-Leuchten sind unerreichbar -- der erste elif frisst genau den Fall, fuer den der zweite gebaut wurde
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

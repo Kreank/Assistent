@@ -1,5 +1,7 @@
 # 032 — Unbekannter Farbname: die ganze Effektkette faellt still weg
 
+Status: erledigt (Commit b217416; Rest — Startzeile in mund.py — mit 44e5fc2)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

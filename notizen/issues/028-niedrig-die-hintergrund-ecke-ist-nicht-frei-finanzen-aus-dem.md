@@ -1,5 +1,7 @@
 # 028 — Die Hintergrund-Ecke ist nicht frei: 'Finanzen' aus dem Kranz liegt darueber
 
+Status: gegenstandslos (Qt-HUD wird auf dem Server nicht gestartet; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

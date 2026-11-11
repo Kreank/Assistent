@@ -1,5 +1,7 @@
 # 011 — stand() vergleicht gegen ein fest verdrahtetes main
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

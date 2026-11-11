@@ -1,5 +1,7 @@
 # 016 — mail_lesen schneidet bei 4000 Zeichen ab, ohne es zu kennzeichnen
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

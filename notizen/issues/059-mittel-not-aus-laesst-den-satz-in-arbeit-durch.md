@@ -1,5 +1,7 @@
 # 059 — Der Not-Aus lässt den Satz durch, der gerade synthetisiert wird
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

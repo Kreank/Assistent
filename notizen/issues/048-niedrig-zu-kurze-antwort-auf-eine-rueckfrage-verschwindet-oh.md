@@ -1,5 +1,7 @@
 # 048 — Zu kurze Antwort auf eine Rueckfrage verschwindet ohne Konsolenzeile
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

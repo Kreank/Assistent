@@ -1,5 +1,7 @@
 # 050 — Das Leerlesen nach dem Abbruch schluckt jeden Fehler und jeden Zeitablauf -- danach ist die naechste Antwort um eine Runde verschoben
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

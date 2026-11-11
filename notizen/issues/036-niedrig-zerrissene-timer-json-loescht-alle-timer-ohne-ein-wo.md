@@ -1,5 +1,7 @@
 # 036 — Zerrissene timer.json loescht alle Timer ohne ein Wort
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

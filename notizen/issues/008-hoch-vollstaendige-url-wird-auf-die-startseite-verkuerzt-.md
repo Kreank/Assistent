@@ -1,5 +1,7 @@
 # 008 — Vollstaendige URL wird auf die Startseite verkuerzt -- der Link geht verloren
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

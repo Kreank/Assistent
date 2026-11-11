@@ -1,5 +1,7 @@
 # 023 — spricht(None) loescht den Echo-Filter, bevor das eigene Echo ueberhaupt geprueft wurde
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

@@ -1,5 +1,7 @@
 # 044 — Telegram-Verbindungen werden bei jedem Neuaufbau liegengelassen
 
+Status: erledigt (Commit b217416; schliessen() wird inzwischen beim Beenden in main.py gerufen)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

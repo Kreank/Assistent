@@ -1,5 +1,7 @@
 # 006 — Inhaltsprüfung hält jede UTF-16-Datei für binär und liest sie still
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |

@@ -1,5 +1,7 @@
 # 022 — Glob umgeht die Rueckfrage fuer D:\Strato Server -- der Pfad steht in `pattern`, geprueft wird nur `path`
 
+Status: erledigt (Commit b217416; auf Linux erst wirksam seit 55db580 — FRAGEN_TROTZ_FREI zeigte im Container auf das falsche Home)
+
 | | |
 |---|---|
 | **Schwere** | mittel |

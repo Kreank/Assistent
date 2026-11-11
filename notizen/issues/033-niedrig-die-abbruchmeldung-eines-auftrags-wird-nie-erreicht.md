@@ -1,5 +1,7 @@
 # 033 — Die Abbruchmeldung eines Auftrags wird nie erreicht
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

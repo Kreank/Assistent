@@ -1,5 +1,7 @@
 # 029 — Das Aufblenden ('hervor') hat mit der ausgelieferten Konfiguration keinerlei Wirkung
 
+Status: gegenstandslos (Qt-HUD wird auf dem Server nicht gestartet; Fix b217416 steht im Code)
+
 | | |
 |---|---|
 | **Schwere** | niedrig |

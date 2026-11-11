@@ -1,5 +1,7 @@
 # 058 — "Ja, frag nicht mehr nach" galt als Einwand statt als Zustimmung
 
+Status: erledigt (Commit b217416)
+
 | | |
 |---|---|
 | **Schwere** | hoch |
