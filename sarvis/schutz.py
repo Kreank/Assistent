@@ -17,6 +17,7 @@ duerfen. Was uebrig bleibt, sind zwei Sorten Ausnahme: Regeln, die sich
 nicht selbst aendern duerfen, und Befehle, die ein verhoertes "ja" nicht
 tragen wuerde.
 """
+import os
 import re
 import sys
 import shlex
@@ -144,8 +145,33 @@ NIE_BEFEHL = (
 
 
 def _passt(pfad: str, muster) -> bool:
-    p = str(pfad).replace("\\", "/")
-    return any(re.search(m, p, re.IGNORECASE) for m in muster)
+    """Trifft ein Muster den Pfad -- wie er dasteht ODER wohin er fuehrt?
+
+    Nur die Schreibweise zu pruefen reichte auf Windows. Auf Linux ist
+    ein Symlink eine Zeile, und die Sperrmuster fuer die wirklichen Orte
+    sind mit "$" verankert. Gemessen am 11.11.2026 im Container:
+        lesen_stufe('/srv/data/sarvis/./google_token.json')   -> fragen
+        lesen_stufe('/srv/data//sarvis/google_token.json')    -> fragen
+        lesen_stufe('<sandkasten>/harmlos.txt' -> Token)     -> FREI
+    Die harte Sperre ("nie") war also mit einem Punkt, einem doppelten
+    Schraegstrich oder einem Link auf "fragen" oder gar "frei"
+    herunterzuhandeln. Deshalb zusaetzlich das aufgeloeste Ziel.
+    """
+    roh = str(pfad or "")
+    p = roh.replace("\\", "/")
+    if any(re.search(m, p, re.IGNORECASE) for m in muster):
+        return True
+    if not roh:
+        return False
+    try:
+        # Relatives gegen den Ordner, in dem die Shell steht -- nicht
+        # gegen den des Prozesses. Fuer absolute Pfade gleichgueltig.
+        echt = os.path.realpath(os.path.join(_arbeitsordner, roh))
+    except (OSError, ValueError):
+        return False
+    if echt == p:
+        return False
+    return any(re.search(m, echt, re.IGNORECASE) for m in muster)
 
 
 def heikel(pfad: str) -> bool:
@@ -337,7 +363,36 @@ _SCHEMA = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://\S*")
 # zweiten Schraegstrich -- und einen Punkt, damit aus "../../.env" nicht
 # der Pfad "/../.env" wird. Der faellt zwar streng aus (er loest sich zu
 # /.env auf und liegt nirgends), aber zufaellig streng ist nicht streng.
-_POSIX_PFAD = re.compile(r"(?<![\w:/.])(/[^\s\"';|]*)")
+#
+# Die Tilde steht seit dem 11.11.2026 mit in der Klammer: "~/.ssh" wurde
+# sonst als "/.ssh" gelesen -- ein Ort, den es nicht gibt. Die Tilde
+# deutet jetzt _HEIM_PFAD unten, und zwar so, wie die Shell es tut.
+_POSIX_PFAD = re.compile(r"(?<![\w:/.~])(/[^\s\"';|]*)")
+
+# Der Benutzerordner in seinen drei Schreibweisen: ~, $HOME, ${HOME} --
+# und ~name fuer den eines anderen. Vorher fand pfade_im_befehl darin
+# nichts, und "nichts gefunden" heisst an allen vier Pruefstellen
+# "nichts zu beanstanden". Gemessen am 11.11.2026 im Container:
+#     Arbeiter: 'cat $HOME/.claude/.credentials.json'      -> erlaubt
+#     Freigabe "Befehle in mcn" deckte denselben Befehl     -> still
+#     entwicklung_frei('cd ~ && pytest')                    -> True
+_HEIM_PFAD = re.compile(
+    r"(?<![\w:/.~$])(~[A-Za-z_][\w.-]*|~|\$HOME\b|\$\{HOME\})"
+    r"(/[^\s\"';|]*)?(?=$|[\s\"';|&)<>])")
+
+# Das Arbeitsverzeichnis als Variable -- dasselbe wie ".".
+_PWD_PFAD = re.compile(
+    r"(?<![\w:/.$])(\$PWD\b|\$\{PWD\}|\$\(pwd\)|`pwd`)(/[^\s\"';|]*)?")
+
+# Ein nacktes "cd" (oder "cd ~") wechselt in den Benutzerordner. Ohne
+# Argument steht darin kein Pfad, also fand die Pruefung nichts -- der
+# Arbeiter kam mit 'cd && cat .claude.json' aus seinem Projekt heraus.
+_CD_NACKT = re.compile(r"(?:^|[;&|(]\s*)cd\s*(?=$|[;&|)])")
+
+# ".." als ganzes Wort. Der relative Zweig unten verlangt einen
+# Schraegstrich dahinter -- 'cd .. && cd .. && cat srv/data/...' ging
+# damit am Wachhund des Arbeiters vorbei, Schritt fuer Schritt nach oben.
+_HOCH = re.compile(r"(?<![\w:/.])\.\.(?=$|[\s;|&)\"'])")
 
 # Ein RELATIVER Pfad, aber nur mit "./" oder "../" davor.
 #
@@ -385,10 +440,12 @@ def pfade_im_befehl(befehl: str, bezug: str | None = None) -> list[str]:
     Rueckgabe in der Form, die auf dieser Plattform gilt: absolute
     POSIX-Pfade so, wie sie dastehen; Windows-Pfade in Laufwerksform.
 
-    NICHT erkannt werden weiterhin RELATIVE Pfade ("cat ../../.env").
-    Das war auf Windows schon so und ist eine eigene Luecke; sie zu
-    schliessen hiesse, jedes "src/app.py" als Pfad zu behandeln, und
-    das will vorher gemessen werden.
+    Relative Pfade zaehlen nur mit "./" oder "../" davor (und ".." als
+    ganzes Wort); ein blosses "src/app.py" bleibt bewusst aussen vor.
+    Dazu kommen ~, $HOME, $PWD und das nackte "cd" -- siehe die Muster
+    darueber. Was sich dagegen erst zur Laufzeit ergibt ($(printf ...),
+    eine selbst gesetzte Variable), sieht kein Regex; dafuer gibt es
+    die Sperrlisten und die Rueckfrage.
     """
     b = _SCHEMA.sub(" ", str(befehl or ""))
     treffer = re.findall(r"[a-zA-Z]:[\\/][^\s\"';|]*", b)
@@ -408,9 +465,62 @@ def pfade_im_befehl(befehl: str, bezug: str | None = None) -> list[str]:
     # Projektordner, nicht in Sarvis'. Beide denselben Bezug nehmen zu
     # lassen ginge meistens gut und einmal falsch aus -- naemlich dann,
     # wenn Sarvis' Ordner zufaellig im Projekt liegt.
-    treffer += [str(Path(bezug or _arbeitsordner) / r)
-                for r in _REL_PFAD.findall(b)]
+    #
+    # Innerhalb EINES Befehls wird jedes "cd" mitgegangen: In
+    # 'cd web && npm run build && cd ..' meint das ".." den Projektordner
+    # und nicht dessen Elternordner. Ohne das Mitgehen lehnte der
+    # Arbeiter genau diesen Alltagsbefehl ab, sobald ".." ueberhaupt
+    # als Pfad zaehlte -- und umgekehrt lief 'cd .. && cd .. && cat x'
+    # nach oben hinaus, solange es nicht zaehlte.
+    ort = str(bezug or _arbeitsordner)
+    # Benutzerordner und Arbeitsverzeichnis als Schreibweise. Gerechnet
+    # wird mit dem HOME dieses Prozesses: Die Shell, die den Befehl
+    # ausfuehrt, erbt es -- im Container ist das /srv/data/sarvis/home,
+    # nicht Saschas Ordner, und genau dorthin fuehrt "~" dann auch.
+    for wort, rest in _HEIM_PFAD.findall(b):
+        treffer.append(_heim(wort) + rest)
+    if _CD_NACKT.search(b):
+        treffer.append(_heim("~"))
+    for teil in _zerlegen(b):
+        treffer += [os.path.join(ort, r) for r in _REL_PFAD.findall(teil)]
+        treffer += [os.path.join(ort, "..") for _ in _HOCH.findall(teil)]
+        treffer += [ort + rest for _, rest in _PWD_PFAD.findall(teil)]
+        ort = _nach_cd(teil, ort)
     return treffer
+
+
+def _nach_cd(teil: str, ort: str) -> str:
+    """Wo die Shell nach diesem Schritt steht -- logisch, wie "cd" rechnet.
+
+    Ohne Dateizugriff: Hier wird nur mitgezaehlt, geprueft wird spaeter
+    an jedem einzelnen Pfad. "cd -" kennt nur die Shell; dann gilt "/",
+    also ausserhalb jeder Freiliste.
+    """
+    if re.match(r"^(cd|chdir)$", teil, re.IGNORECASE):
+        return _heim("~")
+    treffer = _CD.match(teil)
+    if not treffer:
+        return ort
+    ziel = treffer.group(1).strip().strip('"\'')
+    if ziel == "-":
+        return "/"
+    heim = _HEIM_PFAD.match(ziel)
+    if heim:
+        ziel = _heim(heim.group(1)) + (heim.group(2) or "")
+    return os.path.normpath(os.path.join(ort, _laufwerksform(ziel)))
+
+
+def _heim(wort: str) -> str:
+    """'~', '$HOME', '${HOME}' oder '~name' -- als Ordner.
+
+    Ein ~name, den es nicht gibt, laesst die Shell stehen, wie er ist;
+    hier wird daraus "/" -- ausserhalb jeder Freiliste. Lieber eine
+    Rueckfrage zu viel als ein Ort, den niemand pruefen kann.
+    """
+    if wort in ("~", "$HOME", "${HOME}"):
+        return str(Path.home())
+    voll = os.path.expanduser(wort)
+    return voll if voll != wort else "/"
 
 
 def _heikler_ort_erwaehnt(text: str) -> bool:
@@ -514,7 +624,17 @@ _CD = re.compile(r"^(?:cd|chdir|Set-Location|sl)\s+(?:-Path\s+)?(.+)$",
 
 
 def _laufwerksform(pfad: str) -> str:
-    """Git-Bash-Schreibweise in Laufwerksform -- "/d/x" wird "D:/x"."""
+    """Git-Bash-Schreibweise in Laufwerksform -- "/d/x" wird "D:/x".
+
+    Nur auf Windows. Auf Linux ist "/a/x" ein gewoehnlicher Pfad, und
+    die Umdeutung machte daraus "A:/x" -- fuer PosixPath ein RELATIVER
+    Pfad, der am Arbeitsordner angehaengt wurde. Gemessen am 11.11.2026:
+    _im_entwicklungsbereich('/a/../../etc') -> True, weil daraus
+    '<projekt>/A:/../../etc' wurde, also ein Ort im Projektbaum.
+    Dieselbe Weiche wie in pfade_im_befehl.
+    """
+    if sys.platform != "win32":
+        return pfad
     treffer = re.match(r"^/([a-zA-Z])/(.*)$", str(pfad or ""))
     return f"{treffer.group(1).upper()}:/{treffer.group(2)}" if treffer else pfad
 
@@ -538,9 +658,19 @@ def arbeitsordner_merken(befehl: str) -> str:
     global _arbeitsordner
     for teil in _zerlegen(befehl):
         treffer = _CD.match(teil)
-        if not treffer:
+        if treffer:
+            ziel = _laufwerksform(treffer.group(1).strip().strip('"\''))
+        elif re.match(r"^(cd|chdir)$", teil, re.IGNORECASE):
+            ziel = "~"            # nacktes cd: wie die Shell, nach Hause
+        else:
             continue
-        ziel = _laufwerksform(treffer.group(1).strip().strip('"\''))
+        # "~" und "$HOME" meinen den Benutzerordner der SHELL. Vorher
+        # wurde "~" als Ordnername im Projekt gesucht, nicht gefunden und
+        # der Wechsel ignoriert -- die Shell stand danach woanders, als
+        # hier mitgeschrieben war.
+        heim = _HEIM_PFAD.match(ziel)
+        if heim:
+            ziel = _heim(heim.group(1)) + (heim.group(2) or "")
         if not ziel:
             continue
         try:
@@ -642,6 +772,12 @@ def befehl_stufe(befehl: str) -> str:
                 return "nie"
     for ziel in _umleitungsziele(befehl):
         if _passt(ziel, NIE_SCHREIBEN) or _passt(ziel, NIE_LESEN):
+            return "nie"
+    # Noch einmal ueber den GANZEN Befehl: Nur so geht ein "cd" davor in
+    # die Rechnung ein -- 'cd /srv/data/sarvis && cat ./google_token.json'
+    # nennt den Ort in einem Schritt und die Datei im naechsten.
+    for pfad in pfade_im_befehl(befehl):
+        if _passt(pfad, NIE_LESEN):
             return "nie"
 
     if _heikler_ort_erwaehnt(befehl):

@@ -137,6 +137,34 @@ def _befehl_ganz_unter(befehl: str, freigegeben: str) -> bool:
     return all(_unter(_ordner(p), freigegeben) for p in pfade)
 
 
+def _heikle_wurzeln(werkzeug: str, eingabe: dict) -> list[str]:
+    """Welche Orte aus FRAGEN_TROTZ_FREI beruehrt diese Anfrage?
+
+    Bei Pfadwerkzeugen der eine Pfad, bei Befehlen jeder genannte Pfad
+    -- und der Befehlstext selbst, falls ein Ort darin steht, den der
+    Pfad-Regex am Leerzeichen abschneidet. Dann gibt es keinen Ort,
+    unter dem eine Freigabe liegen koennte, und es wird gefragt.
+    """
+    from . import schutz
+    e = eingabe or {}
+    if werkzeug == "befehl_ausfuehren":
+        befehl = str(e.get("befehl") or "")
+        pfade = _pfade_im_befehl(befehl) or [schutz.arbeitsordner()]
+    elif werkzeug in _PFAD_WERKZEUGE:
+        pfade = [str(e.get("pfad") or "")]
+    else:
+        return []
+    treffer = []
+    for h in config.FRAGEN_TROTZ_FREI:
+        h = str(h)
+        if any(p and _unter(p, h) for p in pfade):
+            treffer.append(h)
+    if (werkzeug == "befehl_ausfuehren" and not treffer
+            and schutz._heikler_ort_erwaehnt(str(e.get("befehl") or ""))):
+        treffer.append("\x00")    # unverortbar -- keine Freigabe deckt das
+    return treffer
+
+
 def _unter(kind: str, eltern: str) -> bool:
     if not eltern:
         return True          # ortlose Freigabe gilt ueberall
@@ -188,8 +216,18 @@ class Freigaben:
     def erlaubt(self, werkzeug: str, eingabe: dict) -> bool:
         self._aufraeumen()
         wo = ort(werkzeug, eingabe)
+        heikle = _heikle_wurzeln(werkzeug, eingabe)
         for (w, freigegeben), _ in self._offen.items():
             if w != werkzeug:
+                continue
+            # Eine Freigabe fuer einen Ordner deckt nicht still die
+            # Zugangsorte darin (FRAGEN_TROTZ_FREI). Gemessen am
+            # 11.11.2026: "Lesen in deinem Benutzerordner" deckte
+            # /home/server3070/.ssh/config -- die Rueckfrage, die
+            # orte.py dort ausdruecklich verlangt, entfiel. Wer genau
+            # DIESEN Ort freigegeben hat, meint ihn aber; dann gilt sie.
+            if any(not (freigegeben and _unter(freigegeben, h))
+                   for h in heikle):
                 continue
             # Ein Befehl hat nicht EINEN Ort, sondern so viele, wie er
             # Pfade nennt -- und eine Freigabe deckt ihn nur, wenn sie

@@ -158,10 +158,26 @@ FREI_DURCHSUCHEN = [
 # genau (PosixPath vergleicht anders als WindowsPath). Kein Ort aus
 # dieser Liste darf auf einem case-insensitiven Dateisystem liegen --
 # eingehaengtes NTFS, exFAT, ZFS mit casesensitivity=insensitive.
+#
+# ZWEI Benutzerordner, nicht einer. Hier stand nur Path.home() -- und
+# das ist im Container NICHT Saschas Ordner, sondern Sarvis' eigenes
+# Zuhause (/srv/data/sarvis/home). Gemessen am 11.11.2026 im laufenden
+# Container: /home/server3070/.ssh, .claude und .config waren "frei" zu
+# lesen und aufzulisten, die Liste schuetzte einen Ordner, in dem keine
+# fremden Schluessel liegen. Saschas Ordner kommt aus PROJEKT_ORTE (die
+# Umgebung setzt ihn), der des Prozesses aus Path.home() -- dort liegen
+# Sarvis' eigene Claude-Anmeldung und was die Shell unter "~" findet.
+_HEIME = list(dict.fromkeys([PROJEKT_ORTE["privat"], Path.home()]))
+
+# Was in einem Benutzerordner Zugaenge traegt. Bewusst Orte statt
+# Dateimuster: schutz.HEIKEL faengt Namen ab, hier geht es darum, dass
+# schon das Auflisten eine Auskunft ist.
+_HEIM_HEIKEL = (".ssh", ".claude", ".claude.json", ".config", ".docker",
+                ".gnupg", ".aws", ".kube", ".netrc", ".git-credentials",
+                ".bash_history")
+
 FRAGEN_TROTZ_FREI = [
-    Path.home() / ".ssh",
-    Path.home() / ".claude",
-    Path.home() / ".config",
+    *(heim / name for heim in _HEIME for name in _HEIM_HEIKEL),
     DATEN / "browser-profil",
 ]
 
