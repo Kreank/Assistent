@@ -210,6 +210,34 @@ def ziel() -> str | None:
     return _ziel
 
 
+# Wer mitschreibt, was gezeigt wurde -- fuer den Gespraechsverlauf.
+#
+# Blaetter und Kacheln entstehen in den Werkzeugen, tief unten, und
+# gehen von dort ueber anzeige.aktuelle() hinaus. Damit sie auch im
+# Verlauf stehen (gespraeche.py) und nicht nach 45 Sekunden weg sind,
+# meldet die Anzeige sie hier weiter. Eine Stelle statt eines Aufrufs in
+# jedem Werkzeug -- dieselbe Ueberlegung wie bei _aktuelle.
+#
+# Die Mitschrift darf das Zeigen nie verhindern: Was hier schiefgeht,
+# wird geschluckt und gedruckt.
+_mitschrift = None
+
+
+def mitschreiben(rueckruf) -> None:
+    """rueckruf(art, felder) bekommt jedes Blatt und jede Kachel."""
+    global _mitschrift
+    _mitschrift = rueckruf
+
+
+def _mitschreiben(art: str, felder: dict) -> None:
+    if _mitschrift is None:
+        return
+    try:
+        _mitschrift(art, felder)
+    except Exception as e:
+        print(f"  (Verlauf: {art} nicht mitgeschrieben -- {e})")
+
+
 class UdpTraeger:
     """Der Weg zur Anzeige auf demselben Rechner.
 
@@ -405,6 +433,11 @@ class Anzeige:
                      adresse=str(adresse or ""), inhalt=text,
                      datei=str(datei or ""), bytes=int(bytes_ or 0),
                      sekunden=round(float(sekunden), 1))
+        _mitschreiben("blatt", {
+            "kennung": str(kennung), "sorte": str(sorte or "markdown"),
+            "titel": str(titel or ""), "adresse": str(adresse or ""),
+            "inhalt": text, "datei": str(datei or ""),
+            "bytes": int(bytes_ or 0)})
 
     def blatt_weg(self, kennung: str) -> None:
         """Ein Blatt zuklappen."""
@@ -457,6 +490,12 @@ class Anzeige:
                      form=str(form or "liste"),
                      spalten=[str(x) for x in (spalten or [])][:2],
                      sekunden=round(float(sekunden), 1))
+        _mitschreiben("kachel", {
+            "name": str(name), "sorte": str(sorte), "kopf": str(kopf),
+            "gross": str(gross), "stand": str(stand),
+            "weggelassen": len(alle) - len(behalten), "punkte": behalten,
+            "form": str(form or "liste"),
+            "spalten": [str(x) for x in (spalten or [])][:2]})
 
     def befehl(self, art: str, **felder) -> None:
         """Einen Befehl an die Oberflaechen schicken, die ihn ausfuehren.
@@ -536,6 +575,29 @@ class Anzeige:
         """
         self._senden(art="werkzeug", name=name, aktiv=bool(aktiv),
                      strom=strom)
+
+    def eintrag(self, e: dict) -> None:
+        """Ein Eintrag im Gespraechsverlauf -- neu oder geaendert.
+
+        Dieselbe id heisst derselbe Eintrag mit neuem Stand (eine Kachel,
+        die sich im selben Zug noch einmal aendert; eine Rueckfrage, die
+        entschieden wurde). Siehe gespraeche.py und DRAHT.md.
+        """
+        self._senden(art="eintrag", faden=str(e.get("faden") or ""),
+                     id=int(e.get("id") or 0), zeit=float(e.get("zeit") or 0),
+                     wer=str(e.get("wer") or ""), sorte=str(e.get("sorte") or ""),
+                     text=str(e.get("text") or ""), daten=e.get("daten") or {},
+                     geraet=str(e.get("geraet") or ""))
+
+    def faeden(self, aktiv: str, liste, wechselt: bool = False) -> None:
+        """Welche Gespraechsfaeden es gibt und welcher gerade gilt.
+
+        Immer die ganze Liste -- ein Zustand, keine Aenderung. Es gibt
+        genau EINEN aktiven Faden fuer alle Oberflaechen: Es gibt ein
+        Hirn, und was per Weckwort gesagt wird, landet dort.
+        """
+        self._senden(art="faeden", aktiv=str(aktiv or ""),
+                     liste=list(liste or []), wechselt=bool(wechselt))
 
     def freigabe(self, text: str, sekunden: float = 0.0) -> None:
         """Was gerade ohne Rueckfrage durchgeht -- leerer Text: nichts.

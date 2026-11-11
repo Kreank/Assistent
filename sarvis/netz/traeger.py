@@ -53,7 +53,10 @@ SCHLANGE_MAX = 200
 # "schirm_aus" braucht den Schutz ebenfalls nicht: Danach kommt kein
 # "schirm" mehr, es kann also nicht ueberholt werden, und als eigene Art
 # ueberlebt es das Eindampfen von selbst.
-WICHTIG = frozenset({"werkzeug", "kachel_weg", "verschieben"})
+# "eintrag" seit 11.11.2026: Jeder Eintrag im Gespraechsverlauf ist ein
+# eigener -- zusammengedampft auf "den neuesten" fehlten Zuruf und Antwort
+# im Verlauf, bis die Oberflaeche neu laedt.
+WICHTIG = frozenset({"werkzeug", "kachel_weg", "verschieben", "eintrag"})
 
 
 class Oberflaeche:

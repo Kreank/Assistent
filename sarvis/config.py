@@ -452,6 +452,22 @@ KLANG_QUELLE = os.environ.get("SARVIS_KLANG", "lokal").strip() or "lokal"
 # zweiter Weg hinein waere einer ohne Zertifikat.
 NETZ_HAFEN = 8900
 
+# --- Benachrichtigungen bei geschlossener App (Web Push) -------------------
+# Wohin der Server Push-Nachrichten schicken darf. Ein Abo ist eine
+# Adresse, die ein Geraet nennt und an die der Server danach von sich aus
+# POSTet -- ohne Liste waere das ein Weg, ihn Anfragen an beliebige Ziele
+# schicken zu lassen. Gilt fuer den Hostnamen und alle Unterdomaenen.
+# Eine native App mit eigenem Dienst (UnifiedPush o. ae.) traegt ihren
+# hier nach.
+PUSH_DIENSTE = (
+    "fcm.googleapis.com",                  # Chrome, Edge, Android
+    "updates.push.services.mozilla.com",   # Firefox
+    "push.apple.com",                      # Safari, iOS (installierte Web-App)
+    "notify.windows.com",                  # aeltere Edge-Fassungen
+)
+# Wen der Push-Dienst bei Problemen anschreibt (VAPID "sub").
+PUSH_KONTAKT = "mailto:sarvis@tech-artist.de"
+
 # --- Aufnahme -------------------------------------------------------------
 ABTASTRATE = 16000  # was Whisper erwartet
 MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen

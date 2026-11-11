@@ -909,7 +909,13 @@ class Werkstatt:
             titel = f"Auftrag gescheitert: {auftrag.projekt}"
 
         if self.melden is not None:
-            self.melden(titel, f"Zweig {auftrag.zweig} · Bericht in bericht.md")
+            # Seit 11.11.2026 geht das auch als Web Push aufs Handy
+            # (main._benachrichtigen). Auf einem Sperrbildschirm sagt
+            # "Zweig x · Bericht in bericht.md" nichts -- der erste Satz
+            # des Ergebnisses sagt, was los ist. Der Zweig bleibt dahinter.
+            erster = " ".join((auftrag.ergebnis or "").split())[:160]
+            self.melden(titel, (f"{erster} · " if erster else "")
+                        + f"Zweig {auftrag.zweig}")
         if self.sagen is not None:
             await self.sagen(text)
 

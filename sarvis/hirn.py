@@ -92,14 +92,16 @@ class Hirn:
         self.subagenten: dict = {}
         # Arbeiter, die mittendrin verloren gingen -- (Was, Wann).
         self.abgebrochene: list = []
+        # Die SDK-Sitzung, in der gerade gesprochen wird. Ein
+        # Gespraechsfaden (gespraeche.py) IST eine solche Sitzung; beim
+        # Wechsel wird sie mit resume wieder aufgenommen. sitzung_an(id)
+        # meldet eine neue oder geaenderte Kennung nach aussen -- sie
+        # steht erst nach der ersten Antwort fest.
+        self.sitzung = ""
+        self.sitzung_an = None
 
-    async def start(self) -> None:
-        # Der Kern des Gedaechtnisses gehoert in den Systemprompt, nicht an
-        # die Frage: dort wird er zwischengespeichert und kostet ab dem
-        # zweiten Zuruf praktisch nichts.
-        prompt, self.hinweise = systemprompt()
-        self.klient = ClaudeSDKClient(
-            options=ClaudeAgentOptions(
+    def _optionen(self, prompt: str, resume: str | None = None):
+        return ClaudeAgentOptions(
                 model=config.MODELL,
                 system_prompt=prompt,
                 # Nur was ausdruecklich erlaubt ist. Alles Uebrige faellt
@@ -134,9 +136,78 @@ class Hirn:
                 # Wartesatz an, und danach sagte er seinen eigenen:
                 # "Sekunde. Moment, ich seh mir das an."
                 env={"ENABLE_TOOL_SEARCH": "false"},
+                # Ein Gespraechsfaden ist eine SDK-Sitzung. Leer heisst:
+                # neuer Faden, frischer Kontext.
+                resume=resume or None,
             )
-        )
-        await self.klient.connect()
+
+    async def _verbinden(self, resume: str | None = None) -> ClaudeSDKClient:
+        # Der Kern des Gedaechtnisses gehoert in den Systemprompt, nicht an
+        # die Frage: dort wird er zwischengespeichert und kostet ab dem
+        # zweiten Zuruf praktisch nichts. Bei jedem Verbinden neu gebaut
+        # -- ein Fadenwechsel bringt also auch das Neueste mit.
+        prompt, self.hinweise = systemprompt()
+        klient = ClaudeSDKClient(options=self._optionen(prompt, resume))
+        await klient.connect()
+        return klient
+
+    async def start(self, sitzung: str = "") -> bool:
+        """Verbinden -- in eine bestehende Sitzung oder eine neue.
+
+        Gibt zurueck, ob die gewuenschte Sitzung wieder aufgenommen wurde.
+        Gibt es sie nicht mehr (Sitzungsdatei weg), meldet die CLI das
+        beim Verbinden ("No conversation found") -- dann eben frisch,
+        statt gar nicht. GEMESSEN 11.11.2026 im Container: neu 0,34 s,
+        resume 0,37 s, dieselbe Kennung danach. Die 5 Sekunden aus dem
+        README galten fuer den Prozessstart frueherer Fassungen.
+        """
+        try:
+            self.klient = await self._verbinden(sitzung or None)
+            self.sitzung = sitzung or ""
+            return bool(sitzung)
+        except Exception as e:
+            if not sitzung:
+                raise
+            print(f"  Sitzung {sitzung[:8]} nicht wieder aufnehmbar "
+                  f"({type(e).__name__}) -- fange frisch an")
+            self.klient = await self._verbinden(None)
+            self.sitzung = ""
+            return False
+
+    async def wechseln(self, sitzung: str = "") -> bool:
+        """In einen anderen Gespraechsfaden -- die alte Sitzung zu, die neue auf.
+
+        Eine laufende Runde muss vorher beendet sein (main unterbricht).
+        Was an die alte Sitzung gebunden war -- Nachtrag nach einem
+        Abbruch, verlorene Arbeiter --, gilt im neuen Faden nicht: Es
+        gehoert zu einem anderen Gespraech.
+        """
+        if self._offen:
+            await self.unterbrechen()
+        alt, self.klient = self.klient, None
+        try:
+            erfolg = await self.start(sitzung)
+        finally:
+            if alt is not None:
+                try:
+                    await alt.disconnect()
+                except Exception:
+                    pass
+        self._leitung_unsauber = False
+        self._nachtrag = ""
+        self.abgebrochene = []
+        self.subagenten = {}
+        return erfolg
+
+    def _sitzung_merken(self, nachricht) -> None:
+        kennung = str(getattr(nachricht, "session_id", "") or "")
+        if kennung and kennung != self.sitzung:
+            self.sitzung = kennung
+            if self.sitzung_an is not None:
+                try:
+                    self.sitzung_an(kennung)
+                except Exception as e:
+                    print(f"  (Sitzung nicht vermerkt: {e})")
 
     # --- Erlaubnis --------------------------------------------------------
 
@@ -540,6 +611,7 @@ class Hirn:
             await self.klient.query(befehl)
             async for nachricht in self.klient.receive_response():
                 if isinstance(nachricht, ResultMessage):
+                    self._sitzung_merken(nachricht)
                     break
             return True
         except Exception as e:
@@ -657,6 +729,7 @@ class Hirn:
             elif isinstance(nachricht, ResultMessage):
                 self.letzte_kosten = nachricht.total_cost_usd
                 self._offen = False
+                self._sitzung_merken(nachricht)
                 # Ist die Runde vorbei, laeuft auch kein Arbeiter mehr --
                 # ein Rest hier waere eine Anzeige, die nie verschwindet.
                 # Und er waere mittendrin gestorben, also gehoert er ins

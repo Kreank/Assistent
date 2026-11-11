@@ -147,6 +147,8 @@ Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
 | `schirm` | `daten`, `breite`, `hoehe` | ein Bild aus dem Live-Strom |
 | `schirm_aus` | — | der Live-Strom ist zu Ende |
 | `verschieben` | `an` | dito |
+| `eintrag` | `faden`, `id`, `zeit`, `wer`, `sorte`, `text`, `daten`, `geraet` | ein Eintrag im Gesprächsverlauf, neu oder geändert (seit 11.11.2026) |
+| `faeden` | `aktiv`, `liste`, `wechselt` | welche Gesprächsfäden es gibt und welcher gilt (seit 11.11.2026) |
 
 <!-- /draht:herein -->
 
@@ -443,6 +445,10 @@ gerade **alles** fertig geworden ist.
 | `taste` | `text`, `sonder` | dort tippen |
 | `rollen` | `x`, `y`, `hoch` | dort scrollen |
 | `auto` | `an` | die Oberfläche sitzt im Fahrzeug (siehe unten) |
+| `faden_neu` | `titel` | ein neues Gespräch anfangen, es wird aktiv |
+| `faden_wechseln` | `faden` | in ein anderes Gespräch wechseln |
+| `faden_umbenennen` | `faden`, `titel` | einem Gespräch einen Namen geben |
+| `faden_archivieren` | `faden`, `an` | ins Archiv legen (`an: false` holt zurück) |
 
 <!-- /draht:hinaus -->
 
@@ -874,3 +880,242 @@ Opus kennt kein 30-ms-Frame (2,5/5/10/20/40/60 ms) — wer über Opus
 schickt, muss serverseitig neu blocken. Das ist eine Zeile, die man
 vergisst, und sie fällt nicht auf: Der VAD sagt dann nicht „Fehler", er
 sagt nur öfter das Falsche.
+
+---
+
+## Gesprächsverlauf und Fäden (seit 11.11.2026)
+
+Bis hierhin zeigte eine Oberfläche genau **eine** Untertitelzeile; was
+vorher gesagt wurde, war weg. Jetzt führt der Server den Verlauf selbst
+(SQLite, `/srv/data/sarvis/gespraeche.db`, `sarvis/gespraeche.py`), in
+**Fäden**: getrennten Gesprächen wie in einem Messenger.
+
+### Das Modell
+
+- Ein **Faden** ist ein Gespräch mit eigenem Kontext. Technisch ist er
+  eine SDK-Sitzung des Hirns; beim Wechsel wird sie mit `resume` wieder
+  aufgenommen (gemessen: unter 1 s). Das **Gedächtnis** (gemerkt,
+  entschieden, Personen) gilt über alle Fäden hinweg.
+- Es gibt **genau einen aktiven Faden für alle Oberflächen**. Es gibt nur
+  ein Hirn: Was per Weckwort, Taste oder Zuruf kommt, landet im aktiven
+  Faden, egal von welchem Gerät. Wer wechselt, wechselt überall.
+- Ein Neustart des Dienstes nimmt den zuletzt aktiven Faden wieder auf.
+  Er ist also kein neues Gespräch mehr.
+
+### `faeden` — die Liste
+
+```json
+{ "art": "faeden", "aktiv": "f-4aa4788c777c", "wechselt": false,
+  "liste": [ { "id": "f-4aa4788c777c", "titel": "Urlaub planen",
+               "angelegt": 1794392519.6, "zuletzt": 1794392990.1,
+               "archiviert": false, "eintraege": 14 } ] }
+```
+
+Kommt **gleich nach dem `willkommen`**, nach jedem Wechsel, Umbenennen,
+Archivieren und nach jedem Zuruf (der Titel kann sich ändern, die
+Reihenfolge auch). Immer die ganze Liste, zuletzt benutzte zuerst — ein
+Zustand, keine Änderung.
+
+- `titel` leer heißt: noch unbenannt. Anzeigen als „Neues Gespräch“. Der
+  erste Zuruf gibt ihm einen Titel (seine ersten Wörter), solange ihn
+  niemand von Hand benannt hat.
+- `wechselt: true` steht zwischen „Befehl angenommen“ und „Hirn ist im
+  neuen Faden“. Danach kommt dieselbe Liste mit `false`. Zeigen, nicht
+  blockieren: Ein Zuruf in dieser Zeit wartet auf dem Server.
+- Ein leerer Faden (kein Eintrag) verschwindet, sobald man ihn verlässt.
+
+### `eintrag` — was im Faden geschieht
+
+```json
+{ "art": "eintrag", "faden": "f-…", "id": 812, "zeit": 1794392990.1,
+  "wer": "sarvis", "sorte": "text", "text": "Morgen wird es sonnig.",
+  "daten": {}, "geraet": "" }
+```
+
+**`id` ist die Identität.** Kommt dieselbe `id` noch einmal, ist es
+derselbe Eintrag mit neuem Stand — ersetzen, nicht anhängen. Die `id`
+steigt über alle Fäden hinweg; innerhalb eines Fadens ist sie die
+Reihenfolge.
+
+Einträge eines **anderen** als des aktiven Fadens: ignorieren (sie kommen
+nur in der Wechselsekunde vor).
+
+| `wer` | `sorte` | `text` | `daten` |
+|---|---|---|---|
+| `du` | `text` | was gesagt oder getippt wurde (Whisper-Ergebnis) | `{}` |
+| `du` | `datei` | Dateiname im Eingang | `datei`, `bytes` |
+| `sarvis` | `text` | die ganze Antwort, wie gesprochen | `{}`, oder `unterbrochen: true`, wenn reingeredet wurde (dann nur der Teil bis dahin) |
+| `sarvis` | `meldung` | von selbst gesagt: Timer, fertiger Auftrag | `{}` |
+| `sarvis` | `frage` | die Rückfrage vor einer Handlung | `offen`, `werkzeug`; geschlossen zusätzlich `entscheidung` (`ja`·`nein`·`anders`·`abgebrochen`) und `antwort` (Wortlaut) |
+| `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`) |
+| `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
+| `system` | `text` | Hinweis des Systems („keine Antwort — …“) | `{}` |
+
+`geraet` ist bei `du` das Gerät, von dem es kam; sonst leer.
+
+**Wann kommt was.** Der Zuruf kommt, sobald er verstanden ist; die
+Antwort kommt **als Ganzes**, wenn sie fertig formuliert ist — während
+gesprochen wird, gibt es weiter `untertitel`. Eine Oberfläche, die beides
+hat, zeigt den Untertitel als vorläufige Blase und ersetzt sie durch den
+`eintrag`. (Die Web-App: `#live`, gelöscht bei `eintrag` von `sarvis` oder
+`zustand: ruhig`.)
+
+**Karten.** Blatt und Kachel kommen weiterhin als `blatt`/`kachel` für die
+Bühne — und zusätzlich als `eintrag`, damit sie im Verlauf stehen bleiben.
+Dieselbe Kachel (`name`) oder dasselbe Blatt (`kennung`) mehrmals im selben
+Zug ist **ein** Eintrag mit neuem Stand. Zustandskacheln (`sorte: zustand`)
+kommen nicht in den Verlauf. Die Regeln der Bühne gelten auch in der
+Karte: **Kacheln nicht anklickbar**, `adresse` nur `/blatt/…`, Markdown
+nur über den eigenen Wandler, nie als HTML.
+
+Ein Blatt der Sorte `html`/`datei` im Verlauf öffnet man über
+`POST /ablage/oeffnen` mit `schluessel` = `daten.kennung` (siehe
+„Ablage“) — die Adresse kann abgelaufen sein. Markdown steht vollständig
+in `daten.inhalt`.
+
+**Rückfragen mit Knopf.** Solange `daten.offen` wahr ist, darf die
+Oberfläche **Ja** und **Nein** anbieten. Ein Knopf schickt einen
+**gewöhnlichen Zuruf** `{ "art": "zuruf", "text": "Ja" }` bzw. `"Nein"` —
+dieselbe Antwort, als wäre sie gesagt worden; der Server deutet sie wie
+gesprochen. Es gibt dafür keine eigene Art und keine Abkürzung an den
+Stufen vorbei. Danach kommt derselbe Eintrag mit `offen: false`.
+
+### Hinaus: die Fadenbefehle
+
+```json
+{ "art": "faden_neu" }                       // optional "titel"
+{ "art": "faden_wechseln", "faden": "f-…" }
+{ "art": "faden_umbenennen", "faden": "f-…", "titel": "Urlaub" }
+{ "art": "faden_archivieren", "faden": "f-…", "an": true }
+```
+
+- `faden_neu` ohne `titel`, während der aktive Faden noch leer ist:
+  passiert nichts (ein zweiter leerer daneben wäre Müll). Sonst entsteht
+  ein neuer und wird aktiv.
+- `faden_wechseln` und `faden_neu` **unterbrechen** eine laufende Antwort
+  und eine offene Rückfrage — sie gehören zum alten Faden.
+- `faden_archivieren` mit dem aktiven Faden: Er geht ins Archiv, und ein
+  neuer, leerer wird aktiv. Ein archivierter Faden, in den man wechselt,
+  kommt von selbst aus dem Archiv.
+- `faden_umbenennen` mit leerem `titel` gibt den Namen an die Automatik
+  zurück. Höchstens 80 Zeichen.
+- Antwort ist immer ein `faeden` an alle. Unbekannte Fäden: still nichts.
+
+### HTTP: Verlauf nachladen und durchsuchen
+
+Alles mit `X-Sarvis-Schluessel` im Kopf, ohne: **401** `{"fehler": "kein Zugang"}`.
+
+```
+GET /faeden                     → { "aktiv": "f-…", "liste": [ … wie oben … ] }
+GET /verlauf?faden=f-…&anzahl=60&vor=812
+    → { "faden": { id, titel, angelegt, zuletzt, archiviert, eintraege },
+        "eintraege": [ … wie der Draht, ohne "art", ALT → NEU … ],
+        "mehr": true }
+GET /suche?q=urlaub             → { "treffer": [ { …eintrag…, "faden_titel": "…" } ] }
+```
+
+- `faden` weggelassen = der aktive. Unbekannt: **404**.
+- `anzahl` 1–200 (Vorgabe 60). `vor` = eine `id`: nur ältere. Mit `mehr`
+  weiß man, ob es noch ältere gibt — „Ältere laden“ nimmt die kleinste
+  `id`, die man hat.
+- **Wann holen:** nach jedem `willkommen` (was kam, während die Leitung weg
+  war, steht nur dort) und wenn `faeden.aktiv` sich ändert. Was während
+  des Holens schon per Draht kam, nicht wegwerfen: Einträge mit höherer
+  `id` als der letzte geholte behalten.
+- `/suche` sucht ab zwei Zeichen in Zurufen, Antworten, Meldungen und
+  Rückfragen aller Fäden, neueste zuerst, höchstens 40.
+
+## Ablage (seit 11.11.2026)
+
+Alles, was Sarvis erzeugt hat — Blätter (Markdown), Berichte (HTML),
+Dateien —, mit dem Faden, in dem es entstand. Was schon vor dem
+11.11.2026 in `blaetter.json` stand, ist übernommen. `GET /dateien` bleibt
+unverändert für Apps, die es schon nutzen.
+
+```
+GET /ablage                 (optional ?sorte=markdown|html|datei)
+→ { "eintraege": [ { "schluessel": "…", "sorte": "markdown|html|datei",
+                     "titel": "…", "datei": "…", "bytes": 48211,
+                     "faden": "f-…", "faden_titel": "…", "eintrag": 812,
+                     "seit": 1794350000.1, "geaendert": …,
+                     "vorhanden": true } ],
+    "von_dir": [ { "datei": "…", "bytes": …, "seit": … } ] }
+
+POST /ablage/oeffnen        { "schluessel": "…" }
+→ markdown: { "sorte": "markdown", "titel": "…", "inhalt": "…" }
+→ sonst:    { "sorte": "html|datei", "titel", "datei", "bytes",
+              "adresse": "/blatt/…", "bis": 1796984619.1 }
+→ 404 unbekannt · 410 {"fehler": "liegt nicht mehr da"}
+```
+
+- **Die Adresse unter `/blatt/` läuft ab** (Berichte 7, Dateien 30 Tage).
+  Die Ablage nicht. `POST /ablage/oeffnen` gibt **dieselbe** Kennung mit
+  neuer Frist zurück, solange die Datei noch auf der Platte liegt —
+  deshalb mit Schlüssel. Danach wie ein Blatt: `html` im Rahmen ohne
+  `allow-scripts`, `datei` als Download.
+- `vorhanden: false` heißt: Die Datei ist weg (alte Berichte räumt
+  `bericht._aufraeumen` nach einer Weile ab). Zeigen, aber nicht
+  antippbar machen.
+- `schluessel` ist bei `html`/`datei` die geheime Blatt-Kennung, bei
+  Markdown `md-<eintrag>`. Die Liste ist also vertraulich wie `/dateien`.
+
+## Benachrichtigungen bei geschlossener App (Web Push, seit 11.11.2026)
+
+Ein Timer, eine Erinnerung oder ein fertiger Hintergrundauftrag erreicht
+jetzt auch ein Gerät, auf dem Sarvis gerade nicht offen ist. Verfahren:
+Standard-Web-Push (RFC 8030/8291/8292) mit VAPID. Der private Schlüssel
+liegt in `/srv/data/sarvis/vapid_privat.pem` (0600).
+
+```
+GET  /push/schluessel   → { "schluessel": "<VAPID-Public-Key, base64url>",
+                            "abos": 1 }              // Abos DIESES Geräts
+POST /push/abo          Body: PushSubscription.toJSON()
+                        { "endpoint": "https://fcm.googleapis.com/…",
+                          "keys": { "p256dh": "…", "auth": "…" } }
+                        → { "gut": true } · 400 { "fehler": "…" }
+POST /push/abmelden     { "endpoint": "…" } → { "gut": true, "entfernt": 1 }
+POST /push/probe        → { "gesendet": 1, "fehler": 0, "entfernt": 0 }
+```
+
+Alle vier mit `X-Sarvis-Schluessel`. Ein Abo gehört zu dem Gerät, dessen
+Schlüssel es angemeldet hat; wird das Gerät widerrufen, bekommt es nichts
+mehr (das Abo verschwindet beim nächsten Versand). Meldet der Push-Dienst
+404/410, ist das Abo erloschen und wird gelöscht — die App meldet es beim
+nächsten Start einfach neu an (die Web-App tut das bei jedem `willkommen`).
+
+**Erlaubte Push-Dienste** (`config.PUSH_DIENSTE`): `fcm.googleapis.com`,
+`updates.push.services.mozilla.com`, `push.apple.com`,
+`notify.windows.com` und deren Unterdomänen, nur https auf 443. Sonst
+**400** `{"fehler": "dieser Push-Dienst ist nicht erlaubt"}`. Grund: Der
+Server POSTet von sich aus an diese Adresse; ohne Liste ließe er sich an
+beliebige Ziele schicken.
+
+**Was ankommt** (nach dem Entschlüsseln, UTF-8-JSON):
+
+```json
+{ "titel": "Timer abgelaufen", "text": "Wäsche aufhängen",
+  "art": "wecker", "zeit": 1794392990.1 }
+```
+
+`art`: `wecker` (Timer, Erinnerung), `auftrag` (Hintergrundauftrag fertig,
+abgebrochen, gescheitert), `probe`, `meldung` (sonstiges). Nur was auf
+einen Sperrbildschirm gehört — keine Kontostände, keine Mailtexte.
+
+**Der Service Worker** (`/waechter.js`) zeigt die Meldung — außer ein
+Sarvis-Fenster ist sichtbar **und** im Vordergrund (dann hat man es
+gehört und sieht es im Verlauf). Die Probe zeigt immer. Antippen öffnet
+bzw. holt die App nach vorn. `wecker` bleibt stehen, bis man ihn
+wegwischt.
+
+Gesendet wird immer an alle Abos, auch wenn gerade eine Oberfläche
+verbunden ist: „Verbunden“ heißt bei einem Handy in der Tasche nicht,
+dass jemand hinsieht. Ob gezeigt wird, entscheidet das Gerät.
+
+**iPhone:** Web Push geht nur, wenn Sarvis als Web-App auf dem
+Home-Bildschirm liegt (iOS 16.4+). **Native Apps** nutzen dieselben
+Wege, wenn sie einen Web-Push-fähigen Dienst haben (z. B. UnifiedPush);
+dessen Host gehört dann in `config.PUSH_DIENSTE`.
+
+Prüfen ohne Browser: `einsatz/push_pruefen.py` (verschlüsselt, schickt
+an einen Empfänger auf 127.0.0.1, entschlüsselt unabhängig mit `http_ece`
+und prüft die VAPID-Signatur).

@@ -19,7 +19,7 @@ for strom in (sys.stdout, sys.stderr):
     except (AttributeError, OSError):
         pass
 
-from . import anmeldung, config, klang, rueckfrage, schutz  # noqa: E402
+from . import anmeldung, config, gespraeche, klang, rueckfrage, schutz  # noqa: E402
 from . import anzeige as anzeige_modul  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .klang import gong  # noqa: E402
@@ -172,7 +172,9 @@ class Sarvis:
             # Meldungen gingen weiter per UDP an ein Fenster, das es
             # nicht gibt, und niemand merkte es.
             leuchten=self._leuchten,
-            melden=zeigen,
+            # Windows-Benachrichtigung auf dem Dev-PC, Web Push auf dem
+            # Server -- siehe _benachrichtigen.
+            melden=self._benachrichtigen,
         )
         # Freigaben auf Zeit. Bewusst hier und nicht im Hirn: Sie
         # gehoeren zum Gespraech, nicht zum Modell -- ein Neustart hebt
@@ -197,6 +199,19 @@ class Sarvis:
                                          schutz.arbeitsordner_zeile())
                              if z),
                          freigaben=self.freigaben)
+        # Welcher Gespraechsfaden gerade im Hirn steckt (gespraeche.py).
+        # Die SDK-Sitzung steht erst nach der ersten Antwort fest; das Hirn
+        # meldet sie, und sie gehoert zu DIESEM Faden -- nicht zu dem, der
+        # bis dahin vielleicht schon wieder aktiv ist.
+        self._hirn_faden = ""
+        self.hirn.sitzung_an = self._sitzung_gemerkt
+        # Blaetter und Kacheln eines Zuges: (art, name) -> Eintrag. Dieselbe
+        # Kachel zweimal im selben Zug ist EIN Eintrag mit neuem Stand,
+        # nicht zwei Karten uebereinander -- wie auf der Buehne.
+        self._zug_karten: dict = {}
+        # Die Rueckfrage, die gerade als Karte im Verlauf steht.
+        self._frage_eintrag = 0
+        anzeige_modul.mitschreiben(self._mitschrift)
         # Ein Hinweis fuer GENAU den naechsten Zuruf: Da fiel eine
         # Entscheidung und nichts wurde festgehalten. Siehe
         # gedaechtnis.entscheidung_verpasst.
@@ -255,6 +270,191 @@ class Sarvis:
         self.gruesse = []            # vorbereitete Weckantworten
         self.gruss_laeuft = False
 
+    # --- Gespraechsverlauf (gespraeche.py) -------------------------------
+
+    def _eintragen(self, wer: str, sorte: str, text: str = "",
+                   daten: dict | None = None, geraet: str | None = None):
+        """Einen Eintrag in den AKTIVEN Faden -- und an alle Oberflaechen.
+
+        Darf nie ein Gespraech anhalten: Was hier schiefgeht, wird gedruckt
+        und geschluckt. Ein fehlender Verlaufseintrag ist aergerlich, eine
+        Antwort, die deshalb nicht gesprochen wird, waere ein Fehler.
+        """
+        try:
+            e = gespraeche.eintragen(
+                gespraeche.aktiv(), wer, sorte, text, daten,
+                (anzeige_modul.ziel() or "") if geraet is None else geraet)
+        except Exception as fehler:
+            print(f"  (Verlauf: nicht eingetragen -- {fehler})")
+            return None
+        self.anzeige.eintrag(e)
+        if wer == "du" and sorte == "text":
+            # Der erste Zuruf gibt einem Faden seinen Titel, und jeder
+            # schiebt ihn in der Liste nach oben.
+            self._faeden_melden()
+        return e
+
+    def _aendern(self, nummer: int, text: str | None = None,
+                 daten: dict | None = None):
+        try:
+            e = gespraeche.aendern(nummer, text, daten)
+        except Exception as fehler:
+            print(f"  (Verlauf: nicht geaendert -- {fehler})")
+            return None
+        if e:
+            self.anzeige.eintrag(e)
+        return e
+
+    def _faeden_melden(self, wechselt: bool = False) -> None:
+        try:
+            self.anzeige.faeden(gespraeche.aktiv(), gespraeche.faeden(),
+                                wechselt)
+        except Exception as fehler:
+            print(f"  (Fadenliste nicht gemeldet -- {fehler})")
+
+    def _sitzung_gemerkt(self, kennung: str) -> None:
+        gespraeche.sitzung_setzen(self._hirn_faden or gespraeche.aktiv(),
+                                  kennung)
+
+    def _mitschrift(self, art: str, f: dict) -> None:
+        """Ein Blatt oder eine Kachel -- als Karte in den Verlauf.
+
+        Zustandskacheln ("Auftrag laeuft ...") gehoeren nicht hinein: Sie
+        aendern sich im Sekundentakt und sagen danach nichts mehr.
+        """
+        if art == "kachel":
+            if f.get("sorte") == "zustand":
+                return
+            schl, sorte, titel = ("kachel", f.get("name")), "kachel", f.get("kopf")
+        else:
+            schl, sorte, titel = ("blatt", f.get("kennung")), "blatt", f.get("titel")
+        daten = dict(f)
+        vorhanden = self._zug_karten.get(schl)
+        e = (self._aendern(vorhanden, titel or "", daten) if vorhanden
+             else self._eintragen("sarvis", sorte, titel or "", daten, ""))
+        if not e:
+            return
+        self._zug_karten[schl] = e["id"]
+        if art != "blatt":
+            return
+        # Und in die Ablage: Ein Blatt soll man wiederfinden, auch wenn
+        # seine Adresse unter /blatt/ laengst abgelaufen ist.
+        try:
+            if f.get("sorte") == "markdown":
+                inhalt = str(f.get("inhalt") or "")
+                gespraeche.ablegen(f"md-{e['id']}", "markdown", titel or "",
+                                   bytes_=len(inhalt.encode("utf-8")),
+                                   inhalt=inhalt, faden_id=e["faden"],
+                                   eintrag=e["id"])
+            else:
+                from .netz import blaetter
+                kennung = str(f.get("kennung") or "")
+                bekannt = blaetter._laden().get(kennung) or {}
+                gespraeche.ablegen(
+                    kennung, "html" if f.get("sorte") == "html" else "datei",
+                    titel or "", datei=str(f.get("datei") or ""),
+                    bytes_=int(f.get("bytes") or 0),
+                    pfad=str(bekannt.get("pfad") or ""),
+                    typ=str(bekannt.get("typ") or ""),
+                    faden_id=e["faden"], eintrag=e["id"])
+        except Exception as fehler:
+            print(f"  (Ablage: nicht abgelegt -- {fehler})")
+
+    def _benachrichtigen(self, titel: str, text: str, still: bool = False) -> None:
+        """Eine Meldung, die auch ankommt, wenn niemand zusieht.
+
+        Wecker und Auftraege rufen das (werkzeuge/zeit.py, auftrag.py). Auf
+        Windows ist es ein Toast, auf dem Server Web Push an jedes Geraet,
+        das Benachrichtigungen eingeschaltet hat. Ob die App gerade offen
+        ist, entscheidet der Service Worker: Sieht jemand hin, zeigt er
+        nichts -- dann hat er es ohnehin gehoert.
+        """
+        zeigen(titel, text, still)
+        if not self.im_netz:
+            return
+        art = ("wecker" if titel.startswith("Timer") else
+               "auftrag" if titel.startswith("Auftrag") else "meldung")
+        try:
+            from .netz import push
+            push.benachrichtigen(titel, text, art)
+        except Exception as fehler:
+            print(f"  (Push nicht verschickt -- {fehler})")
+
+    async def _faden_setzen(self, tun: str, wert: str = "") -> None:
+        """Einen anderen Faden aktiv machen -- und das Hirn mitnehmen.
+
+        Laeuft in der Schleife (siehe laufen()), damit sich ein Wechsel
+        nicht mit einem Zuruf ueberholt. Eine laufende Antwort ist vorher
+        unterbrochen worden.
+        """
+        vorher = gespraeche.aktiv()
+        if tun == "neu":
+            jetzt = gespraeche.faden(gespraeche.aktiv())
+            if jetzt and not jetzt.get("eintraege") and not wert:
+                # Ein leerer Faden ist schon "neu". Ein zweiter leerer
+                # daneben waere Muell in der Liste.
+                ziel = jetzt["id"]
+            else:
+                ziel = gespraeche.faden_anlegen(wert)["id"]
+        else:
+            ziel = str(wert or "")
+            if not gespraeche.faden(ziel):
+                return
+        gespraeche.aktiv_setzen(ziel)
+        if vorher and vorher != ziel:
+            gespraeche.leer_entfernen(vorher)
+        if ziel == self._hirn_faden:
+            self._faeden_melden()
+            return
+        self._faeden_melden(wechselt=True)
+        self.anzeige.zustand(DENKT)
+        sitzung = (gespraeche.faden(ziel) or {}).get("sitzung") or ""
+        t = time.perf_counter()
+        try:
+            wieder = await self.hirn.wechseln(sitzung)
+        except Exception as fehler:
+            print(f"  Fadenwechsel: {type(fehler).__name__}: {fehler}")
+            wieder = False
+            if self.hirn.klient is None:
+                await self.hirn.start("")
+        self._hirn_faden = ziel
+        print(f"  Faden {ziel} aktiv ({'wieder aufgenommen' if wieder else 'frisch'}"
+              f", {time.perf_counter() - t:.2f}s)")
+        if sitzung and not wieder:
+            self._eintragen("system", "text",
+                            "Der frühere Gesprächsinhalt ließ sich nicht wieder "
+                            "laden. Ich fange in diesem Faden frisch an — der "
+                            "Verlauf hier bleibt sichtbar.", geraet="")
+        self.anzeige.zustand(RUHIG)
+        self._faeden_melden()
+
+    async def _faden_vom_netz(self, art: str, m: dict, geraet: str) -> None:
+        """Fadenbefehle einer Oberflaeche (DRAHT.md, "Gespraechsfaeden")."""
+        kennung = str(m.get("faden") or "")
+        if art == "faden_umbenennen":
+            if gespraeche.umbenennen(kennung, str(m.get("titel") or "")):
+                self._faeden_melden()
+            return
+        if art == "faden_archivieren":
+            an = bool(m.get("an", True))
+            if not gespraeche.archivieren(kennung, an):
+                return
+            if an and kennung == gespraeche.aktiv():
+                # Wer den Faden wegraeumt, in dem er gerade ist, will
+                # woanders weiterreden -- in einem frischen.
+                self.schlange.put_nowait(("faden", "neu", ""))
+            self._faeden_melden()
+            return
+        if art == "faden_neu":
+            self.schlange.put_nowait(("faden", "neu",
+                                      str(m.get("titel") or "")))
+        elif art == "faden_wechseln" and kennung:
+            self.schlange.put_nowait(("faden", "wechseln", kennung))
+
+    async def _oberflaeche_da(self, geraet: str) -> None:
+        """Eine Oberflaeche ist neu verbunden: Sie braucht die Fadenliste."""
+        self._faeden_melden()
+
     # --- Tastatur (fremder Faden) -----------------------------------------
 
     def _leuchten(self, name: str, aktiv: bool = True, strom: str = "") -> None:
@@ -302,6 +502,8 @@ class Sarvis:
 
     def _antwort_geben(self, text: str) -> None:
         if self.antwort is not None and not self.antwort.done():
+            if text:
+                self._eintragen("du", "text", text)
             # Wer waehrend der Frage antwortet, will den Rest nicht mehr
             # hoeren. Ohne das redet Sarvis die Frage zu Ende, obwohl sie
             # laengst beantwortet ist -- und man sitzt daneben und wartet.
@@ -381,6 +583,7 @@ class Sarvis:
             self.lautsprecher.ziel = None
         anzeige_modul.zielen(None)
         print(f"\n  Sarvis : {text}   (von selbst)")
+        self._eintragen("sarvis", "meldung", text, geraet="")
         # Mit Kopfhoerern bleibt das Ohr offen (config.REINREDEN), damit
         # man ihm ins Wort fallen kann; mit Boxen schaltet spricht() ab.
         self.horcher.spricht(text)
@@ -448,6 +651,28 @@ class Sarvis:
     # --- Rueckfrage --------------------------------------------------------
 
     async def nachfragen(self, werkzeug: str, eingabe: dict):
+        """Die Rueckfrage -- und ihre Karte im Verlauf.
+
+        Die Karte bekommt Ja/Nein-Knoepfe (die Oberflaeche schickt dann
+        einen gewoehnlichen Zuruf "Ja" oder "Nein", siehe DRAHT.md). Hier
+        wird sie geschlossen, wie auch immer die Frage ausging.
+        """
+        self._frage_eintrag = 0
+        entscheidung, wortlaut = "nein", ""
+        try:
+            entscheidung, wortlaut = await self._nachfragen(werkzeug, eingabe)
+            return entscheidung, wortlaut
+        except BaseException:
+            entscheidung = "abgebrochen"
+            raise
+        finally:
+            if self._frage_eintrag:
+                self._aendern(self._frage_eintrag, daten={
+                    "offen": False, "entscheidung": entscheidung,
+                    "antwort": wortlaut or ""})
+                self._frage_eintrag = 0
+
+    async def _nachfragen(self, werkzeug: str, eingabe: dict):
         """Laut nachfragen. Gibt (Entscheidung, Wortlaut) zurueck.
 
         Entscheidung ist "ja", "nein" oder "anders" -- und der Wortlaut
@@ -537,6 +762,9 @@ class Sarvis:
                       f"{Freigaben.dauer_lang(config.FREIGABE_MINUTEN)} "
                       "nicht mehr.")
         print(f"\n  ? Sarvis fragt: {frage}")
+        e = self._eintragen("sarvis", "frage", frage,
+                            {"offen": True, "werkzeug": werkzeug}, geraet="")
+        self._frage_eintrag = e["id"] if e else 0
 
         letztes = ""
         # Das Antwortfenster steht, BEVOR die Frage gesprochen wird.
@@ -711,6 +939,7 @@ class Sarvis:
 
     async def _sagen(self, text: str) -> None:
         print(f"  Sarvis : {text}")
+        self._eintragen("sarvis", "text", text, geraet="")
         self._zuletzt_gesagt = text
         self.anzeige.untertitel("sarvis", text)
         # Waehrend der Ruhe wird geschrieben, nicht gesprochen. Nicht
@@ -881,6 +1110,10 @@ class Sarvis:
         # wieder gefragt werden.
         self._abgelehnt = {}
         self._zugestimmt = {}
+        # Ein neuer Zug: Was jetzt an Blaettern und Kacheln kommt, sind
+        # neue Karten im Verlauf.
+        self._zug_karten = {}
+        self._eintragen("du", "text", gesagt)
 
         if rueckfrage.ist_stopp(gesagt):
             await self._alles_stoppen()
@@ -970,18 +1203,30 @@ class Sarvis:
                 if not heraus:
                     self.horcher.spricht(None)
 
-        async for schnipsel in self.hirn.fragen(gesagt):
-            if erstes_wort is None:
-                erstes_wort = time.perf_counter()
-            ganze_antwort.append(schnipsel)
-            for satz in sammler.dazu(schnipsel):
-                await asyncio.to_thread(vorlesen, satz)
+        try:
+            async for schnipsel in self.hirn.fragen(gesagt):
+                if erstes_wort is None:
+                    erstes_wort = time.perf_counter()
+                ganze_antwort.append(schnipsel)
+                for satz in sammler.dazu(schnipsel):
+                    await asyncio.to_thread(vorlesen, satz)
 
-        rest = sammler.rest()
-        if rest:
-            await asyncio.to_thread(vorlesen, rest)
+            rest = sammler.rest()
+            if rest:
+                await asyncio.to_thread(vorlesen, rest)
+        except asyncio.CancelledError:
+            # Reingeredet: Was bis dahin kam, steht trotzdem im Verlauf --
+            # als unterbrochen markiert, damit niemand es fuer die ganze
+            # Antwort haelt.
+            teil = "".join(ganze_antwort).strip()
+            if teil:
+                self._eintragen("sarvis", "text", teil,
+                                {"unterbrochen": True}, geraet="")
+            raise
 
         text = "".join(ganze_antwort).strip()
+        if text:
+            self._eintragen("sarvis", "text", text, geraet="")
         print(f"  Sarvis : {text}")
         await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
@@ -1094,6 +1339,10 @@ class Sarvis:
             raise
         except Exception as e:
             print(f"  Fehler: {type(e).__name__}: {e}")
+            # Im Verlauf stuende sonst eine Frage ohne Antwort, und man
+            # wuesste nicht, ob noch etwas kommt.
+            self._eintragen("system", "text", "Da ging etwas schief — keine "
+                            f"Antwort ({type(e).__name__}).", geraet="")
             if anmeldung.klingt_nach_anmeldung(e):
                 # Nicht die englische Ausnahme vorlesen lassen. Wer
                 # gerade redet, will wissen was los ist, nicht welche
@@ -1121,6 +1370,8 @@ class Sarvis:
             raise
         except Exception as e:
             print(f"  Fehler: {type(e).__name__}: {e}")
+            self._eintragen("system", "text", "Da ging etwas schief — keine "
+                            f"Antwort ({type(e).__name__}).", geraet="")
             if anmeldung.klingt_nach_anmeldung(e):
                 # Nicht die englische Ausnahme vorlesen lassen. Wer
                 # gerade redet, will wissen was los ist, nicht welche
@@ -1190,7 +1441,9 @@ class Sarvis:
                                         strom_an=self._strom_vom_netz,
                                         auto_an=self._auto_vom_netz,
                                         datei_an=self._datei_vom_netz,
-                                        weg_an=self._oberflaeche_weg)
+                                        weg_an=self._oberflaeche_weg,
+                                        faden_an=self._faden_vom_netz,
+                                        da_an=self._oberflaeche_da)
         await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
         print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
 
@@ -1222,6 +1475,12 @@ class Sarvis:
         """
         self._leuchten("Dateien")
         self.anzeige.untertitel("System", f"Datei angekommen: {pfad.name}")
+        try:
+            groesse = pfad.stat().st_size
+        except OSError:
+            groesse = 0
+        self._eintragen("du", "datei", pfad.name,
+                        {"datei": pfad.name, "bytes": groesse}, geraet=geraet)
 
     async def _auto_vom_netz(self, an: bool, geraet: str) -> None:
         """Die Oberflaeche steckt jetzt im Auto -- oder eben nicht mehr."""
@@ -1314,7 +1573,15 @@ class Sarvis:
             await self._netz_aufbauen()
         print("  Claude verbindet ...")
         t = time.perf_counter()
-        await self.hirn.start()
+        # Der Gespraechsverlauf und der Faden, der zuletzt aktiv war. Seine
+        # SDK-Sitzung wird wieder aufgenommen -- ein Neustart des Dienstes
+        # ist damit kein neues Gespraech mehr.
+        await asyncio.to_thread(gespraeche.oeffnen)
+        self._hirn_faden = gespraeche.aktiv()
+        sitzung = (gespraeche.faden(self._hirn_faden) or {}).get("sitzung") or ""
+        wieder = await self.hirn.start(sitzung)
+        print(f"  Faden     : {self._hirn_faden} "
+              f"({'wieder aufgenommen' if wieder else 'frisch'})")
         print(f"  Claude bereit nach {time.perf_counter() - t:.1f}s")
         for hinweis in self.hirn.hinweise:
             print(f"  Gedaechtnis: {hinweis}")
@@ -1426,6 +1693,19 @@ class Sarvis:
             while True:
                 befehl = await self.schlange.get()
                 antwortet = self.antwort is not None and not self.antwort.done()
+
+                # Ein anderer Gespraechsfaden. Was gerade laeuft -- auch
+                # eine offene Rueckfrage --, gehoert zum alten und wird
+                # abgebrochen, nicht in den neuen mitgenommen.
+                if isinstance(befehl, tuple) and befehl[0] == "faden":
+                    if self.arbeitet or self.aufgabe is not None:
+                        await self._unterbrechen()
+                    self.abgebrochen = False
+                    try:
+                        await self._faden_setzen(befehl[1], befehl[2])
+                    except Exception as e:
+                        print(f"  Fadenwechsel ging nicht: {type(e).__name__}: {e}")
+                    continue
 
                 # Weckwort: der Zuruf steckt schon im selben Satz, es muss
                 # also nichts mehr aufgenommen werden.

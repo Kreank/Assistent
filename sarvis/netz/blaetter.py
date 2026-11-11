@@ -209,6 +209,35 @@ def hinlegen(pfad, typ: str = "html", titel: str = "",
     return kennung
 
 
+def erneuern(kennung: str, pfad, typ: str, titel: str = "",
+             dateiname: str = "", tage: float = 0.0) -> float:
+    """Eine abgelaufene Adresse aus der Ablage wieder aufmachen.
+
+    Die Ablage (gespraeche.py) behaelt, was Sarvis erzeugt hat, laenger
+    als die Frist einer Adresse. Wer es dort antippt, ist angemeldet --
+    der Weg dorthin (POST /ablage/oeffnen) traegt den Geraeteschluessel.
+    Dann bekommt DIESELBE Kennung eine neue Frist. Eine neue Kennung
+    hiesse, dass die Karte im Verlauf auf eine tote Adresse zeigt.
+
+    Gibt das neue "bis" zurueck, 0.0 wenn die Datei nicht mehr da ist.
+    """
+    datei = Path(pfad)
+    if typ not in TYPEN or not datei.is_file():
+        return 0.0
+    alle = _aufraeumen(_laden())
+    alt = alle.get(kennung) if isinstance(alle.get(kennung), dict) else {}
+    bis = max(float(alt.get("bis") or 0),
+              time.time() + (float(tage) or FRIST_TAGE) * 86400.0)
+    alle[kennung] = {
+        "pfad": str(datei), "typ": typ,
+        "titel": str(titel or alt.get("titel") or datei.stem),
+        "datei": str(dateiname or alt.get("datei") or datei.name),
+        "seit": float(alt.get("seit") or time.time()), "bis": bis,
+    }
+    _schreiben(alle)
+    return bis
+
+
 def adresse(kennung: str) -> str:
     """Der Pfad, den die Oberflaeche anfaehrt.
 

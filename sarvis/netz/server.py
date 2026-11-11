@@ -50,7 +50,7 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from .. import config
+from .. import config, gespraeche
 from ..werkzeuge import eingang
 from . import blaetter, geraete
 from .fernsicht import Fernsicht
@@ -86,15 +86,20 @@ class Endpunkt:
     """
 
     def __init__(self, zuruf_an=None, sprache_an=None, strom_an=None,
-                 auto_an=None, datei_an=None, weg_an=None):
+                 auto_an=None, datei_an=None, weg_an=None,
+                 faden_an=None, da_an=None):
         """zuruf_an(text, geraet)        -- eine getippte Zeile kam an
         sprache_an(proben, geraet)    -- eine fertige Aufnahme kam an
         strom_an(daten, rate, geraet) -- ein Stueck Dauerstrom kam an
         auto_an(an, geraet)             -- die Oberflaeche sitzt im Auto
         datei_an(pfad, geraet)          -- eine Datei kam herein
         weg_an(geraet)                -- eine Oberflaeche ist gegangen
-        Alle vier werden in der Ereignisschleife von Sarvis gerufen.
+        faden_an(art, m, geraet)      -- ein Fadenbefehl (faden_neu, ...)
+        da_an(geraet)                 -- eine Oberflaeche ist angemeldet
+        Alle werden in der Ereignisschleife von Sarvis gerufen.
         """
+        self.faden_an = faden_an
+        self.da_an = da_an
         self.zuruf_an = zuruf_an
         self.sprache_an = sprache_an
         self.strom_an = strom_an
@@ -249,6 +254,158 @@ class Endpunkt:
         """
         raise web.HTTPSeeOther("/?geteilt=verpasst")
 
+    # --- Verlauf, Faeden, Ablage, Push (seit 11.11.2026) -----------------
+    #
+    # Alles hier traegt den Geraeteschluessel im Kopf, wie /datei und
+    # /dateien. Es sind Gespraechsinhalte und die Liste der geheimen
+    # Blatt-Adressen. Vertrag: einsatz/DRAHT.md, "Gespraechsverlauf und
+    # Faeden", "Ablage", "Benachrichtigungen".
+
+    async def _wer(self, anfrage: web.Request) -> str | None:
+        schluessel = anfrage.headers.get("X-Sarvis-Schluessel", "")
+        return await asyncio.to_thread(geraete.pruefen, schluessel)
+
+    @staticmethod
+    def _kein_zugang() -> web.Response:
+        return web.json_response({"fehler": "kein Zugang"}, status=401)
+
+    @staticmethod
+    def _json(daten, status: int = 200) -> web.Response:
+        return web.json_response(daten, status=status,
+                                 headers={"Cache-Control": "no-store"})
+
+    async def _faeden(self, anfrage: web.Request) -> web.Response:
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        aktiv = await asyncio.to_thread(gespraeche.aktiv)
+        liste = await asyncio.to_thread(gespraeche.faeden)
+        return self._json({"aktiv": aktiv, "liste": liste})
+
+    async def _verlauf(self, anfrage: web.Request) -> web.Response:
+        """Die Eintraege eines Fadens, juengste zuletzt, aeltere seitenweise."""
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        q = anfrage.query
+        kennung = q.get("faden") or await asyncio.to_thread(gespraeche.aktiv)
+        try:
+            vor = int(q.get("vor") or 0)
+            anzahl = int(q.get("anzahl") or 60)
+        except ValueError:
+            return self._json({"fehler": "vor/anzahl muessen Zahlen sein"}, 400)
+        faden = await asyncio.to_thread(gespraeche.faden, kennung)
+        if faden is None:
+            return self._json({"fehler": "diesen Faden gibt es nicht"}, 404)
+        faden.pop("sitzung", None)
+        seite = await asyncio.to_thread(gespraeche.verlauf, kennung, vor, anzahl)
+        return self._json({"faden": faden, **seite})
+
+    async def _suche(self, anfrage: web.Request) -> web.Response:
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        wort = anfrage.query.get("q", "")
+        return self._json({"treffer": await asyncio.to_thread(
+            gespraeche.suchen, wort)})
+
+    async def _ablage(self, anfrage: web.Request) -> web.Response:
+        """Was Sarvis erzeugt hat -- und was du ihm geschickt hast."""
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        sorte = anfrage.query.get("sorte", "")
+        if sorte and sorte not in ("markdown", "html", "datei"):
+            return self._json({"fehler": "sorte: markdown, html oder datei"}, 400)
+        liste = await asyncio.to_thread(gespraeche.ablage, sorte)
+
+        def von_dir():
+            try:
+                alle = sorted((d for d in config.EINGANG.glob("*")
+                               if d.is_file()),
+                              key=lambda d: d.stat().st_mtime, reverse=True)
+            except OSError:
+                return []
+            return [{"datei": d.name, "bytes": d.stat().st_size,
+                     "seit": d.stat().st_mtime} for d in alle[:60]]
+
+        return self._json({"eintraege": liste,
+                           "von_dir": await asyncio.to_thread(von_dir)})
+
+    async def _ablage_oeffnen(self, anfrage: web.Request) -> web.Response:
+        """Ein Stueck aus der Ablage holen -- und seine Adresse erneuern.
+
+        Eine Blatt-Adresse gilt 7 bzw. 30 Tage (blaetter.py). Die Ablage
+        haelt laenger. Wer hier mit Schluessel fragt, bekommt dieselbe
+        Adresse mit neuer Frist, solange die Datei noch da ist.
+        """
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        try:
+            m = await anfrage.json()
+        except Exception:
+            return self._json({"fehler": "JSON erwartet"}, 400)
+        schl = str((m or {}).get("schluessel") or "")
+        zeile = await asyncio.to_thread(gespraeche.abgelegt, schl)
+        if not zeile:
+            return self._json({"fehler": "gibt es nicht"}, 404)
+        if zeile["sorte"] == "markdown":
+            return self._json({"sorte": "markdown", "titel": zeile["titel"],
+                               "inhalt": zeile["inhalt"]})
+        typ = zeile["typ"] or ("html" if zeile["sorte"] == "html" else "beliebig")
+        bis = await asyncio.to_thread(
+            blaetter.erneuern, schl, zeile["pfad"], typ, zeile["titel"],
+            zeile["datei"],
+            blaetter.FRIST_VERSAND_TAGE if zeile["sorte"] == "datei" else 0.0)
+        if not bis:
+            return self._json({"fehler": "liegt nicht mehr da"}, 410)
+        return self._json({"sorte": zeile["sorte"], "titel": zeile["titel"],
+                           "datei": zeile["datei"], "bytes": zeile["bytes"],
+                           "adresse": blaetter.adresse(schl), "bis": bis})
+
+    async def _push_schluessel(self, anfrage: web.Request) -> web.Response:
+        name = await self._wer(anfrage)
+        if name is None:
+            return self._kein_zugang()
+        from . import push
+        oeffentlich = await asyncio.to_thread(push.oeffentlich)
+        abos = await asyncio.to_thread(push.abos, name)
+        return self._json({"schluessel": oeffentlich, "abos": len(abos)})
+
+    async def _push_abo(self, anfrage: web.Request) -> web.Response:
+        name = await self._wer(anfrage)
+        if name is None:
+            return self._kein_zugang()
+        from . import push
+        try:
+            abo = await anfrage.json()
+        except Exception:
+            return self._json({"fehler": "JSON erwartet"}, 400)
+        grund = await asyncio.to_thread(push.abo_speichern, abo, name)
+        if grund:
+            return self._json({"fehler": grund}, 400)
+        return self._json({"gut": True})
+
+    async def _push_abmelden(self, anfrage: web.Request) -> web.Response:
+        name = await self._wer(anfrage)
+        if name is None:
+            return self._kein_zugang()
+        from . import push
+        try:
+            m = await anfrage.json()
+        except Exception:
+            return self._json({"fehler": "JSON erwartet"}, 400)
+        weg = await asyncio.to_thread(push.abo_loeschen,
+                                      str((m or {}).get("endpoint") or ""), name)
+        return self._json({"gut": True, "entfernt": weg})
+
+    async def _push_probe(self, anfrage: web.Request) -> web.Response:
+        """Eine Probe an die Abos DIESES Geraets -- zum Ausprobieren."""
+        name = await self._wer(anfrage)
+        if name is None:
+            return self._kein_zugang()
+        from . import push
+        ergebnis = await asyncio.to_thread(push.alle_senden, {
+            "titel": "Sarvis", "text": "Benachrichtigungen kommen an.",
+            "art": "probe", "zeit": time.time()}, name)
+        return self._json(ergebnis)
+
     # --- WebSocket -------------------------------------------------------
 
     async def _draht(self, anfrage: web.Request) -> web.WebSocketResponse:
@@ -261,6 +418,14 @@ class Endpunkt:
 
         log.info("Oberfläche verbunden: %s", oberflaeche.name)
         self.traeger.dazu(oberflaeche)
+        if self.da_an is not None:
+            # Gleich nach dem willkommen: welche Faeden es gibt und welcher
+            # gilt. Geht an alle -- ein Zustand, den die anderen schon
+            # kennen, schadet ihnen nicht.
+            try:
+                await self.da_an(oberflaeche.name)
+            except Exception as e:
+                log.warning("Begruessung an %s: %s", oberflaeche.name, e)
         sender = asyncio.create_task(self._senden(ws, oberflaeche))
         try:
             await self._empfangen(ws, oberflaeche)
@@ -377,6 +542,27 @@ class Endpunkt:
         elif art == "hier":
             pass  # Lebenszeichen, aiohttp haelt die Verbindung selbst wach
 
+        # --- Gespraechsfaeden (seit 11.11.2026) ---------------------------
+        # Es gibt EIN Hirn und damit einen aktiven Faden fuer alle. Wer
+        # wechselt, wechselt fuer jede Oberflaeche; alle bekommen danach
+        # "faeden" mit dem neuen Stand. Was die Befehle tun, entscheidet
+        # main.py -- hier wird nur weitergereicht.
+        elif art == "faden_neu":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
+        elif art == "faden_wechseln":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
+        elif art == "faden_umbenennen":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
+        elif art == "faden_archivieren":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
         elif art == "auto":
             # Die Oberflaeche sagt, ob sie gerade im Auto steckt.
             #
@@ -456,6 +642,15 @@ class Endpunkt:
         app.router.add_get("/leben", self._leben)
         app.router.add_post("/datei", self._datei)
         app.router.add_get("/dateien", self._dateien)
+        app.router.add_get("/faeden", self._faeden)
+        app.router.add_get("/verlauf", self._verlauf)
+        app.router.add_get("/suche", self._suche)
+        app.router.add_get("/ablage", self._ablage)
+        app.router.add_post("/ablage/oeffnen", self._ablage_oeffnen)
+        app.router.add_get("/push/schluessel", self._push_schluessel)
+        app.router.add_post("/push/abo", self._push_abo)
+        app.router.add_post("/push/abmelden", self._push_abmelden)
+        app.router.add_post("/push/probe", self._push_probe)
         app.router.add_get("/waechter.js", self._waechter)
         app.router.add_post("/teilen", self._teilen)
         app.router.add_get("/draht", self._draht)
