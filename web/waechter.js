@@ -7,7 +7,12 @@
  *    Geraeteschluessel nicht (der liegt im localStorage der Seite), also
  *    legt er die Dateien in einen eigenen Zwischenspeicher und schickt
  *    die Seite hin, die sie mit Schluessel hochlaedt.
- * 3. Nichts sonst. Bewusst OHNE Zwischenspeicher fuer Draht, Dateiliste
+ * 3. Benachrichtigungen bei geschlossener App (seit 11.11.2026, Web Push):
+ *    Der Server schickt verschluesselt an den Push-Dienst des Browsers
+ *    (sarvis/netz/push.py), der weckt diesen Worker. Ist ein Sarvis-
+ *    Fenster sichtbar UND im Vordergrund, wird nichts gezeigt -- dann hat
+ *    man es ohnehin gehoert und im Verlauf. Die Probe zeigt immer.
+ * 4. Nichts sonst. Bewusst OHNE Zwischenspeicher fuer Draht, Dateiliste
  *    und Downloads: Ein Assistent, der gespeicherte Antworten zeigt, waere
  *    schlimmer als einer, der sagt, dass er nicht erreichbar ist -- und ein
  *    100-MB-Download hat im Cache nichts verloren. (Bis 10.11. landete
@@ -16,7 +21,7 @@
  * Wird an der WURZEL ausgeliefert (/waechter.js, netz/server.py). Unter
  * /dabei/ galt er nur fuer /dabei/ und haette /teilen nie gesehen.
  */
-const LAGER = 'sarvis-2';
+const LAGER = 'sarvis-3';
 const HUELLE = ['/', '/dabei/sarvis.js', '/dabei/manifest.json', '/dabei/symbol.svg'];
 
 self.addEventListener('install', e => {
@@ -70,4 +75,33 @@ self.addEventListener('fetch', e => {
       return a;
     }).catch(() => caches.match(e.request))
   );
+});
+
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { text: e.data ? e.data.text() : '' }; }
+  e.waitUntil((async () => {
+    const fenster = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const schautHin = fenster.some(c => c.visibilityState === 'visible' && c.focused);
+    if (schautHin && d.art !== 'probe') return;
+    await self.registration.showNotification(d.titel || 'Sarvis', {
+      body: d.text || '',
+      // Gleiche Art ersetzt die vorige nicht: zwei Timer sind zwei Meldungen.
+      tag: (d.art || 'sarvis') + '-' + Math.round(Number(d.zeit || 0)),
+      icon: '/dabei/symbol-192.png',
+      badge: '/dabei/symbol-192.png',
+      data: { url: '/' },
+      requireInteraction: d.art === 'wecker',
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil((async () => {
+    const fenster = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const offen = fenster.find(c => new URL(c.url).origin === self.location.origin);
+    if (offen) return offen.focus();
+    return self.clients.openWindow('/');
+  })());
 });

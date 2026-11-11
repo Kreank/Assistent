@@ -1466,7 +1466,6 @@ const FORMEN = {
 };
 
 function kachelZeigen(m) {
-  const farbe = m.sorte === 'zustand' ? KACHEL_ZUSTAND : KACHEL_ANTWORT;
   let el = S.kacheln.get(m.name);
   if (!el) {
     el = document.createElement('div');
@@ -1474,15 +1473,26 @@ function kachelZeigen(m) {
     kachelraum.appendChild(el);
     S.kacheln.set(m.name, el);
   }
-  el.style.borderColor = rgb(farbe, 0.30);
-  const punkte = m.punkte || [];
-
   // Die WIRKLICH vorhandene Innenbreite, nicht eine geratene: Am Rechner
   // rund 264, auf dem Handy rund 364. Die gerechneten Formen legen ihr
   // Inneres darin aus -- siehe den Kopf dieses Abschnitts. Der leere
   // Kasten steht schon im Baum, also hat er seine Breite; nur beim
   // allerersten Bild vor dem ersten Layout ist sie 0, dafuer der Notnagel.
   const breite = Math.max(180, (el.clientWidth || Math.min(290, kachelraum.clientWidth || 290)) - 24);
+  kachelFuellen(el, m, breite);
+
+  const sek = Number(m.sekunden) || (m.sorte === 'zustand' ? 0 : 45);
+  clearTimeout(el._uhr);
+  if (sek > 0) el._uhr = setTimeout(() => kachelWeg(m.name), sek * 1000);
+}
+
+/* Den Inhalt einer Kachel malen -- auf der Bühne UND als Karte im
+ * Verlauf. Eine Stelle, damit die Karte nicht anders aussieht als das,
+ * was vorher neben dem Ring stand. */
+function kachelFuellen(el, m, breite) {
+  const farbe = m.sorte === 'zustand' ? KACHEL_ZUSTAND : KACHEL_ANTWORT;
+  el.style.borderColor = rgb(farbe, 0.30);
+  const punkte = m.punkte || [];
 
   // Etwas Unbekanntes faellt auf "liste" zurueck: Eine Kachel, die wegen
   // eines Tippfehlers gar nicht aufgeht, ist schlechter als eine, die
@@ -1504,10 +1514,6 @@ function kachelZeigen(m) {
     ${rumpf}
     ${weg ? `<div class="fuss">und ${weg} weitere</div>` : ''}
     ${m.stand ? `<div class="fuss">${sicher(m.stand)}</div>` : ''}`;
-
-  const sek = Number(m.sekunden) || (m.sorte === 'zustand' ? 0 : 45);
-  clearTimeout(el._uhr);
-  if (sek > 0) el._uhr = setTimeout(() => kachelWeg(m.name), sek * 1000);
 }
 
 function kachelWeg(name) {
@@ -1938,7 +1944,17 @@ function blattZu() {
 
 function hintergrundZeigen() {
   const kasten = document.getElementById('hintergrund');
-  if (!S.hintergrund.length && !S.hgFertig) { kasten.classList.remove('an'); return; }
+  const leiste = document.getElementById('hgleiste');
+  if (!S.hintergrund.length && !S.hgFertig) {
+    kasten.classList.remove('an'); leiste.hidden = true; return;
+  }
+  // Dieselbe Auskunft schmal über der Eingabe -- in der Verlaufsansicht
+  // ist die Bühne mit ihrer Ecke nicht zu sehen.
+  const zahl = Math.max(S.hgGesamt, S.hintergrund.length);
+  leiste.hidden = false;
+  leiste.style.color = S.hgFertig ? 'rgb(120,226,140)' : 'rgba(255,196,120,.92)';
+  leiste.textContent = S.hgFertig ? 'Im Hintergrund: fertig'
+    : `Im Hintergrund${zahl > 1 ? ' · ' + zahl : ''}: ${S.hintergrund.join(' · ')}`;
   kasten.classList.add('an');
   // Die WIRKLICHE Zahl, nicht die der angezeigten Zeilen.
   const gesamt = Math.max(S.hgGesamt, S.hintergrund.length);
@@ -2018,11 +2034,18 @@ function empfangen(m) {
       document.getElementById('geraet').textContent = m.geraet || '';
       document.getElementById('tor').classList.add('weg');
       localStorage.setItem('sarvis-schluessel', schluessel);
+      // Nach jeder (Wieder-)Verbindung den Verlauf neu holen: Was kam,
+      // während die Leitung weg war, steht nur auf dem Server.
+      F.geladen = '';
       dateienLaden();
       geteiltAbholen();
+      pushStand();
       break;
+    case 'faeden':   faedenZeigen(m); break;
+    case 'eintrag':  eintragZeigen(m); break;
     case 'zustand':
       if (m.strom) break;            // gehört einem Vorgang, nicht dem Ring
+      liveZustand(m.zustand);
       if (m.zustand !== S.zustand) {
         S.zustand = m.zustand;
         if (m.zustand === 'hoert') {
@@ -2042,6 +2065,7 @@ function empfangen(m) {
       if (m.strom) break;
       S.untertitel = m.text || ''; S.wer = m.wer || 'sarvis'; S.hervor = 4;
       zeigeUntertitel();
+      if (m.wer === 'sarvis') liveText(m.text || '');
       break;
     case 'nachhoeren':
       S.nachhoeren = Number(m.sekunden) || 0;
@@ -2965,49 +2989,86 @@ async function geteiltAbholen() {
   if (text) { const z = document.getElementById('zeile'); z.value = text; z.focus(); }
 }
 
-/* Die Ablage. */
-let ablageDaten = { von_sarvis: [], von_dir: [] };
+/* Die Ablage -- seit 11.11.2026 alles, was Sarvis erzeugt hat: Blätter,
+ * Berichte, Dateien. Kommt von GET /ablage (gespraeche.py). Die alte
+ * Dateiliste (GET /dateien) gibt es für andere Apps weiter. */
+let ablageDaten = { eintraege: [], von_dir: [] };
+let ablageFilter = '';
 const zeitDeutsch = sek => {
   const d = new Date(sek * 1000), heute = new Date();
   const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   return d.toDateString() === heute.toDateString() ? `heute ${uhr}`
     : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + uhr;
 };
+// Für Attributwerte: sicher() lässt Anführungszeichen stehen.
+const attr = t => sicher(t).replace(/"/g, '&quot;');
+const mitSchluessel = (mehr) => Object.assign({ 'X-Sarvis-Schluessel': schluessel }, mehr || {});
 
 async function dateienLaden() {
   if (!schluessel) return;
   try {
-    const a = await fetch('/dateien', { headers: { 'X-Sarvis-Schluessel': schluessel },
-                                        cache: 'no-store' });
+    const a = await fetch('/ablage', { headers: mitSchluessel(), cache: 'no-store' });
     if (!a.ok) return;
     ablageDaten = await a.json();
   } catch { return; }
+  // "Neu" zählt nur Dateien und Berichte -- ein Blatt hat man gerade im
+  // Verlauf gesehen, das ist keine Nachricht.
   const gesehen = Number(localStorage.getItem('sarvis-dateien-gesehen') || 0);
-  const neu = (ablageDaten.von_sarvis || []).filter(d => d.seit > gesehen).length;
+  const neu = (ablageDaten.eintraege || [])
+    .filter(d => d.sorte !== 'markdown' && d.seit > gesehen).length;
   const marke = document.getElementById('dateienneu');
   marke.textContent = neu; marke.hidden = !neu;
   if (!document.getElementById('ablage').hidden) ablageMalen();
 }
 
+const ABLAGE_ZEICHEN = { markdown: '&#128221;', html: '&#128202;', datei: '&#128196;' };
+
 function ablageMalen() {
   const gesehen = Number(localStorage.getItem('sarvis-dateien-gesehen') || 0);
-  const von = ablageDaten.von_sarvis || [], hin = ablageDaten.von_dir || [];
-  const zeile = (d, link) => {
-    const neben = `${menge(d.bytes)}<br>${zeitDeutsch(d.seit)}`;
-    const name = sicher(d.datei || d.titel || 'Datei');
-    if (!link) return `<div class="datei"><span class="name">${name}</span>`
-      + `<span class="neben">${neben}</span></div>`;
-    const adresse = String(d.adresse || '');
-    if (!adresse.startsWith('/blatt/')) return '';
-    return `<a class="datei${d.seit > gesehen ? ' neu' : ''}" href="${sicher(adresse)}" `
-      + `download="${name}"><span class="name">${name}</span>`
-      + `<span class="neben">${neben}</span><span class="pfeil">&#8595;</span></a>`;
-  };
-  document.querySelector('#ablage .liste').innerHTML =
-    '<h3>Von Sarvis</h3>' + (von.length ? von.map(d => zeile(d, true)).join('')
-      : '<div class="leer">Noch nichts. Sag einfach „schick mir …“.</div>')
-    + '<h3>Von dir geschickt</h3>' + (hin.length ? hin.map(d => zeile(d, false)).join('')
+  const alle = (ablageDaten.eintraege || []).filter(d => !ablageFilter || d.sorte === ablageFilter);
+  const hin = ablageDaten.von_dir || [];
+  let html = '';
+  if (ablageFilter !== 'dir') {
+    html += alle.length ? alle.map(d => {
+      const name = sicher(d.titel || d.datei || 'Ohne Titel');
+      const unter = d.faden_titel ? `<small>aus „${sicher(d.faden_titel)}“</small>`
+        : (d.datei && d.datei !== d.titel ? `<small>${sicher(d.datei)}</small>` : '');
+      const groesse = d.sorte !== 'markdown' && d.bytes ? menge(d.bytes) + '<br>' : '';
+      const neu = d.sorte !== 'markdown' && d.seit > gesehen ? ' neu' : '';
+      return `<button type="button" class="datei${d.vorhanden ? '' : ' weg'}${neu}" `
+        + `data-schluessel="${attr(d.schluessel)}"${d.vorhanden ? '' : ' disabled'}>`
+        + `<span class="art">${ABLAGE_ZEICHEN[d.sorte] || ABLAGE_ZEICHEN.datei}</span>`
+        + `<span class="name">${name}${unter}</span>`
+        + `<span class="neben">${d.vorhanden ? groesse : 'nicht mehr da<br>'}${zeitDeutsch(d.seit)}</span>`
+        + `</button>`;
+    }).join('') : '<div class="leer">Hier liegt noch nichts. Sag einfach „schick mir …“ '
+      + 'oder „zeig mir das als Blatt“.</div>';
+  }
+  if (!ablageFilter || ablageFilter === 'dir') {
+    html += '<h3>Von dir geschickt</h3>' + (hin.length ? hin.map(d =>
+      `<div class="datei"><span class="art">&#128206;</span><span class="name">${sicher(d.datei)}</span>`
+      + `<span class="neben">${menge(d.bytes)}<br>${zeitDeutsch(d.seit)}</span></div>`).join('')
       : '<div class="leer">Noch nichts — Büroklammer unten, Einfügen oder Teilen.</div>');
+  }
+  document.querySelector('#ablage .liste').innerHTML = html;
+}
+
+/* Ein Stück aus der Ablage holen. Die Adresse unter /blatt/ läuft nach
+ * 7 bzw. 30 Tagen ab -- mit Schlüssel bekommt sie hier eine neue Frist. */
+async function ablageHolen(schl) {
+  let a, r;
+  try {
+    r = await fetch('/ablage/oeffnen', { method: 'POST', cache: 'no-store',
+      headers: mitSchluessel({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ schluessel: schl }) });
+    a = await r.json();
+  } catch { hinweis('Die Ablage ist gerade nicht erreichbar.'); return; }
+  if (r.status === 410) { hinweis('Diese Datei liegt nicht mehr da.'); return; }
+  if (!r.ok) { hinweis(a.fehler || `Fehler ${r.status}`); return; }
+  document.getElementById('ablage').hidden = true;
+  blattZeigen({ kennung: schl, sorte: a.sorte === 'html' ? 'html'
+    : a.sorte === 'markdown' ? 'markdown' : 'datei',
+    titel: a.titel, adresse: a.adresse, datei: a.datei, bytes: a.bytes, inhalt: a.inhalt });
 }
 
 document.getElementById('dateienknopf').addEventListener('click', () => {
@@ -3017,10 +3078,496 @@ document.getElementById('dateienknopf').addEventListener('click', () => {
   ablageMalen();
   dateienLaden();
   // Ab jetzt gilt alles bis hierhin als gesehen.
-  const neuestes = Math.max(0, ...(ablageDaten.von_sarvis || []).map(d => d.seit));
+  const neuestes = Math.max(0, ...(ablageDaten.eintraege || []).map(d => d.seit));
   if (neuestes) localStorage.setItem('sarvis-dateien-gesehen', String(neuestes));
   document.getElementById('dateienneu').hidden = true;
 });
 document.getElementById('ablagezu').addEventListener('click', () => {
   document.getElementById('ablage').hidden = true;
+});
+document.querySelector('#ablage .filter').addEventListener('click', e => {
+  const b = e.target.closest('button[data-sorte]');
+  if (!b) return;
+  ablageFilter = b.dataset.sorte;
+  document.querySelectorAll('#ablage .filter button')
+    .forEach(x => x.classList.toggle('an', x === b));
+  ablageMalen();
+});
+document.querySelector('#ablage .liste').addEventListener('click', e => {
+  const b = e.target.closest('button[data-schluessel]');
+  if (b && !b.disabled) ablageHolen(b.dataset.schluessel);
+});
+
+// =====================================================================
+// Gesprächsfäden und Verlauf (seit 11.11.2026)
+// =====================================================================
+/* Der Verlauf liegt auf dem Server (gespraeche.py) und kommt auf zwei
+ * Wegen: GET /verlauf beim Verbinden und Wechseln, der Draht ("eintrag")
+ * für alles, was danach geschieht. Dieselbe id heißt derselbe Eintrag mit
+ * neuem Stand. Es gibt EINEN aktiven Faden für alle Oberflächen -- wer
+ * wechselt, wechselt überall ("faeden"). */
+const F = { aktiv: '', liste: [], wechselt: false, geladen: '', alle: [],
+            mehr: false, treffer: [], archivAuf: false };
+const eintraegeEl = document.getElementById('eintraege');
+const verlaufEl = document.getElementById('verlauf');
+const liveEl = document.getElementById('live');
+const fadenTitel = f => (f && f.titel) || 'Neues Gespräch';
+const uhrzeit = sek => new Date(sek * 1000)
+  .toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+const tagVon = sek => new Date(sek * 1000).toDateString();
+
+function tagName(sek) {
+  const d = new Date(sek * 1000), heute = new Date();
+  const gestern = new Date(); gestern.setDate(heute.getDate() - 1);
+  if (d.toDateString() === heute.toDateString()) return 'Heute';
+  if (d.toDateString() === gestern.toDateString()) return 'Gestern';
+  return d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function wannKurz(sek) {
+  if (!sek) return '';
+  const d = new Date(sek * 1000), heute = new Date();
+  if (d.toDateString() === heute.toDateString()) return uhrzeit(sek);
+  if ((heute - d) < 6 * 86400000) return d.toLocaleDateString('de-DE', { weekday: 'short' });
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+function istUnten() {
+  return verlaufEl.scrollHeight - verlaufEl.scrollTop - verlaufEl.clientHeight < 80;
+}
+function nachUnten() {
+  requestAnimationFrame(() => { verlaufEl.scrollTop = verlaufEl.scrollHeight; });
+}
+
+// --- Fäden -------------------------------------------------------------
+function faedenZeigen(m) {
+  F.liste = Array.isArray(m.liste) ? m.liste : [];
+  F.wechselt = !!m.wechselt;
+  const vorher = F.aktiv;
+  F.aktiv = String(m.aktiv || '');
+  const jetzt = F.liste.find(f => f.id === F.aktiv);
+  const t = document.getElementById('fadentitel');
+  t.textContent = F.wechselt ? 'wechselt …' : fadenTitel(jetzt);
+  t.classList.toggle('wechselt', F.wechselt);
+  document.title = jetzt && jetzt.titel ? `${jetzt.titel} · Sarvis` : 'Sarvis';
+  fadenlisteMalen();
+  if (F.aktiv && (F.aktiv !== vorher || F.geladen !== F.aktiv)) verlaufLaden();
+}
+
+function fadenZeile(f) {
+  const zurueck = f.archiviert;
+  return `<div class="faden${f.id === F.aktiv ? ' aktiv' : ''}" data-faden="${attr(f.id)}">`
+    + `<div class="was"><div class="name">${sicher(fadenTitel(f))}</div>`
+    + `<div class="wann">${wannKurz(f.zuletzt)}${f.eintraege ? ' · ' + f.eintraege : ''}</div></div>`
+    + `<button type="button" data-tun="umbenennen" title="Umbenennen" aria-label="Umbenennen">&#9998;</button>`
+    + `<button type="button" data-tun="${zurueck ? 'zurueck' : 'archivieren'}" `
+    + `title="${zurueck ? 'Aus dem Archiv holen' : 'Archivieren'}" `
+    + `aria-label="${zurueck ? 'Aus dem Archiv holen' : 'Archivieren'}">${zurueck ? '&#8634;' : '&#128451;'}</button>`
+    + `</div>`;
+}
+
+function fadenlisteMalen() {
+  const wort = document.getElementById('fadensuche').value.trim().toLowerCase();
+  const passt = f => !wort || fadenTitel(f).toLowerCase().includes(wort);
+  const offen = F.liste.filter(f => !f.archiviert && passt(f));
+  const archiv = F.liste.filter(f => f.archiviert && passt(f));
+  let html = offen.map(fadenZeile).join('')
+    || `<div class="leer" style="padding:6px 8px;font-size:12px;opacity:.5">${wort ? 'Kein Titel passt.' : 'Noch keine Gespräche.'}</div>`;
+  if (archiv.length) {
+    const auf = F.archivAuf || !!wort;
+    html += `<h3 class="archivkopf" style="cursor:pointer">Archiv · ${archiv.length} ${auf ? '&#9662;' : '&#9656;'}</h3>`
+      + (auf ? archiv.map(fadenZeile).join('') : '');
+  }
+  if (wort.length >= 2 && F.treffer.length) {
+    html += '<h3>Im Verlauf gefunden</h3>' + F.treffer.map(t =>
+      `<div class="treffer" data-faden="${attr(t.faden)}">${sicher(t.text.slice(0, 120))}`
+      + `<small>${sicher(t.faden_titel || 'Neues Gespräch')} · ${wannKurz(t.zeit)}</small></div>`).join('');
+  }
+  document.getElementById('fadenliste').innerHTML = html;
+}
+
+function schubladeAuf() {
+  document.getElementById('faeden').classList.add('offen');
+  document.getElementById('schleier').hidden = false;
+}
+function schubladeZu() {
+  document.getElementById('faeden').classList.remove('offen');
+  document.getElementById('schleier').hidden = true;
+}
+
+function umbenennen(kennung) {
+  const f = F.liste.find(x => x.id === kennung);
+  const titel = window.prompt('Wie soll das Gespräch heißen?', f ? f.titel : '');
+  if (titel === null) return;
+  senden({ art: 'faden_umbenennen', faden: kennung, titel: titel.trim() });
+}
+
+function fadenNeu() {
+  senden({ art: 'faden_neu' });
+  schubladeZu();
+  document.getElementById('zeile').focus();
+}
+
+document.getElementById('faedenknopf').addEventListener('click', schubladeAuf);
+document.getElementById('faedenzu').addEventListener('click', schubladeZu);
+document.getElementById('schleier').addEventListener('click', schubladeZu);
+document.getElementById('fadenneu').addEventListener('click', fadenNeu);
+document.getElementById('fadenneu2').addEventListener('click', fadenNeu);
+document.getElementById('fadentitel').addEventListener('click', () => {
+  if (F.aktiv) umbenennen(F.aktiv);
+});
+document.getElementById('fadenliste').addEventListener('click', e => {
+  if (e.target.closest('.archivkopf')) {
+    F.archivAuf = !F.archivAuf; fadenlisteMalen(); return;
+  }
+  const knopf = e.target.closest('button[data-tun]');
+  const zeile = e.target.closest('[data-faden]');
+  if (!zeile) return;
+  const kennung = zeile.dataset.faden;
+  if (knopf) {
+    const tun = knopf.dataset.tun;
+    if (tun === 'umbenennen') umbenennen(kennung);
+    else senden({ art: 'faden_archivieren', faden: kennung, an: tun === 'archivieren' });
+    return;
+  }
+  if (kennung !== F.aktiv) senden({ art: 'faden_wechseln', faden: kennung });
+  schubladeZu();
+});
+
+let sucheUhr = 0;
+document.getElementById('fadensuche').addEventListener('input', e => {
+  fadenlisteMalen();
+  clearTimeout(sucheUhr);
+  const wort = e.target.value.trim();
+  if (wort.length < 2) { F.treffer = []; return; }
+  sucheUhr = setTimeout(async () => {
+    try {
+      const r = await fetch('/suche?q=' + encodeURIComponent(wort),
+                            { headers: mitSchluessel(), cache: 'no-store' });
+      if (!r.ok) return;
+      F.treffer = (await r.json()).treffer || [];
+      fadenlisteMalen();
+    } catch { /* still */ }
+  }, 300);
+});
+
+// --- Verlauf -----------------------------------------------------------
+async function verlaufLaden(vor) {
+  if (!schluessel || !F.aktiv) return;
+  const faden = F.aktiv;
+  const q = new URLSearchParams({ faden, anzahl: '60' });
+  if (vor) q.set('vor', String(vor));
+  let a;
+  try {
+    const r = await fetch('/verlauf?' + q, { headers: mitSchluessel(), cache: 'no-store' });
+    if (!r.ok) return;
+    a = await r.json();
+  } catch { return; }
+  if (faden !== F.aktiv) return;          // inzwischen gewechselt
+  const neu = a.eintraege || [];
+  if (vor) {
+    const vorher = verlaufEl.scrollHeight;
+    F.alle = neu.concat(F.alle);
+    F.mehr = !!a.mehr;
+    alleMalen();
+    verlaufEl.scrollTop += verlaufEl.scrollHeight - vorher;
+    return;
+  }
+  // Was während des Ladens schon über den Draht kam, nicht verlieren.
+  const hoechste = neu.length ? neu[neu.length - 1].id : 0;
+  const spaeter = F.alle.filter(e => e.faden === faden && e.id > hoechste);
+  F.alle = neu.concat(spaeter);
+  F.mehr = !!a.mehr;
+  F.geladen = faden;
+  alleMalen();
+  nachUnten();
+}
+
+function alleMalen() {
+  eintraegeEl.innerHTML = '';
+  let tag = '';
+  for (const e of F.alle) {
+    if (tagVon(e.zeit) !== tag) { tag = tagVon(e.zeit); eintraegeEl.appendChild(tagEl(e.zeit)); }
+    eintraegeEl.appendChild(eintragEl(e));
+  }
+  document.getElementById('aelter').hidden = !F.mehr;
+  leerPruefen();
+}
+
+function tagEl(sek) {
+  const el = document.createElement('div');
+  el.className = 'tag'; el.textContent = tagName(sek);
+  return el;
+}
+
+function leerPruefen() {
+  document.getElementById('vorschlaege').hidden = !(F.geladen === F.aktiv && !F.alle.length);
+}
+
+function eintragZeigen(m) {
+  if (!m || m.faden !== F.aktiv) return;
+  const e = { id: m.id, faden: m.faden, zeit: m.zeit, wer: m.wer, sorte: m.sorte,
+              text: m.text || '', daten: m.daten || {}, geraet: m.geraet || '' };
+  const i = F.alle.findIndex(x => x.id === e.id);
+  if (i >= 0) {
+    F.alle[i] = e;
+    const alt = eintraegeEl.querySelector(`[data-id="${e.id}"]`);
+    if (alt) alt.replaceWith(eintragEl(e));
+    return;
+  }
+  const unten = istUnten();
+  const letzt = F.alle[F.alle.length - 1];
+  F.alle.push(e);
+  if (!letzt || tagVon(letzt.zeit) !== tagVon(e.zeit)) eintraegeEl.appendChild(tagEl(e.zeit));
+  eintraegeEl.appendChild(eintragEl(e));
+  if (e.wer === 'sarvis' && (e.sorte === 'text' || e.sorte === 'meldung')) liveWeg();
+  leerPruefen();
+  if (unten || e.wer === 'du') nachUnten();
+}
+
+const AUSGANG = { ja: 'Du hast ja gesagt.', nein: 'Nicht ausgeführt.',
+                  anders: 'Du wolltest es anders.', abgebrochen: 'Abgebrochen.' };
+
+function klartext(md) {
+  return String(md || '').replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*_`~|]+/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*[-+]\s+(\[[ x]\]\s*)?/gm, '· ').replace(/\s+/g, ' ').trim();
+}
+
+function blattKarte(e) {
+  const d = e.daten || {};
+  const art = d.sorte === 'html' ? 'Bericht' : d.sorte === 'datei' ? 'Datei' : 'Blatt';
+  const kopf = sicher(e.text || d.titel || d.datei || art);
+  const vor = d.sorte === 'markdown' ? klartext(d.inhalt).slice(0, 240)
+    : d.sorte === 'datei' ? [d.datei, menge(d.bytes)].filter(Boolean).join(' · ') : '';
+  return `<div class="karte"><div class="art">${art}</div><div class="kopf">${kopf}</div>`
+    + (vor ? `<div class="vorschau">${sicher(vor)}</div>` : '')
+    + `<div class="tun"><button type="button" data-oeffnen="${e.id}">`
+    + `${d.sorte === 'datei' ? 'Holen' : 'Öffnen'}</button></div></div>`;
+}
+
+function eintragEl(e) {
+  const el = document.createElement('div');
+  el.dataset.id = e.id;
+  const d = e.daten || {};
+  if (e.wer === 'system') {
+    el.className = 'e system';
+    el.textContent = e.text;
+    return el;
+  }
+  el.className = `e ${e.wer === 'du' ? 'du' : 'sarvis'}`;
+  let innen = '';
+  if (e.sorte === 'frage') {
+    el.classList.add('frage');
+    innen = `<div class="blase">${sicher(e.text)}</div>` + (d.offen
+      ? `<div class="knoepfe"><button type="button" data-antwort="Ja">Ja</button>`
+        + `<button type="button" class="nein" data-antwort="Nein">Nein</button></div>`
+      : `<div class="ausgang">${sicher(AUSGANG[d.entscheidung] || '')}</div>`);
+  } else if (e.sorte === 'blatt') {
+    innen = blattKarte(e);
+  } else if (e.sorte === 'datei') {
+    innen = `<div class="karte"><div class="art">Geschickt</div>`
+      + `<div class="kopf">&#128206; ${sicher(d.datei || e.text)}</div>`
+      + (d.bytes ? `<div class="vorschau">${menge(d.bytes)}</div>` : '') + `</div>`;
+  } else if (e.sorte !== 'kachel') {
+    if (e.sorte === 'meldung') el.classList.add('meldung');
+    innen = `<div class="blase">${sicher(e.text)}</div>`;
+  }
+  el.innerHTML = innen;
+  if (e.sorte === 'kachel') {
+    // Eine Kachel bleibt ein Bild: gemalt wie auf der Bühne, nicht anklickbar.
+    const huelle = document.createElement('div');
+    huelle.className = 'kachelkarte';
+    const k = document.createElement('div');
+    k.className = 'kachel';
+    huelle.appendChild(k);
+    el.appendChild(huelle);
+    const breite = Math.max(200, Math.min(320, (verlaufEl.clientWidth || 360) * 0.8)) - 24;
+    try { kachelFuellen(k, d, breite); } catch { k.textContent = e.text; }
+  }
+  const zeit = document.createElement('div');
+  zeit.className = 'zeit';
+  zeit.innerHTML = uhrzeit(e.zeit)
+    + (d.unterbrochen ? ' · <span class="unterbrochen">unterbrochen</span>' : '');
+  el.appendChild(zeit);
+  return el;
+}
+
+eintraegeEl.addEventListener('click', e => {
+  const antwort = e.target.closest('button[data-antwort]');
+  if (antwort) {
+    // Dieselbe Antwort, als wäre sie gesagt worden -- der Server sieht
+    // einen gewöhnlichen Zuruf während der offenen Rückfrage.
+    senden({ art: 'zuruf', text: antwort.dataset.antwort });
+    antwort.parentElement.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    return;
+  }
+  const auf = e.target.closest('button[data-oeffnen]');
+  if (!auf) return;
+  const eintrag = F.alle.find(x => String(x.id) === auf.dataset.oeffnen);
+  if (!eintrag) return;
+  const d = eintrag.daten || {};
+  if (d.sorte === 'markdown') {
+    blattZeigen({ kennung: 'verlauf-' + eintrag.id, sorte: 'markdown',
+                  titel: eintrag.text || d.titel, inhalt: d.inhalt });
+  } else if (d.kennung) {
+    ablageHolen(d.kennung);
+  }
+});
+
+document.getElementById('aelter').addEventListener('click', () => {
+  if (F.alle.length) verlaufLaden(F.alle[0].id);
+});
+
+document.getElementById('vorschlaege').addEventListener('click', e => {
+  const b = e.target.closest('button[data-satz]');
+  if (!b) return;
+  const z = document.getElementById('zeile');
+  z.value = b.dataset.satz; z.focus();
+});
+
+// --- Was gerade gesprochen wird ---------------------------------------
+function liveZustand(z) {
+  if (z === 'denkt') {
+    const unten = istUnten();
+    liveEl.innerHTML = '<div class="blase punkte"><span></span><span></span><span></span></div>';
+    liveEl.hidden = false;
+    if (unten) nachUnten();
+  } else if (z === 'ruhig' || z === 'hoert') {
+    liveWeg();
+  }
+}
+function liveText(text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  // Steht derselbe Satz schon als Eintrag da, nicht doppelt zeigen.
+  const letzt = F.alle[F.alle.length - 1];
+  if (letzt && letzt.wer === 'sarvis' && letzt.text.trim() === text) { liveWeg(); return; }
+  const unten = istUnten();
+  liveEl.innerHTML = `<div class="blase">${sicher(text)}</div>`;
+  liveEl.hidden = false;
+  if (unten) nachUnten();
+}
+function liveWeg() { liveEl.hidden = true; liveEl.innerHTML = ''; }
+
+// --- Ansicht: Verlauf oder Ring ---------------------------------------
+function ansicht(welche) {
+  const ring = welche === 'ring';
+  document.body.classList.toggle('ansicht-ring', ring);
+  document.body.classList.toggle('ansicht-verlauf', !ring);
+  const k = document.getElementById('ansichtknopf');
+  k.innerHTML = ring ? '&#128172;' : '&#9678;';
+  k.title = ring ? 'Zum Verlauf' : 'Zum Ring (Sprechansicht)';
+  try { localStorage.setItem('sarvis-ansicht', ring ? 'ring' : 'verlauf'); } catch { /* egal */ }
+  if (!ring) nachUnten();
+}
+document.getElementById('ansichtknopf').addEventListener('click', () =>
+  ansicht(document.body.classList.contains('ansicht-ring') ? 'verlauf' : 'ring'));
+// Wer freihändig mithört, schaut nicht auf Text -- dann der Ring.
+document.getElementById('horchen').addEventListener('change', e => {
+  if (e.target.checked) ansicht('ring');
+});
+ansicht(localStorage.getItem('sarvis-ansicht') || 'verlauf');
+
+// =====================================================================
+// Benachrichtigungen bei geschlossener App (Web Push)
+// =====================================================================
+const pushFeld = document.getElementById('push');
+const pushProbe = document.getElementById('pushprobe');
+function pushHinweis(text) { document.getElementById('pushhinweis').textContent = text; }
+const PUSH_TEXT = 'Timer, Erinnerungen und fertige Aufträge — auch wenn die App zu ist.';
+
+function bytesAus(b64) {
+  const roh = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64.length % 4) % 4));
+  return Uint8Array.from(roh, c => c.charCodeAt(0));
+}
+const pushMoeglich = () => 'serviceWorker' in navigator && 'PushManager' in window
+  && 'Notification' in window;
+
+async function pushStand() {
+  if (!pushMoeglich()) {
+    pushFeld.disabled = true;
+    pushHinweis(/iPhone|iPad/.test(navigator.userAgent)
+      ? 'Am iPhone geht das nur, wenn Sarvis auf dem Home-Bildschirm liegt (Teilen → Zum Home-Bildschirm).'
+      : 'Dieser Browser kann keine Benachrichtigungen.');
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const abo = await reg.pushManager.getSubscription();
+    const an = !!abo && Notification.permission === 'granted';
+    pushFeld.checked = an;
+    pushProbe.hidden = !an;
+    if (an && schluessel) {
+      // Dem Server sagen, dass es dieses Abo gibt -- falls er es
+      // inzwischen verworfen hat (Gerät neu angelegt, Dienst meldete 410).
+      await fetch('/push/abo', { method: 'POST', headers: mitSchluessel(
+        { 'Content-Type': 'application/json' }), body: JSON.stringify(abo.toJSON()) });
+    }
+  } catch { /* bleibt aus */ }
+}
+
+async function pushAn() {
+  pushHinweis('Einen Moment …');
+  try {
+    const erlaubt = await Notification.requestPermission();
+    if (erlaubt !== 'granted') {
+      pushFeld.checked = false;
+      pushHinweis('Nicht erlaubt. In den Einstellungen des Browsers für diese Seite freigeben.');
+      return;
+    }
+    const r = await fetch('/push/schluessel', { headers: mitSchluessel(), cache: 'no-store' });
+    if (!r.ok) throw new Error('Schlüssel ' + r.status);
+    const oeffentlich = (await r.json()).schluessel;
+    const reg = await navigator.serviceWorker.ready;
+    let abo = await reg.pushManager.getSubscription();
+    // Ein Abo mit fremdem Server-Schlüssel taugt nicht -- neu anmelden.
+    if (abo && abo.options && abo.options.applicationServerKey) {
+      const alt = new Uint8Array(abo.options.applicationServerKey);
+      const neu = bytesAus(oeffentlich);
+      if (alt.length !== neu.length || alt.some((b, i) => b !== neu[i])) {
+        await abo.unsubscribe(); abo = null;
+      }
+    }
+    if (!abo) abo = await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: bytesAus(oeffentlich) });
+    const a = await fetch('/push/abo', { method: 'POST', headers: mitSchluessel(
+      { 'Content-Type': 'application/json' }), body: JSON.stringify(abo.toJSON()) });
+    if (!a.ok) {
+      const f = await a.json().catch(() => ({}));
+      throw new Error(f.fehler || 'Server ' + a.status);
+    }
+    pushFeld.checked = true;
+    pushProbe.hidden = false;
+    pushHinweis('An. ' + PUSH_TEXT);
+  } catch (e) {
+    pushFeld.checked = false;
+    pushProbe.hidden = true;
+    pushHinweis('Ging nicht: ' + (e && e.message ? e.message : e));
+  }
+}
+
+async function pushAus() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const abo = await reg.pushManager.getSubscription();
+    if (abo) {
+      await fetch('/push/abmelden', { method: 'POST', headers: mitSchluessel(
+        { 'Content-Type': 'application/json' }), body: JSON.stringify({ endpoint: abo.endpoint }) });
+      await abo.unsubscribe();
+    }
+  } catch { /* aus ist aus */ }
+  pushProbe.hidden = true;
+  pushHinweis('Aus. ' + PUSH_TEXT);
+}
+
+pushFeld.addEventListener('change', () => (pushFeld.checked ? pushAn() : pushAus()));
+pushProbe.addEventListener('click', async () => {
+  pushHinweis('Schicke eine Probe …');
+  try {
+    const r = await fetch('/push/probe', { method: 'POST', headers: mitSchluessel() });
+    const a = await r.json();
+    pushHinweis(a.gesendet ? 'Probe ist raus — sie sollte gleich erscheinen.'
+      : `Nichts angekommen (Fehler: ${a.fehler || 0}, entfernt: ${a.entfernt || 0}). Schalte es aus und wieder an.`);
+  } catch { pushHinweis('Probe ging nicht raus.'); }
 });
