@@ -1,137 +1,163 @@
-# Änderungsblatt für die Android-App — 13.11.2026
+# Vertrag: Android-App ↔ Sarvis-Server — Stand 13.11.2026
 
 **Für den Agenten, der die Sarvis-Android-App baut** (Package `de.techartist.sarvis`).
 
-Maßgeblich für jedes Feld ist `einsatz/DRAHT.md`. Dieses Blatt sagt, **was in der App fehlt**, in
-welcher Reihenfolge es gebaut werden soll und woran man merkt, dass es fertig ist. Vorlage zum
-Abschauen ist die Weboberfläche `web/sarvis.js` — dort ist alles schon umgesetzt.
+Der Server ist fertig und läuft. Alles, was hier steht, ist **in der Weboberfläche schon umgesetzt**
+(`web/sarvis.js`) und fehlt nur noch in der App. Maßgeblich für jedes Feld ist `einsatz/DRAHT.md`
+(`python einsatz/draht_pruefen.py` prüft es gegen den Servercode).
 
-> **Keine bestehende Nachrichtenart wurde geändert.** Die App läuft weiter wie bisher. Alles hier
-> sind Ergänzungen.
+> **Keine bestehende Nachrichtenart wurde geändert oder entfernt.** Die App läuft weiter wie bisher.
+> Alles hier sind Ergänzungen. Unbekannte Arten und Sorten weiter still überspringen.
 
----
+## Woher die Unterlagen kommen
+
+Repo `github.com/Kreank/Assistent`, **Zweig `server`** (nicht `main`):
+
+| Datei | Wofür |
+|---|---|
+| `einsatz/AENDERUNG-2026-11-13.md` | dieser Vertrag |
+| `einsatz/DRAHT.md` | das Protokoll, Feld für Feld |
+| `einsatz/AENDERUNG-OBERFLAECHE.md` | Verlauf/Fäden/Ablage/Push ausführlich (11.11.) |
+| `web/sarvis.js`, `web/index.html` | Vorlage: so macht es die Weboberfläche |
+
+## Übersicht
+
+| # | Was | Server | App |
+|---|---|---|---|
+| 1 | Verlauf und Gesprächsfäden | ✅ seit 11.11. | ⬜ |
+| 2 | Statuskarte laufender Aufträge | ✅ | ⬜ |
+| 3 | Nichts Getipptes verlieren (Warteschlange, Neuverbinden) | ✅ | ⬜ |
+| 4 | Formulare (offene Fragen ausfüllen) | ✅ | ⬜ |
+| 5 | Webseiten-Vorschau (Kartenart `seite`) | ✅ | ⬜ |
+| 6 | Links in Antworten anklickbar | ✅ | ⬜ |
+| 7 | Ablage und Benachrichtigungen (Push) | ✅ seit 11.11. | ⬜ (nach 1–6) |
+
+**Reihenfolge = Nummer.** Jede Aufgabe ist einzeln testbar; nach jeder bauen und prüfen.
 
 ## Warum (was Sascha erlebt)
 
-1. **Nach jedem Neustart von Sarvis ist der Bildschirm leer.** Kein Verlauf, kein Hinweis, ob ein
-   Auftrag noch läuft. Der Server hat aber alles gespeichert — die App fragt es nur nie ab.
-   (Gemessen: Die App ruft `/draht` und `/dateien`, aber nie `/verlauf`.)
-2. **Ein getipptes „ja“ auf eine Rückfrage ging verloren.** Das Handy kam gerade aus dem Standby,
-   die Leitung war noch nicht wieder offen, die App zeigte das „ja“ trotzdem als gesendet. Sarvis
-   wartete 35 Sekunden und brach mit „Ich habe keine Antwort bekommen“ ab.
-3. **Eine Vorschau-Karte war leer.** Sarvis kann jetzt Webseiten aus Projekten bauen und zeigen
-   (Kartenart `seite`), die App kennt sie nicht.
-4. **Links in Antworten sind nicht anklickbar.**
+- Er schickt einen Auftrag ab, ist eine Stunde weg und sieht danach **einen einzigen Satz** — kein
+  Verlauf, kein Stand, keine Ahnung, ob etwas läuft. Nach jedem Neustart von Sarvis ist der
+  Bildschirm leer. Der Server hat alles gespeichert, die App fragt es nur nie ab (gemessen: die App
+  ruft `/draht` und `/dateien`, nie `/verlauf`).
+- Ein getipptes „ja“ ging verloren: Handy kam aus dem Standby, Leitung noch zu, die App zeigte es
+  trotzdem als gesendet.
+- Fragen des Arbeiters kamen als Text, den man nicht ausfüllen kann.
+- Eine Vorschau-Karte war leer, Links waren nicht anklickbar.
 
 ---
 
-## Aufgabe 1 (zuerst, wichtigste): Verlauf und Gesprächsfäden
+## 1. Verlauf und Gesprächsfäden (zuerst, wichtigste)
 
-Steht vollständig in **`einsatz/AENDERUNG-OBERFLAECHE.md`** (Abschnitte 1–3) und in `DRAHT.md`
-„Gesprächsverlauf und Fäden“. Wurde bisher nicht umgesetzt. Kurzfassung:
+Ausführlich: `AENDERUNG-OBERFLAECHE.md` Abschnitte 1–3 und `DRAHT.md` „Gesprächsverlauf und Fäden“.
 
 - Hauptbildschirm = **Verlauf wie in einem Messenger** (Zurufe rechts, Antworten links, Karten für
-  Blätter, Berichte, Dateien, Kacheln, Rückfragen). Der Ring wird zur umschaltbaren Sprechansicht.
+  Blätter, Berichte, Dateien, Kacheln, Rückfragen, Formulare, Auftragsstand). Der Ring wird zur
+  umschaltbaren Sprechansicht.
 - **Nach JEDEM `willkommen`** (auch nach Wiederverbinden):
-  `GET /verlauf?faden=<faeden.aktiv>&anzahl=60` mit Kopfzeile `X-Sarvis-Schluessel` → Liste
-  ALT → NEU. Danach neue/geänderte Einträge per Draht-Nachricht `eintrag` (gleiche `id` = ersetzen).
-- „Ältere laden“ mit `&vor=<kleinste id>`, solange `mehr` wahr ist.
-- Rückfrage-Karte (`sorte: frage`, `daten.offen: true`) mit **Ja/Nein-Knöpfen**, die
-  `{"art":"zuruf","text":"Ja"}` bzw. `"Nein"` schicken.
-- Gesprächsliste (Fäden): wechseln, neu, umbenennen, archivieren.
-- Einträge lokal (Room o. ä.) zwischenspeichern ist erlaubt, **Quelle der Wahrheit bleibt der
-  Server** — nach dem Wiederverbinden immer neu holen.
+  `GET /verlauf?faden=<faeden.aktiv>&anzahl=60`, Kopfzeile `X-Sarvis-Schluessel` → `eintraege`
+  ALT → NEU. Danach kommen neue/geänderte Einträge als Draht-Nachricht `eintrag`.
+  **Gleiche `id` = Eintrag ersetzen**, nicht anhängen.
+- „Ältere laden“: `&vor=<kleinste id>`, solange `mehr` wahr ist.
+- `eintrag` mit `faden` ≠ aktiver Faden: überspringen.
+- Rückfrage (`sorte: frage`, `daten.offen: true`): Text + **Ja/Nein-Knöpfe**, die
+  `{"art":"zuruf","text":"Ja"}` bzw. `"Nein"` schicken. Sarvis wartet 75 Sekunden.
+- Gesprächsliste (Fäden): wechseln, neu, umbenennen, archivieren (`faden_*`, siehe DRAHT.md).
+- Lokal zwischenspeichern (Room) ist erlaubt; **Quelle der Wahrheit ist der Server** — nach jedem
+  Verbinden neu holen.
+- Mehrzeiliger `text` (Zeilenumbrüche) muss als mehrzeilig angezeigt werden.
 
-**Fertig, wenn:** Sarvis wird neu gestartet (`docker restart sarvis` auf dem Server), die App
-verbindet sich neu und zeigt danach **denselben Verlauf** wie vorher, inklusive der letzten
-Meldungen zu Aufträgen.
+**Abnahme:** `docker restart sarvis` auf dem Server → die App verbindet neu und zeigt **denselben
+Verlauf** wie vorher.
 
----
+## 2. Statuskarte laufender Aufträge
 
-## Aufgabe 2: Nichts Getipptes verlieren
+- `eintrag` mit `sorte: auftrag`, `daten`: `nummer`, `zustand` (`läuft` | `fertig` | `gestoppt` |
+  `abgebrochen`), `projekt`. `text` ist mehrzeilig, z. B.:
+  ```
+  Auftrag 8 · portfolio · läuft seit 12 Min.
+  Aufgabe: 3D-Objekte und Bewegung …
+  Zuletzt erledigt: Punktkugel in Blender gebaut …
+  Als Nächstes: Scroll-Animationen der Karten
+  ```
+- Kommt etwa **jede Minute neu mit derselben `id`** → an Ort und Stelle ersetzen.
+- Symbol nach `zustand`: ⏳ läuft · ✅ fertig · ⚠️ gestoppt/abgebrochen.
+- Schön, nicht Pflicht: laufende Aufträge oben im Verlauf anheften.
 
-Vorlage: `web/sarvis.js`, Funktionen `senden`, `warteschlangeLeeren`, `frischVerbinden` und der
-`visibilitychange`-Block.
+**Abnahme:** Auftrag starten, App schließen, nach ein paar Minuten öffnen → Karte zeigt Laufzeit
+und zuletzt Erledigtes; am Ende ✅.
 
-- **Erst nach `willkommen` gilt die Leitung als bereit.** Vorher (und wenn sie zu ist) kommen
-  `zuruf`-Nachrichten — auch die Ja/Nein-Knöpfe — in eine **Warteschlange** und werden direkt nach
-  dem nächsten `willkommen` in Reihenfolge gesendet. Älter als **90 Sekunden** → verwerfen
-  (sonst platzt ein altes „ja“ in eine neue Frage).
-- Ist die Leitung beim Tippen zu, **sofort neu verbinden**, nicht auf das Backoff warten.
-- **App kommt nach mehr als 20 Sekunden aus dem Hintergrund** (`onResume`/`ON_START`): alte
-  WebSocket-Verbindung verwerfen und frisch verbinden. Eine Leitung, die ein schlafendes Handy für
-  offen hält, ist oft tot — was man darauf sendet, verschwindet ohne Fehler.
-- Solange nicht verbunden: sichtbar anzeigen („verbindet …“), Eingabe aber **nicht** sperren.
-- `strom`-/Audio-Nachrichten **nicht** puffern (veraltet, sinnlos), nur `zuruf`.
+## 3. Nichts Getipptes verlieren
 
-**Fertig, wenn:** Flugmodus an, „Ja“ tippen, Flugmodus aus → das „Ja“ kommt beim Server an
-(im Serverprotokoll `docker logs sarvis` steht `Du (<Gerät>): Ja`).
+Vorlage `web/sarvis.js`: `senden`, `warteschlangeLeeren`, `frischVerbinden`, `visibilitychange`.
 
----
+- Die Leitung gilt **erst nach `willkommen`** als bereit. Vorher und wenn sie zu ist: `zuruf` und
+  `formular_antwort` in eine **Warteschlange**, nach dem nächsten `willkommen` in Reihenfolge
+  senden. Älter als **90 Sekunden** → verwerfen.
+- Ist die Leitung beim Senden zu: **sofort neu verbinden**, nicht auf das Backoff warten.
+- App kommt nach **mehr als 20 Sekunden** aus dem Hintergrund (`ON_START`/`onResume`): alte
+  WebSocket-Verbindung verwerfen, frisch verbinden (eine Leitung, die das schlafende Handy für offen
+  hält, ist oft tot).
+- Nicht verbunden: sichtbar „verbindet …“, Eingabe aber **nicht** sperren.
+- `strom`/`sprache` (Audio) **nicht** puffern.
 
-## Aufgabe 3: Kartenart `seite` (Webseiten-Vorschau)
+**Abnahme:** Flugmodus an, „Ja“ tippen, Flugmodus aus → im Serverprotokoll (`docker logs sarvis`)
+steht `Du (<Gerät>): Ja`.
 
-Siehe `DRAHT.md` → „Blätter“, Zeile `seite`. Kommt als Draht-Nachricht `blatt` und im Verlauf als
-`eintrag` mit `sorte: blatt`, `daten.sorte: seite`, `daten.adresse`, `daten.titel`.
+## 4. Formulare (offene Fragen ausfüllen)
+
+`DRAHT.md` → „Formulare“. Vorlage `web/sarvis.js`: `formularKarte`, Klick auf `data-formular`.
+
+- `eintrag` mit `sorte: formular`; `daten.fragen` = Liste aus `nr`, `titel`, `frage`.
+- Solange `daten.offen`: je Frage Überschrift `titel`, darunter klein `frage`, darunter ein
+  mehrzeiliges Eingabefeld. Unten **Absenden**.
+- Absenden: `{"art":"formular_antwort","eintrag":<id>,"antworten":{"<nr>":"…"}}`, leere Felder
+  als `""`. Danach Felder sperren.
+- Der Server schickt denselben Eintrag neu (`offen: false`, `antworten`) → nur noch anzeigen.
+
+**Abnahme:** Formular ausfüllen und abschicken → Sarvis startet einen Folgeauftrag (eine neue
+Statuskarte ⏳ erscheint).
+
+## 5. Webseiten-Vorschau (Kartenart `seite`)
+
+`DRAHT.md` → „Blätter“, Zeile `seite`. Kommt als Draht-Nachricht `blatt` (`sorte: seite`) und im
+Verlauf als `eintrag` `sorte: blatt` mit `daten.sorte: seite`, `daten.adresse`, `daten.titel`.
 
 - **Adresse prüfen**, sonst nichts anzeigen:
   `^https://test\.tech-artist\.de/(vorschau|offen)/[a-z0-9-]+/$`
-- Anzeigen in einer **WebView mit JavaScript an** (React-Seiten sind sonst weiß), großflächig wie
-  ein Blatt, mit Titel, „Schließen“ und **„Im Browser öffnen“** (Intent `ACTION_VIEW`).
-  Nur für diese geprüften Adressen JavaScript erlauben — alle anderen Blätter (`html`) bleiben
-  **ohne** JavaScript, wie bisher.
-- In der WebView keine `addJavascriptInterface`-Brücke, kein Zugriff auf App-Daten, Navigation aus
-  der Vorschau heraus (andere Domain) → im externen Browser öffnen statt in der WebView.
-- `/vorschau/…` ist mit Benutzer/Passwort geschützt (HTTP Basic Auth). Die WebView soll den
-  Anmeldedialog anbieten (`onReceivedHttpAuthRequest` → Dialog) — oder es bleibt beim Knopf
-  „Im Browser öffnen“. `/offen/…` braucht nichts.
-- Verlaufskarte: Art „Webseite“, Titel, darunter die Adresse; antippen = dieselbe Ansicht öffnen.
+- Großflächig in einer **WebView mit JavaScript** (React-Seiten sind sonst weiß), mit Titel,
+  „Schließen“ und **„Im Browser öffnen“** (`ACTION_VIEW`). JavaScript **nur** für diese
+  geprüften Adressen — Blätter der Sorte `html` bleiben ohne.
+- Keine `addJavascriptInterface`-Brücke, kein Zugriff auf App-Daten. Navigation auf eine andere
+  Domain → externer Browser.
+- `/vorschau/…` ist mit Benutzer/Passwort geschützt (HTTP Basic Auth): Anmeldedialog über
+  `onReceivedHttpAuthRequest` anbieten, sonst bleibt „Im Browser öffnen“. `/offen/…` ist frei.
+- Verlaufskarte: „Webseite“, Titel, Adresse; antippen = dieselbe Ansicht.
 
-**Fertig, wenn:** Sascha sagt Sarvis „zeig mir die Portfolio-Seite, offen für alle“, und die Seite
-erscheint in der App bedienbar (scrollen, Hell/Dunkel umschalten).
+**Abnahme:** Sarvis „zeig mir die Portfolio-Seite, offen für alle“ → Seite erscheint bedienbar in
+der App.
+
+## 6. Links anklickbar
+
+- In `sorte: text` und `meldung` jede `https://…`-Adresse als Link (z. B. `AnnotatedString` mit
+  `LinkAnnotation.Url`), Satzzeichen am Ende nicht mit in den Link. Antippen → externer Browser.
+- Nur `https://`.
+
+## 7. Danach: Ablage und Benachrichtigungen
+
+Steht in `AENDERUNG-OBERFLAECHE.md` (Ablage `GET /ablage`, `POST /ablage/oeffnen`; Push über
+`/push/*`). Nicht dringend — erst, wenn 1–6 laufen.
 
 ---
 
-## Aufgabe 4: Links in Textblasen anklickbar
+## Serverseitig erledigt — in der App nichts zu tun
 
-- In `sorte: text` und `meldung` jede `https://…`-Adresse als Link darstellen
-  (z. B. `LinkifyText`/`AnnotatedString` mit `UrlAnnotation`), Satzzeichen am Ende nicht mit in den
-  Link nehmen. Antippen → externer Browser.
-- Nur `https://`, keine anderen Schemata.
+- Sarvis liest URLs und Dateipfade nicht vor.
+- Aufträge starten ohne zweite Rückfrage; Rückfragen warten 75 s; Zeitablauf gilt nicht als Nein.
+- Auftragsmeldungen sind am Satzende gekürzt und sagen ehrlich „fertig“ / „gestoppt“ /
+  „Pensum aufgebraucht, soll ich fortsetzen?“.
 
----
+## Bei Unklarheiten
 
-## Aufgabe 5: Formulare (offene Fragen ausfüllen)
-
-Siehe `DRAHT.md` → „Formulare“. Hat ein Auftrag offene Fragen, kommt ein `eintrag` mit
-`sorte: formular`. Vorlage: `web/sarvis.js`, Funktion `formularKarte` und der Klick auf
-`data-formular`.
-
-- Solange `daten.offen`: je Frage Überschrift (`titel`), darunter klein `frage`, darunter ein
-  mehrzeiliges Eingabefeld. Unten „Absenden“.
-- Absenden schickt `{"art":"formular_antwort","eintrag":<id>,"antworten":{"<nr>":"…"}}` — leere
-  Felder als leeren Text. Wie `zuruf` in die Warteschlange, wenn die Leitung nicht steht.
-- Danach kommt derselbe Eintrag neu (`offen: false`, `antworten`) → Antworten nur noch anzeigen.
-
-**Fertig, wenn:** Ein Formular in der App ausgefüllt und abgeschickt wird und Sarvis daraufhin einen
-Folgeauftrag startet (Rückfrage „Soll ich einen Auftrag … starten?“ erscheint).
-
-## Aufgabe 6: Statuskarte laufender Aufträge
-
-Solange ein Hintergrundauftrag läuft, liegt im Verlauf ein `eintrag` mit `sorte: auftrag`.
-Er wird **laufend mit derselben `id` ersetzt** (etwa jede Minute): Laufzeit, Aufgabe, zuletzt
-erledigt, als Nächstes — am Ende „fertig“ oder „gestoppt“ mit Grund. `text` ist mehrzeilig
-(Zeilenumbrüche anzeigen), `daten.zustand` ist `läuft` | `fertig` | `gestoppt` | `abgebrochen`
-(z. B. Symbol ⏳ / ✅ / ⚠️). Ohne Aufgabe 1 (Verlauf + `eintrag` per Draht) sieht man sie nicht —
-das ist der Grund, warum Sascha nach einer Stunde Abwesenheit nicht wusste, was los ist.
-
-## Nicht nötig (serverseitig schon erledigt)
-
-- Sarvis liest URLs und Dateipfade nicht mehr vor — das macht der Server vor der Sprachausgabe.
-- Auftragsmeldungen sind klarer formuliert („Pensum aufgebraucht, soll ich fortsetzen?“) — kommen als
-  normale `meldung`, keine App-Änderung.
-
-## Prüfen
-
-- `python einsatz/draht_pruefen.py` auf dem Server: DRAHT.md stimmt mit dem Code überein.
-- Reihenfolge: Aufgabe 1 → 6 → 2 → 3 → 4 → 5. Nach jeder Aufgabe einzeln testbar.
+Nicht raten: `DRAHT.md` lesen, dann in `web/sarvis.js` nachsehen, wie es dort gelöst ist. Weicht
+die App bewusst ab, das im Commit begründen.
