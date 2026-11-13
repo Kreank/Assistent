@@ -216,13 +216,26 @@ werden, sonst verschwindet sie lautlos.
 
 Ein Blatt ist, was gelesen statt gehört wird. Die Kachel ist zu klein
 dafür (rund 290 Punkte breit, zwölf Datenpunkte), der Untertitel ist
-eine Zeile. Drei Sorten, ein Kasten:
+eine Zeile. Vier Sorten, ein Kasten:
 
 | `sorte` | wo der Inhalt steckt | wie er gezeigt wird |
 |---|---|---|
 | `markdown` | `inhalt`, mit der Nachricht | die Oberfläche setzt ihn |
 | `html` | `adresse` → `/blatt/<kennung>` | in einem Rahmen |
 | `datei` | dito, plus `datei` und `bytes` | ein Knopf zum Herunterladen |
+| `seite` | `adresse` → eine **Webseiten-Vorschau** (seit 13.11.2026) | eingebettet **mit** JavaScript, dazu „Im Browser öffnen“ |
+
+**`seite` ist die einzige Ausnahme von den Regeln unten** und genau
+begrenzt: `adresse` muss auf
+`^https://test\.tech-artist\.de/(vorschau|offen)/[a-z0-9-]+/$` passen,
+sonst wird nichts angezeigt. Dort liegen nur Seiten, die Sarvis aus
+Saschas Projekten gebaut hat (`werkzeug vorschau_zeigen`). Weil eine
+React-Seite ohne Skripte weiß bleibt, darf **dieser** Rahmen Skripte
+ausführen — er gehört einer anderen Herkunft (test.tech-artist.de) und
+kommt deshalb nicht an den Geräteschlüssel dieser Oberfläche. Unter
+`/vorschau/` fragt der Server nach Benutzer und Passwort (Basic Auth);
+bietet der eingebettete Rahmen das nicht an, bleibt „Im Browser
+öffnen“. `/offen/` braucht nichts.
 
 `kennung` ist die **Identität**, wie `name` bei der Kachel: Zweimal
 dieselbe heißt dasselbe Blatt mit neuem Inhalt, nicht zwei
@@ -230,7 +243,7 @@ dieselbe heißt dasselbe Blatt mit neuem Inhalt, nicht zwei
 `blatt_weg`".
 
 **`adresse` ist immer ein Pfad auf diesen Server**, beginnend mit
-`/blatt/`. Nie eine fremde Adresse — und eine Oberfläche, die etwas
+`/blatt/` (Ausnahme nur `seite`, siehe oben). Nie eine fremde Adresse — und eine Oberfläche, die etwas
 anderes bekommt, zeigt es nicht an. Der Draht ist authentifiziert, was
 über ihn kommt, ist trotzdem aus Modellausgabe gebaut.
 

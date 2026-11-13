@@ -72,6 +72,14 @@ services:
       HF_HOME: /srv/data/sarvis/modelle/hf
       XDG_CACHE_HOME: /srv/data/sarvis/cache
 
+      # HyperFrames: Chrome aus dem Image statt eines eigenen Downloads,
+      # keine Telemetrie, keine automatisch installierten Skills (die
+      # stehen im Handbuch).
+      HYPERFRAMES_BROWSER_PATH: /usr/bin/google-chrome
+      HYPERFRAMES_NO_TELEMETRY: "1"
+      HYPERFRAMES_SKIP_SKILLS: "1"
+      DO_NOT_TRACK: "1"
+
       # Der Verlauf, den das SDK schreibt. Ausgeschrieben statt aus
       # WURZEL gerechnet, damit ein Umzug des Quelltextes ihn nicht
       # still verliert (orte.py, VERLAUF_ORDNER).
@@ -123,6 +131,12 @@ services:
       # Alles, was Sarvis mitbringt und erzeugt: Gedaechtnis, Timer,
       # Auftragsjournal, Zugaenge, Stimmen, Modelle.
       - /srv/data/sarvis:/srv/data/sarvis
+
+      # Werkstatt der Arbeiter (13.11.2026): Blender vom Host und das
+      # Handbuch (Design-Stil, Blender-, HyperFrames-Anleitung). Beides
+      # nur lesend -- der Arbeiter darf es benutzen, nicht veraendern.
+      - /home/server3070/tools/blender-4.5.13-linux-x64:/opt/blender:ro
+      - /srv/data/sarvis-handbuch:/opt/handbuch:ro
 
       # Die Anmeldung der Claude-Code-CLI. Kommt von aussen (einmalig
       # `docker compose run --rm sarvis claude` und dann anmelden) und

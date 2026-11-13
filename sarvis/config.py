@@ -975,7 +975,7 @@ AUFTRAG_ABBRUCH_FRIST_SEK = 3.0
 
 # Wie viele Zuege ein Arbeiter hoechstens machen darf. Notbremse gegen
 # einen Auftrag, der sich im Kreis dreht und dabei Kontingent frisst.
-AUFTRAG_ZUEGE = 120
+AUFTRAG_ZUEGE = 250   # 120 reichte fuer eine Design-Runde nicht (Auftrag 6, 13.11.2026)
 
 # --- Wo Sarvis SELBST ohne Rueckfrage arbeiten darf -----------------------
 # Der Grundsatz ist nicht Aussperren, sondern Nachfragen. Diese beiden
@@ -1208,6 +1208,9 @@ WERKZEUG_STUFEN = {
     "ort_ansehen":        "still",
     "projekt_anlegen":    "fragen",
     "projekt_oeffnen":    "fragen",
+    # Stellt eine Seite ins Netz -- immer fragen, nie pauschal freigeben.
+    "vorschau_zeigen":    "fragen",
+    "vorschau_entfernen": "still",
 
     # Auftraege: Starten fragt nach -- ein Arbeiter schreibt danach
     # selbstaendig Dateien. Status und Abbrechen sind harmlos.
@@ -1466,6 +1469,8 @@ FREIGABE_NIE = {
     # freigebbar: ein langes Formular zu diktieren ist der Normalfall,
     # und abgeschickt wird es damit noch lange nicht.
     "web_klicken",
+    # Eine Seite ins Netz stellen (offen = fuer jeden sichtbar).
+    "vorschau_zeigen",
 }
 
 # Wie eine laufende Freigabe genannt wird -- vorgelesen und in der
@@ -1480,6 +1485,7 @@ FREIGABE_NAMEN = {
     "programm_beenden": "Programme beenden",
     "projekt_anlegen": "Projekte anlegen",
     "projekt_oeffnen": "Projekte öffnen",
+    "vorschau_zeigen": "Vorschauen bereitstellen",
     "finanzen_buchen": "Buchungen eintragen",
     "finanzen_umbuchen": "Geld umbuchen",
     "ort_ansehen": "Orte ansehen",

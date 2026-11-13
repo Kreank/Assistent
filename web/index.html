@@ -453,6 +453,9 @@ body{display:flex;flex-direction:column;
 #blatt .rahmen{flex:1 1 auto;width:100%;border:0;border-radius:9px;
   background:#0B1219}
 #blatt .rahmen[hidden]{display:none}
+#blatt .vorschaurahmen{flex:1 1 auto;width:100%;border:0;border-radius:9px;
+  background:#fff}
+#blatt .vorschaurahmen[hidden]{display:none}
 
 /* Der Lesetext. Eine Spalte mit Maximalbreite -- eine Zeile ueber die
    ganze Breite eines 27-Zoll-Schirms findet das Auge am Ende nicht
@@ -817,6 +820,17 @@ body{display:flex;flex-direction:column;
            kann diesen Rechner bedienen. -->
       <iframe class="rahmen" hidden title="Blatt"
               sandbox="allow-popups allow-popups-to-escape-sandbox"
+              referrerpolicy="no-referrer"></iframe>
+      <!-- DER ZWEITE RAHMEN: nur fuer Sarvis' eigene Webseiten-Vorschauen
+           (test.tech-artist.de/vorschau|offen/..., werkzeuge/vorschau.py).
+           Eine React-Seite ohne Skripte ist weiss, deshalb hier
+           allow-scripts. Das ist vertretbar, weil sarvis.js NUR Adressen
+           durchlaesst, die auf VORSCHAU_OK passen: eine andere Herkunft
+           (test.tech-artist.de) -- sie kommt trotz allow-same-origin
+           nicht an localStorage oder window.parent dieser Seite. Der
+           Riegel oben bleibt fuer alles andere unangetastet. -->
+      <iframe class="vorschaurahmen" hidden title="Vorschau"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
               referrerpolicy="no-referrer"></iframe>
     </div>
   </div>

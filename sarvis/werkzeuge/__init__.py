@@ -13,7 +13,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 
 from .. import config
 
-from . import (auftrag, bericht, dokument, eingang, versand, erinnern, fachdaten,
+from . import (vorschau, auftrag, bericht, dokument, eingang, versand, erinnern, fachdaten,
                finanzen, google, kacheln, lesen, medien, musik, programme,
                projekte, rechnen, rechner, telegram, unterwegs, verlauf,
                wetter, zeit)
@@ -86,6 +86,8 @@ def bauen(sagen, leuchten=None, melden=None, ohren=None):
     # Dateien aufs Handy -- Erzeugtes UND was auf dem Server liegt.
     alle += versand.werkzeuge(protokoll, leuchten)
     alle += projekte.werkzeuge(protokoll, leuchten)
+    # Webseiten aus Projekten unter test.tech-artist.de zeigen (13.11.2026).
+    alle += vorschau.werkzeuge(protokoll, leuchten)
     alle += programme.werkzeuge(protokoll, leuchten)
     alle += medien.werkzeuge(protokoll, leuchten)
     # Die vier Nachschlagewerke. Alle lesen nur, keines braucht einen

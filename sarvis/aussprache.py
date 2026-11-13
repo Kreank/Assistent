@@ -345,3 +345,51 @@ def vorlesbar(text: str) -> str:
         return text
     except Exception:
         return original
+
+
+# --- Links und Pfade nicht vorlesen --------------------------------------
+#
+# Sascha (13.11.2026): URLs und Dateipfade vorgelesen nerven. Im Text auf
+# dem Bildschirm bleiben sie stehen -- gefiltert wird NUR, was in die
+# Stimme geht (Mund.sprechen, vor Piper UND ElevenLabs).
+
+# "Sources: [...](...)" / "Quellen: ..." am Ende einer Websuche: ganz weg.
+_QUELLEN = re.compile(r"(?:^|\s)(?:Sources|Quellen)\s*:.*$", re.S | re.I)
+# [Name](https://...) -> Name
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# https://www.github.com/x/y -> github.com ; www.foo.de/bar -> foo.de
+_URL = re.compile(r"(?:https?://|www\.)(?:www\.)?([\w.-]+)[^\s)\]>,;]*", re.I)
+# /srv/data/x/datei.py, ~/a/b, C:\a\b -> letzter Teil
+_PFAD = re.compile(
+    r"(?<![\w.:/])(?:[A-Za-z]:[\\/]|~/|/)(?:[\w.-]+[\\/])+([\w.-]*)")
+# relative Pfade: a/b/c oder ordner/datei.py -- "und/oder", "24/7" bleiben
+_REL_PFAD = re.compile(
+    r"(?<![\w./])(?:(?:[\w.-]+/){2,}([\w.-]+)|[\w.-]+/([\w-]+\.[A-Za-z]{1,5}))\b")
+
+
+def _pfad_ende(m: re.Match) -> str:
+    letzter = m.group(1)
+    if letzter:
+        return letzter
+    teile = [t for t in re.split(r"[\\/]", m.group(0)) if t]
+    return teile[-1] if teile else ""
+
+
+def ohne_links(text: str) -> str:
+    """Entfernt, was man nicht hoeren will: Quellenblock, Markdown-Links,
+    volle URLs (bleibt nur der Domainname) und Pfade (bleibt der letzte
+    Teil). Ohne '/' und ohne 'www'/'http' kommt der Text unveraendert
+    zurueck."""
+    if "/" not in text and "\\" not in text and "www" not in text \
+            and not _QUELLEN.search(text):
+        return text
+    text = _QUELLEN.sub("", text)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _URL.sub(lambda m: m.group(1).rstrip("."), text)
+    text = _PFAD.sub(_pfad_ende, text)
+    text = _REL_PFAD.sub(lambda m: m.group(1) or m.group(2), text)
+    text = text.replace("`", "")
+    text = re.sub(r"\(\s*\)", "", text)          # leere Klammern
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    return text

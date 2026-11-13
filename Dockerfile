@@ -226,6 +226,27 @@ http://dl.google.com/linux/chrome/deb/ stable main" \
     rm -rf /var/lib/apt/lists/*; \
     google-chrome --version
 
+# --- Werkstatt fuer die Arbeiter (13.11.2026) -----------------------------
+#
+# Sascha: Sarvis soll fuer Webseiten auch 3D (Blender) und Videos
+# (HyperFrames) machen koennen. Blender selbst kommt NICHT ins Image --
+# es liegt auf dem Host (~/tools/blender-4.5.13-linux-x64) und wird nach
+# /opt/blender eingehaengt (docker-compose.yml). Hier stehen nur die
+# Bibliotheken, ohne die es nicht startet (libSM fehlte, gemessen), und
+# ffmpeg, das HyperFrames zum Zusammensetzen der Videos braucht.
+# HyperFrames fest auf eine Version, die schon zwei Wochen alt ist.
+ARG HYPERFRAMES_VERSION=0.8.225
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ffmpeg libsm6 libice6 libxi6 libxrender1 libxkbcommon0 libxxf86vm1 \
+        libxfixes3 libgl1 libegl1; \
+    rm -rf /var/lib/apt/lists/*; \
+    npm install -g "hyperframes@${HYPERFRAMES_VERSION}"; \
+    npm cache clean --force; \
+    ln -s /opt/blender/blender /usr/local/bin/blender; \
+    ffmpeg -version | head -1
+
 # --- Wer hier arbeitet ----------------------------------------------------
 #
 # Nicht root. Sarvis schreibt in /srv/data/sarvis und -- wenn er an

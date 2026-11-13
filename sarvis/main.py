@@ -377,7 +377,8 @@ class Sarvis:
         if not e:
             return
         self._zug_karten[schl] = e["id"]
-        if art != "blatt":
+        if art != "blatt" or f.get("sorte") == "seite":
+            # Eine Vorschau-Seite ist ein Link, keine Datei -- nichts abzulegen.
             return
         # Und in die Ablage: Ein Blatt soll man wiederfinden, auch wenn
         # seine Adresse unter /blatt/ laengst abgelaufen ist.

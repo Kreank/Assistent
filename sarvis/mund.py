@@ -81,6 +81,11 @@ class Mund:
         Aufrufer muss keinen Fall unterscheiden, und es gibt keinen Pfad,
         auf dem am Ende gar nichts gesprochen wird.
         """
+        # Links und Pfade nie vorlesen (Sascha, 13.11.2026) -- gilt fuer
+        # beide Stimmen, der Bildschirmtext bleibt unberuehrt.
+        text = aussprache.ohne_links(text)
+        if not text:
+            return np.zeros(0, dtype="float32"), config.ABTASTRATE
         if self.eleven is not None:
             fertig = self.eleven.sprechen(text)
             if fertig is not None:

@@ -1853,6 +1853,8 @@ function menge(bytes) {
 
 let blattJetzt = '';
 
+const VORSCHAU_OK = /^https:\/\/test\.tech-artist\.de\/(vorschau|offen)\/[a-z0-9-]+\/$/;
+
 function blattZeigen(m) {
   const el = document.getElementById('blatt');
   const kennung = String(m.kennung || '');
@@ -1872,8 +1874,15 @@ function blattZeigen(m) {
   text.innerHTML = '';
   rahmen.hidden = true;
   rahmen.removeAttribute('src');
+  const vrahmen = el.querySelector('.vorschaurahmen');
+  vrahmen.hidden = true;
+  vrahmen.removeAttribute('src');
   laden.hidden = true;
   laden.removeAttribute('href');
+  laden.removeAttribute('target');
+  laden.removeAttribute('rel');
+  laden.setAttribute('download', '');
+  laden.textContent = 'Herunterladen';
 
   if (sorte === 'markdown') {
     el.querySelector('.dazu').textContent = '';
@@ -1909,6 +1918,26 @@ function blattZeigen(m) {
       + `<p>Du findest sie auch später oben unter „Dateien“.</p>`;
     // Die Liste nachziehen, damit sie dort sofort steht.
     setTimeout(dateienLaden, 300);
+  } else if (sorte === 'seite') {
+    // Eine Webseiten-Vorschau (werkzeuge/vorschau.py). Nicht gerahmt --
+    // der Rahmen laesst keine Skripte zu, und eine React-Seite ohne
+    // Skripte ist weiss. Also ein Knopf, der sie in einem neuen Tab
+    // oeffnet. Nur unsere beiden Vorschau-Orte, keine fremde Adresse.
+    const adresse = String(m.adresse || '');
+    if (!VORSCHAU_OK.test(adresse)) { blattZu(); return; }
+    el.querySelector('.dazu').textContent = 'Webseite';
+    laden.href = adresse;
+    laden.removeAttribute('download');
+    laden.target = '_blank';
+    laden.rel = 'noopener';
+    laden.textContent = 'Im Browser öffnen';
+    laden.hidden = false;
+    // Die Seite selbst, eingebettet. Der Knopf daneben bleibt fuer den
+    // grossen Tab -- und fuer /vorschau/ mit Passwort, falls der Browser
+    // die Anmeldung im Rahmen nicht anbietet.
+    const vrahmen = el.querySelector('.vorschaurahmen');
+    vrahmen.src = adresse;
+    vrahmen.hidden = false;
   } else {
     // Unbekannte Sorte: still ueberspringen, wie ueberall am Draht.
     return;
@@ -1939,6 +1968,9 @@ function blattZu() {
   const rahmen = el.querySelector('.rahmen');
   rahmen.hidden = true;
   rahmen.removeAttribute('src');
+  const vrahmen = el.querySelector('.vorschaurahmen');
+  vrahmen.hidden = true;
+  vrahmen.removeAttribute('src');
   el.querySelector('.text').innerHTML = '';
 }
 
@@ -1993,6 +2025,7 @@ function verbinden() {
   const wo = (location.protocol === 'https:' ? 'wss://' : 'ws://')
     + location.host + '/draht';
   lage('verbindet …', false);
+  bereit = false;
   draht = new WebSocket(wo);
 
   draht.onopen = () => draht.send(JSON.stringify({
@@ -2020,6 +2053,7 @@ function verbinden() {
       lage('kein Zugang', false);
       return;
     }
+    bereit = false;
     lage('getrennt', false);
     setTimeout(verbinden, wiederIn);
     wiederIn = Math.min(wiederIn * 1.6, 20000);   // nicht im Kreis hämmern
@@ -2030,7 +2064,9 @@ function empfangen(m) {
   switch (m.art) {
     case 'willkommen':
       wiederIn = 1000;
+      bereit = true;
       lage('verbunden', true);
+      warteschlangeLeeren();
       document.getElementById('geraet').textContent = m.geraet || '';
       document.getElementById('tor').classList.add('weg');
       localStorage.setItem('sarvis-schluessel', schluessel);
@@ -2126,9 +2162,61 @@ function zeigeUntertitel() {
     : rgb(FARBEN[S.zustand] || FARBEN.ruhig, 0.92);
 }
 
+// Getippte Zeilen und Antwort-Knöpfe gehen NICHT mehr verloren, wenn die
+// Leitung gerade weg ist. Vorher warf senden() sie stumm weg, während die
+// Oberfläche sie schon als gesagt anzeigte. Gemessen 13.11.2026: Sascha
+// tippt "ja" auf eine Rückfrage, das Handy hatte nach dem Aufwachen noch
+// keine Verbindung, der Server sah nichts, die Frage lief ab ("Ich habe
+// keine Antwort bekommen"). Zurufe warten jetzt bis zum nächsten
+// 'willkommen' und gehen dann raus -- aber nur, wenn sie frisch sind.
+let bereit = false;                 // erst nach 'willkommen' wirklich drin
+const wartet = [];                  // {o, zeit}
+const WARTET_HOECHSTENS = 90000;    // ältere Zurufe wären nicht mehr gemeint
+
 function senden(o) {
-  if (draht && draht.readyState === 1) draht.send(JSON.stringify(o));
+  if (bereit && draht && draht.readyState === 1) {
+    draht.send(JSON.stringify(o));
+    return;
+  }
+  if (o.art === 'zuruf') {
+    wartet.push({ o, zeit: Date.now() });
+    // Steht die Leitung gar nicht, sofort neu verbinden statt auf den
+    // nächsten Wiederholversuch zu warten.
+    if (!draht || draht.readyState > 1) frischVerbinden();
+  }
 }
+
+function warteschlangeLeeren() {
+  const jetzt = Date.now();
+  while (wartet.length) {
+    const { o, zeit } = wartet.shift();
+    if (jetzt - zeit <= WARTET_HOECHSTENS) draht.send(JSON.stringify(o));
+  }
+}
+
+// Alte Leitung abhängen und sofort neu aufbauen. Das alte onclose darf
+// danach nichts mehr anstoßen, sonst verbinden wir doppelt.
+function frischVerbinden() {
+  if (draht) {
+    draht.onclose = null; draht.onmessage = null; draht.onopen = null;
+    try { draht.close(); } catch {}
+  }
+  draht = null; bereit = false;
+  wiederIn = 1000;
+  verbinden();
+}
+
+// Ein Handy, das geschlafen hat, hält oft noch eine Leitung für "offen",
+// die längst tot ist -- was man dann tippt, verschwindet im Nichts. Nach
+// längerem Wegsein deshalb beim Zurückkommen gleich frisch verbinden.
+let verstecktSeit = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { verstecktSeit = Date.now(); return; }
+  if (verstecktSeit && Date.now() - verstecktSeit > 20000 && schluessel) {
+    frischVerbinden();
+  }
+  verstecktSeit = 0;
+});
 
 // =====================================================================
 // Ton: hin und zurück
@@ -3334,11 +3422,24 @@ function klartext(md) {
     .replace(/^\s*[-+]\s+(\[[ x]\]\s*)?/gm, '· ').replace(/\s+/g, ' ').trim();
 }
 
+// Adressen in einer Textblase anklickbar machen. Erst sicher(), dann
+// verlinken -- es entsteht kein Tag aus der Nachricht selbst, nur <a>
+// um eine https-Adresse, die schon entschaerft ist.
+function verlinkt(text) {
+  return sicher(text).replace(/https:\/\/[^\s<>"')\]]+/g, url => {
+    const sauber = url.replace(/[.,;:!?]+$/, '');
+    const rest = url.slice(sauber.length);
+    return `<a href="${sauber}" target="_blank" rel="noopener noreferrer">${sauber}</a>${rest}`;
+  });
+}
+
 function blattKarte(e) {
   const d = e.daten || {};
-  const art = d.sorte === 'html' ? 'Bericht' : d.sorte === 'datei' ? 'Datei' : 'Blatt';
+  const art = d.sorte === 'html' ? 'Bericht' : d.sorte === 'datei' ? 'Datei'
+    : d.sorte === 'seite' ? 'Webseite' : 'Blatt';
   const kopf = sicher(e.text || d.titel || d.datei || art);
-  const vor = d.sorte === 'markdown' ? klartext(d.inhalt).slice(0, 240)
+  const vor = d.sorte === 'seite' ? String(d.adresse || '')
+    : d.sorte === 'markdown' ? klartext(d.inhalt).slice(0, 240)
     : d.sorte === 'datei' ? [d.datei, menge(d.bytes)].filter(Boolean).join(' · ') : '';
   return `<div class="karte"><div class="art">${art}</div><div class="kopf">${kopf}</div>`
     + (vor ? `<div class="vorschau">${sicher(vor)}</div>` : '')
@@ -3371,7 +3472,7 @@ function eintragEl(e) {
       + (d.bytes ? `<div class="vorschau">${menge(d.bytes)}</div>` : '') + `</div>`;
   } else if (e.sorte !== 'kachel') {
     if (e.sorte === 'meldung') el.classList.add('meldung');
-    innen = `<div class="blase">${sicher(e.text)}</div>`;
+    innen = `<div class="blase">${verlinkt(e.text)}</div>`;
   }
   el.innerHTML = innen;
   if (e.sorte === 'kachel') {
@@ -3407,7 +3508,11 @@ eintraegeEl.addEventListener('click', e => {
   const eintrag = F.alle.find(x => String(x.id) === auf.dataset.oeffnen);
   if (!eintrag) return;
   const d = eintrag.daten || {};
-  if (d.sorte === 'markdown') {
+  if (d.sorte === 'seite') {
+    blattZeigen({ kennung: d.kennung || ('verlauf-' + eintrag.id),
+                  sorte: 'seite', titel: eintrag.text || d.titel,
+                  adresse: d.adresse });
+  } else if (d.sorte === 'markdown') {
     blattZeigen({ kennung: 'verlauf-' + eintrag.id, sorte: 'markdown',
                   titel: eintrag.text || d.titel, inhalt: d.inhalt });
   } else if (d.kennung) {

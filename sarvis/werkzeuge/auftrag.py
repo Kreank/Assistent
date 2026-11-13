@@ -139,7 +139,71 @@ Führe Buch, und zwar WÄHREND der Arbeit, nicht am Ende:
   gemergt — häufige Commits kosten dich nichts und sind der einzige
   verlässliche Zwischenstand.
 * Wirst du fortgesetzt, lies zuerst `git log`, `git status` und
-  `fortschritt.md`. Fang nicht von vorn an."""
+  `fortschritt.md`. Fang nicht von vorn an.
+
+Fehlende Angaben: Fehlt dir etwas, das nur Sascha wissen kann (Anschrift,
+E-Mail, Telefon, Impressumsangaben, persönliche Texte), dann erfinde es
+nicht — aber bau auch keine großen sichtbaren TODO-Kästen in das
+Ergebnis. Lass den Teil schlicht und unauffällig weg oder nimm einen
+dezenten Platzhalter, und schreib im Bericht unter der Überschrift
+"## Offene Fragen an Sascha" jede fehlende Angabe als konkrete Frage auf.
+Sarvis stellt sie ihm dann.
+
+Werkstatt und Handbuch (nur lesen) unter /opt/handbuch — zuerst
+/opt/handbuch/README.md lesen, wenn eins davon passt:
+* Webseiten, die beeindrucken sollen (Portfolio, Firmenseite,
+  Landingpage): Saschas Hausstil in
+  /opt/handbuch/webseiten-design/SKILL.md. Das ist VERBINDLICH, nicht
+  Inspiration. Ein generischer Standard-Look (Karten-Raster, Pillen,
+  Orange auf Dunkelgrau) ist genau das, was Sascha nicht will.
+* 3D (Leitmotiv, Hero-Bild, glTF für three.js): `blender`, Anleitung in
+  /opt/handbuch/blender/ANLEITUNG.md. Nur auf der CPU rendern.
+* Videos aus HTML (Projekt-Clips, animierte Vorschauen): `hyperframes`,
+  Anleitung in /opt/handbuch/hyperframes/hyperframes/SKILL.md.
+* Bilder von echten, laufenden Seiten (z. B. für Projektkarten) holst du
+  dir mit Chrome im Hintergrund:
+  `google-chrome --headless=new --no-sandbox --hide-scrollbars
+  --window-size=1440,900 --screenshot=bild.png <adresse>`
+
+Bei allem Sichtbaren (Webseite, Bild, Video): Sieh dir das Ergebnis
+selbst an, bevor du fertig meldest — Screenshot machen, mit Read
+öffnen, kritisch prüfen wie ein Gestalter, nachbessern. Mindestens zwei
+Runden. Bilder vorher klein halten (Breite höchstens 1600 Pixel), sonst
+wird die Nachricht zu groß."""
+
+
+def _eingang_kopieren(ordner: Path, namen: list) -> tuple[int, list]:
+    """Dateien aus dem Sarvis-Eingang nach <projekt>/eingang/ kopieren.
+
+    Nur reine Dateinamen (kein Pfad), nur was wirklich im Eingang liegt.
+    eingang/ kommt in die .gitignore: Was Sascha schickt, kann Privates
+    enthalten (gemessen: Screenshots mit Kundendaten) und gehoert nicht
+    in die Projektgeschichte.
+    """
+    if not namen:
+        return 0, []
+    import shutil
+    from ..orte import EINGANG
+    ziel = ordner / "eingang"
+    ziel.mkdir(exist_ok=True)
+    kopiert, fehlt = 0, []
+    for name in namen:
+        name = Path(str(name)).name
+        quelle = EINGANG / name
+        if name and quelle.is_file():
+            shutil.copy2(quelle, ziel / name)
+            kopiert += 1
+        else:
+            fehlt.append(name)
+    ignore = ordner / ".gitignore"
+    try:
+        zeilen = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []
+        if "eingang/" not in zeilen:
+            with ignore.open("a", encoding="utf-8") as f:
+                f.write(("\n" if zeilen and zeilen[-1] else "") + "eingang/\n")
+    except OSError:
+        pass
+    return kopiert, fehlt
 
 
 def _glatt(text: str, grenze: int = 600) -> str:
@@ -434,6 +498,24 @@ class Werkstatt:
         genau wissen, was durchkommt. Der Ordner ist die Grenze.
         """
         wurzel = ordner.resolve()
+        # Nur lesen: das Handbuch und die Werkstatt. Beide sind im
+        # Container read-only eingehaengt -- auch ein Bash-Befehl, der dort
+        # schreiben will, scheitert also am Dateisystem, nicht erst hier.
+        lesewurzeln = [Path("/opt/handbuch"), Path("/opt/blender")]
+
+        def lesbar(pfad: str) -> bool:
+            if innerhalb(pfad):
+                return True
+            # Nur absolute Pfade: Relatives meint den Projektordner und
+            # ist oben schon entschieden.
+            try:
+                p = Path(pfad)
+                if not p.is_absolute():
+                    return False
+                p = p.resolve()
+            except (OSError, ValueError):
+                return False
+            return any(p == w or w in p.parents for w in lesewurzeln)
 
         def innerhalb(pfad: str) -> bool:
             try:
@@ -484,7 +566,7 @@ class Werkstatt:
                     felder = ("file_path", "path")
                 for feld in felder:
                     ziel = str(eingabe.get(feld) or "")
-                    if ziel and not innerhalb(ziel):
+                    if ziel and not lesbar(ziel):
                         return PermissionResultDeny(
                             message="Außerhalb des Projektordners wird nichts "
                                     "gelesen."
@@ -513,7 +595,7 @@ class Werkstatt:
                 # nur Bash, das Werkzeug mit der groessten Reichweite, nicht.
                 # Eine Ortspruefung, zwei Regexe: einer davon veraltet still.
                 for gefunden in schutz.pfade_im_befehl(befehl, str(wurzel)):
-                    if not innerhalb(gefunden):
+                    if not lesbar(gefunden):
                         return PermissionResultDeny(
                             message=f"{gefunden} liegt außerhalb des Projekts."
                         )
@@ -817,6 +899,10 @@ class Werkstatt:
                 strict_mcp_config=True,
                 effort="high",       # anders als Sarvis: hier zählt Gründlichkeit
                 max_turns=config.AUFTRAG_ZUEGE,
+                # Standard ist 1 MB je Nachricht. Liest der Arbeiter einen
+                # Screenshot (base64), reisst das sofort -- so ist Auftrag 4
+                # (Portfolio, 12.11.2026) gescheitert.
+                max_buffer_size=32 * 1024 * 1024,
                 # Beim ersten Lauf die Kennung VORGEBEN, beim Fortsetzen
                 # dieselbe wieder aufnehmen. Gemessen: Der Arbeiter hat
                 # danach seinen eigenen Verlauf zurueck.
@@ -838,6 +924,7 @@ class Werkstatt:
                     f"Auftrag: {auftrag.was}"
                 )
             letzter = ""
+            schluss = None
             async for nachricht in klient.receive_response():
                 if hasattr(nachricht, "content"):
                     for block in getattr(nachricht, "content", []) or []:
@@ -856,9 +943,37 @@ class Werkstatt:
                         timespec="seconds")
                     journal(auftrag.nummer, "lebt", werkzeug=letztes_werkzeug)
                 if isinstance(nachricht, ResultMessage):
+                    schluss = nachricht
                     break
-            auftrag.ergebnis = vorlesbar(letzter)
-            auftrag.status = "fertig"
+            # Ein API-Fehler (Anmeldung, 403, Ueberlast) kommt NICHT als
+            # Ausnahme, sondern als normale Schlussnachricht mit is_error.
+            # Bis 13.11.2026 hiess das "fertig": Auftrag 5 meldete nach
+            # einer Minute "ist fertig ... Failed to authenticate. API
+            # Error: 403 ... Soll ich es dir zeigen?" -- und Sascha
+            # wusste nicht, was er gefragt wird.
+            fehlgeschlagen = bool(getattr(schluss, "is_error", False)) or (
+                re.match(r"(Failed to authenticate|API Error)", letzter or "")
+                is not None)
+            if getattr(schluss, "subtype", "") == "error_max_turns":
+                # Kein Fehler im eigentlichen Sinn: Das Arbeitspensum ist
+                # aufgebraucht, der Stand liegt committet im Zweig.
+                # Gemessen 13.11.: Auftrag 6 meldete stattdessen seinen
+                # letzten Halbsatz ("Jetzt die Stationsanzeige und die
+                # App:") als Fehlergrund.
+                auftrag.status = "fehler"
+                auftrag.ergebnis = (
+                    f"Er hat sein Arbeitspensum von {config.AUFTRAG_ZUEGE} "
+                    "Schritten aufgebraucht und ist mittendrin stehen "
+                    "geblieben. Der Zwischenstand ist gespeichert, er kann "
+                    "an derselben Stelle weitermachen. Soll ich ihn "
+                    "fortsetzen?")
+            elif fehlgeschlagen:
+                auftrag.status = "fehler"
+                auftrag.ergebnis = (letzter or str(
+                    getattr(schluss, "result", "") or "unbekannter Fehler"))[:300]
+            else:
+                auftrag.ergebnis = vorlesbar(letzter)
+                auftrag.status = "fertig"
         except asyncio.CancelledError:
             auftrag.status = "abgebrochen"
             # Hier und nicht ueber _melden: Das 'raise' beendet die
@@ -1071,7 +1186,25 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         "selbst, wenn es fertig ist. Für alles, was länger dauert als eine "
         "Antwort: Funktion einbauen, Fehler suchen, umbauen. Der Auftrag "
         "sollte so ausformuliert sein, dass jemand ohne Vorwissen ihn "
-        "versteht — der Arbeiter kennt euer Gespräch nicht.",
+        "versteht — der Arbeiter kennt euer Gespräch nicht. "
+        "VORHER ERFRAGEN: Der Arbeiter kann niemanden fragen. Braucht die "
+        "Arbeit Angaben, die nur der Nutzer kennt — Name, Anschrift, "
+        "E-Mail, Telefon, Impressum, Zugangsdaten-Orte, Wunschtexte, "
+        "Farben, Vorbilder —, dann frag sie im Gespräch ab, BEVOR du den "
+        "Auftrag gibst, und schreib sie in den Auftrag. Kurz und gebündelt "
+        "in einer Frage. Bei Webseiten zusätzlich fragen, ob es ein "
+        "Vorbild oder eine Stimmung gibt. Sagt der Nutzer 'weiß ich noch "
+        "nicht', dann bleibt es offen — aber gefragt wird. "
+        "DESIGN: Sagt Sascha 'meine Designvorgaben', 'mein Stil' oder "
+        "'mein Design', meint er seinen Hausstil für Schaufenster-Seiten "
+        "(dunkel, filmisch, ein Leitmotiv, eine Signalfarbe). Der liegt "
+        "für den Arbeiter in /opt/handbuch/webseiten-design/SKILL.md — "
+        "schreib in den Auftrag, dass er sich daran hält. Erfinde keinen "
+        "eigenen Look und leite ihn nicht aus Screenshots ab. "
+        "BILDER: Schickt Sascha Bilder für eine öffentliche Seite, frag "
+        "nach, was sie zeigen, falls es nicht eindeutig ist — und weise "
+        "ihn darauf hin, wenn Namen, Adressen oder Kundendaten darauf "
+        "zu sehen sind.",
         {
             "type": "object",
             "properties": {
@@ -1080,6 +1213,16 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
                 "was": {"type": "string",
                         "description": "Der Auftrag, ausformuliert und "
                                        "vollständig. Ruhig mehrere Sätze."},
+                "dateien": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Dateinamen aus dem Eingang (was der "
+                                   "Nutzer geschickt hat, siehe "
+                                   "eingang_zeigen), die der Arbeiter "
+                                   "braucht. Der Arbeiter kommt an den "
+                                   "Eingang NICHT heran — nur so bekommt "
+                                   "er sie. Sie liegen dann im Projekt "
+                                   "unter eingang/ (nicht in Git). Im "
+                                   "Auftragstext auf eingang/ verweisen."},
             },
             "required": ["projekt", "was"],
         },
@@ -1105,6 +1248,11 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         if auftrag is None:
             return {"content": [{"type": "text", "text": fehler}],
                     "is_error": True}
+        # Mitgeschickte Dateien ins Projekt legen (13.11.2026): Auftrag 6
+        # sollte Bilder aus dem Eingang einbauen und konnte sie nicht
+        # einmal sehen -- der Eingang liegt ausserhalb seines Ordners.
+        kopiert, fehlt = await asyncio.to_thread(
+            _eingang_kopieren, auftrag.ordner, args.get("dateien") or [])
         # Erst HIER, im Event-Loop, faengt die Arbeit wirklich an.
         fehler = werkstatt.losschicken(auftrag)
         if fehler:
@@ -1118,7 +1266,11 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         return {"content": [{"type": "text", "text":
                 f"Auftrag {auftrag.nummer} läuft im Projekt "
                 f"{auftrag.projekt}, auf dem Zweig {auftrag.zweig}. "
-                "Ich melde mich, wenn er fertig ist."}]}
+                + (f"{kopiert} Datei(en) liegen für ihn unter eingang/. "
+                   if kopiert else "")
+                + (f"Nicht gefunden im Eingang: {', '.join(fehlt)}. "
+                   if fehlt else "")
+                + "Ich melde mich, wenn er fertig ist."}]}
 
     @tool(
         "auftrag_status",

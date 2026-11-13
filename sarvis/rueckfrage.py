@@ -488,6 +488,12 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "tabelle_anlegen":
         return f"Soll ich eine Tabelle {_kuerzen(e.get('name'), 50)} anlegen?"
 
+    if werkzeug == "vorschau_zeigen":
+        wie = ("offen für jeden mit dem Link" if e.get("zugang") == "offen"
+               else "mit Passwort")
+        return (f"Soll ich die Seite von {_kuerzen(e.get('projekt'), 40)} "
+                f"bauen und {wie} bereitstellen?")
+
     if werkzeug == "kontakt_anlegen":
         return f"Soll ich {_kuerzen(e.get('name'), 40)} als Kontakt anlegen?"
 
