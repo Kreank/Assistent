@@ -156,6 +156,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                       "type": "string",
                       "description":
                           "Markdown. Unterstützt: # Überschriften, **fett**, *kursiv*, ~~durchgestrichen~~, `code`, - Listen (auch eingerückte Unterpunkte), 1. Nummerierung, - [ ] und - [x] für Haken, > Zitat, ```Codeblöcke```, | Tabellen | (die |---|-Zeile ist Pflicht), --- Trennlinie, [Text](https://ziel). "
+                          "Listen zum Abhaken (offene Punkte, Einkauf, Packliste) IMMER als - [ ] schreiben: Sascha hakt sie in der App ab, und mit blatt_lesen siehst du später den Stand. "
                           "Kein HTML — das wird als Text angezeigt, "
                           "nicht ausgeführt. Bilder werden nur benannt, "
                           "nicht geladen."},
@@ -395,4 +396,113 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 f"({groesse // 1024 or 1} KB). Der Nutzer hat jetzt einen "
                 "Knopf zum Herunterladen."}]}
 
-    return [blatt_zeigen, blatt_weg, dokument_erstellen]
+    @tool("blatt_lesen",
+          "Liest ein früheres Blatt so, wie es JETZT ist — mit den Haken, "
+          "die Sascha in der App gesetzt hat. Benutze das, bevor du eine "
+          "Abhakliste ersetzt oder wenn gefragt wird, was noch offen ist.",
+          {
+              "type": "object",
+              "properties": {
+                  "titel": {"type": "string",
+                            "description": "Wort aus dem Titel des Blattes. "
+                                           "Leer: das jüngste Blatt."},
+              },
+          })
+    async def blatt_lesen(args):
+        from .. import gespraeche
+        b = gespraeche.blatt_finden(str(args.get("titel") or ""))
+        if not b:
+            return {"content": [{"type": "text", "text":
+                    "Ein solches Blatt finde ich nicht."}], "is_error": True}
+        return {"content": [{"type": "text", "text":
+                f"»{b['titel']}«:\n\n{b['inhalt']}"}]}
+
+    _TYPEN = ("text", "einfach", "mehrfach", "janein", "zahl", "datum")
+
+    @tool("fragen_stellen",
+          "Legt Sascha Fragen zum Anhaken hin, als Formular im Chat. Nimm "
+          "es, wenn du im Gespräch eine oder mehrere Entscheidungen mit "
+          "klaren Möglichkeiten brauchst (typ einfach/mehrfach, Optionen "
+          "kurz, die wahrscheinlichste als vorschlag, frei=true, wenn die "
+          "Liste nicht vollständig sein kann) oder viele offene Angaben "
+          "(typ text) statt einer Markdown-Liste 'offene Punkte'. NICHT "
+          "für Ja/Nein vor einer Handlung — das fragt das System selbst. "
+          "Sag danach nur einen Satz wie 'Ich hab dir drei Fragen "
+          "hingelegt.' und warte; die Antworten kommen als nächster Zuruf.",
+          {
+              "type": "object",
+              "properties": {
+                  "titel": {"type": "string",
+                            "description": "Worum es geht, kurz."},
+                  "fragen": {
+                      "type": "array", "minItems": 1, "maxItems": 10,
+                      "items": {
+                          "type": "object",
+                          "properties": {
+                              "frage": {"type": "string"},
+                              "typ": {"type": "string", "enum": list(_TYPEN)},
+                              "optionen": {"type": "array",
+                                           "items": {"type": "string"},
+                                           "maxItems": 8},
+                              "frei": {"type": "boolean",
+                                       "description": "Zusätzlich 'Anders: …'"},
+                              "vorschlag": {"description": "Vorbelegung: "
+                                            "String, bei mehrfach Liste"},
+                              "pflicht": {"type": "boolean"},
+                          },
+                          "required": ["frage"],
+                      },
+                  },
+              },
+              "required": ["titel", "fragen"],
+          })
+    async def fragen_stellen(args):
+        titel = str(args.get("titel") or "").strip()[:120]
+        roh = args.get("fragen") or []
+        if not titel or not isinstance(roh, list) or not roh:
+            return {"content": [{"type": "text", "text":
+                    "Ich brauche einen Titel und mindestens eine Frage."}],
+                    "is_error": True}
+        draht = sicht.draht()
+        if anzeige_modul.im_auto() or not sicht.ueber_netz() or (
+                draht is not None and not draht.wie_viele()):
+            return {"content": [{"type": "text", "text":
+                    "Gerade sieht niemand auf einen Bildschirm (oder Sascha "
+                    "fährt). Stell die Fragen mündlich, eine nach der "
+                    "anderen."}], "is_error": True}
+        fragen = []
+        for nr, f in enumerate(roh[:10], 1):
+            if not isinstance(f, dict) or not str(f.get("frage") or "").strip():
+                continue
+            typ = f.get("typ") if f.get("typ") in _TYPEN else "text"
+            q = {"nr": nr, "titel": str(f["frage"]).strip()[:200],
+                 "frage": str(f["frage"]).strip()[:500], "typ": typ}
+            if typ in ("einfach", "mehrfach"):
+                optionen = [str(o).strip()[:60] for o in (f.get("optionen") or [])
+                            if str(o).strip()][:8]
+                if not optionen:
+                    q["typ"] = "text"
+                else:
+                    q["optionen"] = optionen
+            if f.get("frei"):
+                q["frei"] = True
+            if f.get("pflicht"):
+                q["pflicht"] = True
+            v = f.get("vorschlag")
+            if isinstance(v, list):
+                q["vorschlag"] = [str(x)[:60] for x in v][:8]
+            elif v not in (None, ""):
+                q["vorschlag"] = str(v)[:200]
+            fragen.append(q)
+        if not fragen:
+            return {"content": [{"type": "text", "text":
+                    "Keine brauchbare Frage dabei."}], "is_error": True}
+        import time as _zeit
+        sicht.formular(f"rueckfrage-{int(_zeit.time())}", titel, fragen,
+                       zweck="rueckfrage")
+        return {"content": [{"type": "text", "text":
+                f"{len(fragen)} Frage(n) liegen als Formular im Chat. Sag "
+                "nur einen kurzen Satz dazu und warte auf die Antworten."}]}
+
+    return [blatt_zeigen, blatt_weg, dokument_erstellen, blatt_lesen,
+            fragen_stellen]

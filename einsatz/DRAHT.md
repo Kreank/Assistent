@@ -1041,6 +1041,41 @@ Ein zweites Abschicken desselben Formulars wird still übergangen.
 Wie `zuruf` gehört `formular_antwort` in die Warteschlange, solange die
 Leitung nicht steht.
 
+**Seit 13.11.2026 (abends): Antwortarten, Rückfragen, später beantworten.**
+
+Jede Frage in `daten.fragen` kann zusätzlich tragen (fehlt es: wie oben,
+Freitext):
+
+| Feld | Werte | Bedeutung |
+|---|---|---|
+| `typ` | `text` (Vorgabe) · `einfach` · `mehrfach` · `janein` · `zahl` · `datum` | wie man antwortet |
+| `optionen` | Liste, höchstens 8, je ≤ 60 Zeichen | bei `einfach`/`mehrfach` |
+| `frei` | bool | zusätzlich „Anders: …“ mit Textfeld |
+| `vorschlag` | String, bei `mehrfach` Liste | vorbelegt |
+| `pflicht` | bool | ohne Antwort kein Abschicken |
+
+Antworten: `text`/`einfach`/`zahl`/`datum` (ISO `2026-11-20`)/`janein`
+(`"ja"`/`"nein"`) als **String**, `mehrfach` als **Liste** (höchstens 20,
+je ≤ 200 Zeichen). „Anders“ steht als Wert bzw. als weiteres
+Listenelement. Leer heißt „weiß ich noch nicht“.
+
+- `daten.zweck`: `"rueckfrage"` (Sarvis fragt im Gespräch, Werkzeug
+  `fragen_stellen`) oder `"auftrag"` (offene Fragen eines Arbeiters;
+  fehlt das Feld: `"auftrag"`). Rückfragen gehen als gewöhnlicher Zuruf
+  („Meine Antworten auf „…“: 1. Farben: Blau, Grün …“) an das Gespräch,
+  **nicht** als Folgeauftrag.
+- `daten.erledigt`, sobald `offen` falsch ist: `"beantwortet"` oder
+  `"anders"`. **`anders`** heißt: Sascha hat gesprochen oder frei getippt,
+  während ein Rückfrage-Formular offen war; dann schließt der Server alle
+  offenen **Rückfrage**-Formulare des aktiven Fadens. Grau zeigen, nicht
+  mehr ausfüllbar. Auftrags-Formulare bleiben offen.
+- **`formular_antwort` findet das Formular über `eintrag` in jedem
+  Faden**, auch Tage später. Steht es in einem anderen als dem aktiven
+  Faden, wechselt der Server zuerst dorthin (es kommt `faeden` mit
+  `wechselt`), dann folgt der Zuruf.
+- Im Auto (`auto` an) und ohne verbundenen Bildschirm legt Sarvis keine
+  Rückfrage-Formulare hin, sondern fragt mündlich.
+
 ### HTTP: Verlauf nachladen und durchsuchen
 
 Alles mit `X-Sarvis-Schluessel` im Kopf, ohne: **401** `{"fehler": "kein Zugang"}`.
@@ -1098,6 +1133,40 @@ POST /ablage/oeffnen        { "schluessel": "…" }
   antippbar machen.
 - `schluessel` ist bei `html`/`datei` die geheime Blatt-Kennung, bei
   Markdown `md-<eintrag>`. Die Liste ist also vertraulich wie `/dateien`.
+
+### Formulare in der Ablage (seit 13.11.2026)
+
+`GET /ablage` (auch `?sorte=formular`) führt jedes Formular mit
+`sorte: "formular"`, `schluessel: "fm-<eintrag>"`, `titel`, `seit`,
+`faden`, `eintrag`, dazu **`offen`** (bool) und **`fragen`** (Anzahl).
+**Offene stehen vorn**, danach wie gehabt neueste zuerst.
+
+```
+POST /ablage/oeffnen  { "schluessel": "fm-812" }
+→ { "sorte": "formular", "titel": "…", "eintrag": { …der ganze Verlaufseintrag… } }
+```
+
+Beantwortet wird wie im Chat mit `formular_antwort` und der
+`eintrag`-Nummer.
+
+### Abhaken in Markdown-Blättern (seit 13.11.2026)
+
+Aufgabenzeilen (`- [ ] …`, `- [x] …`, auch `* `, `+ `, `1. `) zeigt die App
+als Kästchen. Antippen:
+
+```
+POST /blatt/haken   { "schluessel": "md-<eintrag>", "zeile": 7, "an": true }
+→ 200 { "gut": true, "inhalt": "<das ganze neue Markdown>" }
+→ 404 unbekannt · 409 { "fehler": "…", "inhalt": "<aktueller Inhalt>" }
+```
+
+- `zeile` zählt ab 0 im `inhalt`, wie die App ihn bekommen hat. Steht
+  dort keine Aufgabenzeile mehr: **409**, den mitgeschickten `inhalt`
+  zeigen.
+- Der Server ändert nur `[ ]`↔`[x]` in dieser Zeile, speichert in der
+  Ablage und schickt den Blatt-`eintrag` mit derselben `id` an alle
+  Geräte. Sarvis liest den Stand mit `blatt_lesen`.
+- Mit `X-Sarvis-Schluessel`.
 
 ## Geplant — Timer und geplante Aufgaben (seit 13.11.2026)
 

@@ -134,3 +134,30 @@ POST /blatt/haken   { "schluessel": "md-<eintrag>", "zeile": 7, "an": true }
 3. Ein Kästchen in „Portfolio – offene Punkte" abhaken → auf dem zweiten
    Gerät ist es auch abgehakt; Sarvis sieht es, wenn er das Blatt liest.
 4. Altes Formular (ohne `typ`) → unverändert Freitext.
+
+---
+
+## Antwort vom Server (13.11.2026, abends)
+
+Alle vier Punkte gebaut, Vertrag in `DRAHT.md` (Abschnitte „Formulare“,
+„Formulare in der Ablage“, „Abhaken in Markdown-Blättern“).
+
+1. **Antwortarten:** wie vorgeschlagen. Listen bleiben Listen
+   (≤ 20 × 200 Zeichen), fürs Hirn mit „, “ verbunden.
+2. **`fragen_stellen`:** neues Werkzeug fürs Hirn, die Regel steht in seiner
+   Beschreibung. `daten.zweck` = `rueckfrage`/`auftrag`. Antworten
+   gehen als Zuruf in den Faden des Formulars. Spricht oder tippt Sascha
+   frei, während ein Rückfrage-Formular offen ist, gilt
+   `offen: false, erledigt: "anders"`. Zusätzlich gibt es
+   `erledigt: "beantwortet"`. Im Auto oder ohne Bildschirm fragt Sarvis
+   mündlich.
+3. **Ablage:** `fm-<eintrag>` mit `offen`/`fragen`, offene vorn; die fünf
+   Auftrags-Formulare von heute sind nachgetragen. `formular_antwort`
+   findet das Formular in jedem Faden und wechselt vorher dorthin.
+4. **`POST /blatt/haken`:** wie vorgeschlagen, auch für `* `/`+ `/`1. `.
+   Sarvis hat dazu `blatt_lesen` (Blatt mit den aktuellen Haken), und
+   `blatt_zeigen` sagt ihm, Abhaklisten als `- [ ]` zu schreiben.
+
+Getestet an einer Kopie der Gesprächsdatenbank: Haken an/aus, 409, 404,
+Ablage-Formulare, Mehrfachantwort aus einem anderen Faden, Schließen bei
+freier Antwort. Wirksam nach dem nächsten Neustart des Containers.

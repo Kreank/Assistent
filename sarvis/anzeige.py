@@ -223,6 +223,20 @@ def ziel() -> str | None:
 _mitschrift = None
 
 
+_im_auto = False
+
+
+def auto_setzen(an: bool) -> None:
+    """Steckt eine Oberflaeche im Auto? (main._auto_vom_netz)"""
+    global _im_auto
+    _im_auto = bool(an)
+
+
+def im_auto() -> bool:
+    """Im Auto legt Sarvis keine Formulare hin -- er fragt muendlich."""
+    return _im_auto
+
+
 def mitschreiben(rueckruf) -> None:
     """rueckruf(art, felder) bekommt jedes Blatt und jede Kachel."""
     global _mitschrift
@@ -440,7 +454,8 @@ class Anzeige:
             "bytes": int(bytes_ or 0)})
 
     def formular(self, kennung: str, titel: str, fragen: list,
-                 auftrag: int = 0, projekt: str = "") -> None:
+                 auftrag: int = 0, projekt: str = "",
+                 zweck: str = "auftrag") -> None:
         """Fragen zum Ausfuellen in den Verlauf legen (seit 13.11.2026).
 
         Kommt nur als eintrag (sorte "formular") ueber den Draht, keine
@@ -451,7 +466,10 @@ class Anzeige:
         _mitschreiben("formular", {
             "kennung": str(kennung), "titel": str(titel or ""),
             "fragen": list(fragen or []), "auftrag": int(auftrag or 0),
-            "projekt": str(projekt or "")})
+            "projekt": str(projekt or ""),
+            # "rueckfrage" (aus dem Gespraech, fragen_stellen) oder
+            # "auftrag" (offene Fragen eines Arbeiters). Seit 13.11.2026.
+            "zweck": "rueckfrage" if zweck == "rueckfrage" else "auftrag"})
 
     def auftrag_stand(self, nummer: int, text: str, zustand: str,
                       projekt: str = "", seit: float = 0.0,

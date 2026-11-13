@@ -127,6 +127,7 @@ def oeffnen() -> None:
             pass
         _bereit = True
         _blaetter_uebernehmen()
+        _formulare_nachtragen()
         if not aktiv():
             neu = faden_anlegen()
             aktiv_setzen(neu["id"])
@@ -338,6 +339,25 @@ def aendern(nummer: int, text: str | None = None,
     return _eintrag_aus(z) if z else None
 
 
+def eintrag(nummer: int) -> dict | None:
+    """Einen Eintrag ueber seine id -- egal in welchem Faden (13.11.2026).
+
+    Ein Formular in der Ablage soll sich auch Tage spaeter und aus einem
+    anderen Faden heraus beantworten lassen.
+    """
+    _sicher_offen()
+    with _sperre, _verbindung() as v:
+        z = v.execute("SELECT * FROM eintraege WHERE id = ?",
+                      (int(nummer),)).fetchone()
+    return _eintrag_aus(z) if z else None
+
+
+def offene_formulare(faden_id: str, anzahl: int = 200) -> list[dict]:
+    """Offene Formulare unter den juengsten Eintraegen eines Fadens."""
+    return [e for e in verlauf(faden_id, 0, anzahl)["eintraege"]
+            if e["sorte"] == "formular" and (e["daten"] or {}).get("offen")]
+
+
 def verlauf(faden_id: str, vor: int = 0, anzahl: int = 60) -> dict:
     """Die jüngsten Einträge eines Fadens, ältere seitenweise.
 
@@ -440,11 +460,43 @@ def ablage(sorte: str = "", anzahl: int = 300) -> list[dict]:
         # bericht._aufraeumen nach einer Weile weg. Ein Eintrag, der
         # beim Antippen "gibt es nicht mehr" sagt, ist ehrlicher als einer,
         # der fehlt -- aber er soll es vorher schon zeigen.
-        d["vorhanden"] = True if d["sorte"] == "markdown" else (
+        d["vorhanden"] = True if d["sorte"] in ("markdown", "formular") else (
             bool(pfad) and Path(pfad).is_file())
         d["faden_titel"] = d.get("faden_titel") or ""
         raus.append(d)
     return raus
+
+
+def _formulare_nachtragen() -> None:
+    """Formulare aus der Zeit vor dem 13.11.2026 (abends) in die Ablage.
+
+    Seitdem legt main._mitschrift jedes neue selbst ab; das hier holt die
+    aelteren nach und tut danach nichts mehr (INSERT OR IGNORE).
+    """
+    with _sperre, _verbindung() as v:
+        v.execute(
+            "INSERT OR IGNORE INTO ablage (schluessel, sorte, titel, faden,"
+            " eintrag, seit, geaendert)"
+            " SELECT 'fm-' || id, 'formular', text, faden, id, zeit, zeit"
+            " FROM eintraege WHERE sorte = 'formular'")
+
+
+def blatt_finden(stichwort: str = "") -> dict | None:
+    """Das juengste Markdown-Blatt, dessen Titel das Stichwort enthaelt.
+
+    Fuer blatt_lesen: Sarvis soll ein Blatt so sehen, wie es JETZT ist --
+    mit den Haken, die Sascha inzwischen gesetzt hat.
+    """
+    _sicher_offen()
+    wort = str(stichwort or "").strip()
+    muster = "%" + wort.replace("\\", "\\\\").replace("%", "\\%") \
+        .replace("_", "\\_") + "%"
+    with _sperre, _verbindung() as v:
+        z = v.execute(
+            "SELECT schluessel, titel, inhalt, eintrag, seit, geaendert"
+            " FROM ablage WHERE sorte = 'markdown' AND titel LIKE ?"
+            " ESCAPE '\\' ORDER BY seit DESC LIMIT 1", (muster,)).fetchone()
+    return dict(z) if z else None
 
 
 def _blaetter_uebernehmen() -> None:

@@ -42,6 +42,7 @@ unterbricht. Das entscheidet aber die Schleife in main.py, nicht dieser
 Server -- er reicht nur weiter.
 """
 import asyncio
+import re
 import base64
 import json
 import logging
@@ -389,9 +390,24 @@ class Endpunkt:
         if await self._wer(anfrage) is None:
             return self._kein_zugang()
         sorte = anfrage.query.get("sorte", "")
-        if sorte and sorte not in ("markdown", "html", "datei"):
-            return self._json({"fehler": "sorte: markdown, html oder datei"}, 400)
+        if sorte and sorte not in ("markdown", "html", "datei", "formular"):
+            return self._json({"fehler": "sorte: markdown, html, datei "
+                                         "oder formular"}, 400)
         liste = await asyncio.to_thread(gespraeche.ablage, sorte)
+
+        def formulare_ergaenzen():
+            # Formulare: ob noch offen und wie viele Fragen -- aus dem
+            # Eintrag, der ist die Wahrheit. Offene zuerst (13.11.2026).
+            for d in liste:
+                if d["sorte"] != "formular":
+                    continue
+                e = gespraeche.eintrag(d["eintrag"]) or {}
+                daten = e.get("daten") or {}
+                d["offen"] = bool(daten.get("offen"))
+                d["fragen"] = len(daten.get("fragen") or [])
+            liste.sort(key=lambda d: not d.get("offen", False))
+
+        await asyncio.to_thread(formulare_ergaenzen)
 
         def von_dir():
             try:
@@ -426,6 +442,12 @@ class Endpunkt:
         if zeile["sorte"] == "markdown":
             return self._json({"sorte": "markdown", "titel": zeile["titel"],
                                "inhalt": zeile["inhalt"]})
+        if zeile["sorte"] == "formular":
+            e = await asyncio.to_thread(gespraeche.eintrag, zeile["eintrag"])
+            if not e:
+                return self._json({"fehler": "liegt nicht mehr da"}, 410)
+            return self._json({"sorte": "formular", "titel": zeile["titel"],
+                               "eintrag": e})
         typ = zeile["typ"] or ("html" if zeile["sorte"] == "html" else "beliebig")
         bis = await asyncio.to_thread(
             blaetter.erneuern, schl, zeile["pfad"], typ, zeile["titel"],
@@ -436,6 +458,64 @@ class Endpunkt:
         return self._json({"sorte": zeile["sorte"], "titel": zeile["titel"],
                            "datei": zeile["datei"], "bytes": zeile["bytes"],
                            "adresse": blaetter.adresse(schl), "bis": bis})
+
+    _HAKEN = re.compile(r"^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])")
+    _haken_sperre = asyncio.Lock()
+
+    async def _blatt_haken(self, anfrage: web.Request) -> web.Response:
+        """Ein Kaestchen in einem Markdown-Blatt an- oder abhaken (13.11.2026).
+
+        Nur [ ] <-> [x] in genau dieser Zeile. Steht dort keine
+        Aufgabenzeile mehr, hat sich das Blatt geaendert: 409 mit dem
+        aktuellen Inhalt. Danach geht der Eintrag mit derselben id an alle
+        Geraete, und die Ablage traegt den neuen Stand -- dort liest
+        Sarvis ihn (blatt_lesen).
+        """
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        k = await self._json_koerper(anfrage)
+        schl = str(k.get("schluessel") or "")
+        try:
+            nr = int(k.get("zeile"))
+        except (TypeError, ValueError):
+            return self._json({"fehler": "zeile muss eine Zahl sein"}, 400)
+        if "an" not in k or not schl.startswith("md-"):
+            return self._json({"fehler": "schluessel (md-…) und an noetig"}, 400)
+        an = bool(k["an"])
+
+        def haken():
+            zeile = gespraeche.abgelegt(schl)
+            if not zeile or zeile["sorte"] != "markdown":
+                return 404, {"fehler": "gibt es nicht"}
+            zeilen = zeile["inhalt"].split("\n")
+            t = self._HAKEN.match(zeilen[nr]) if 0 <= nr < len(zeilen) else None
+            if not t:
+                return 409, {"fehler": "dort steht keine Aufgabenzeile mehr",
+                             "inhalt": zeile["inhalt"]}
+            zeilen[nr] = (t.group(1) + ("x" if an else " ") + t.group(3)
+                          + zeilen[nr][t.end():])
+            inhalt = "\n".join(zeilen)
+            gespraeche.ablegen(schl, "markdown", zeile["titel"],
+                               bytes_=len(inhalt.encode("utf-8")),
+                               inhalt=inhalt)
+            e = gespraeche.eintrag(zeile["eintrag"]) if zeile["eintrag"] else None
+            neu = None
+            if e:
+                daten = dict(e.get("daten") or {})
+                daten["inhalt"] = inhalt
+                neu = gespraeche.aendern(e["id"], None, daten)
+            return 200, {"gut": True, "inhalt": inhalt, "_eintrag": neu}
+
+        async with self._haken_sperre:
+            status, antwort = await asyncio.to_thread(haken)
+        neu = antwort.pop("_eintrag", None)
+        if neu:
+            try:
+                from .. import anzeige as anzeige_modul
+                anzeige_modul.aktuelle().eintrag(neu)
+            except Exception as fehler:
+                log.warning("Haken nicht verteilt: %s", fehler)
+        return self._json(antwort, status)
 
     async def _push_schluessel(self, anfrage: web.Request) -> web.Response:
         name = await self._wer(anfrage)
@@ -736,6 +816,7 @@ class Endpunkt:
         app.router.add_get("/gedaechtnis", self._gedaechtnis)
         app.router.add_post("/gedaechtnis/vergessen", self._gedaechtnis_vergessen)
         app.router.add_post("/ablage/oeffnen", self._ablage_oeffnen)
+        app.router.add_post("/blatt/haken", self._blatt_haken)
         app.router.add_get("/push/schluessel", self._push_schluessel)
         app.router.add_post("/push/abo", self._push_abo)
         app.router.add_post("/push/abmelden", self._push_abmelden)

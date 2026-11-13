@@ -389,8 +389,17 @@ class Sarvis:
         if art == "formular":
             daten = dict(f)
             daten["offen"] = True
-            self._eintragen("sarvis", "formular", f.get("titel") or "",
-                            daten, "")
+            e = self._eintragen("sarvis", "formular", f.get("titel") or "",
+                                daten, "")
+            # In die Ablage (seit 13.11.2026): Ein Formular soll man auch
+            # Tage spaeter noch finden und beantworten koennen.
+            if e:
+                try:
+                    gespraeche.ablegen(f"fm-{e['id']}", "formular",
+                                       f.get("titel") or "",
+                                       faden_id=e["faden"], eintrag=e["id"])
+                except Exception as fehler:
+                    print(f"  (Ablage: Formular nicht abgelegt -- {fehler})")
             return
         if art == "kachel":
             if f.get("sorte") == "zustand":
@@ -539,11 +548,10 @@ class Sarvis:
         antworten = m.get("antworten") or {}
         if not nummer or not isinstance(antworten, dict):
             return
-        alt = None
+        # In JEDEM Faden, nicht nur in den letzten 200 des aktiven: Ein
+        # Formular aus der Ablage kann von gestern sein (seit 13.11.2026).
         try:
-            alt = next((e for e in gespraeche.verlauf(
-                gespraeche.aktiv(), 0, 200)["eintraege"]
-                if e.get("id") == nummer), None)
+            alt = gespraeche.eintrag(nummer)
         except Exception:
             alt = None
         if alt is None or alt.get("sorte") != "formular":
@@ -552,20 +560,67 @@ class Sarvis:
         if not d.get("offen"):
             return                       # zweimal abgeschickt: nichts tun
         d["offen"] = False
-        d["antworten"] = {str(k): str(v)[:2000] for k, v in antworten.items()}
+        d["erledigt"] = "beantwortet"
+
+        def wert_von(v):
+            # Mehrfachauswahl bleibt eine Liste (DRAHT.md, Formulare).
+            if isinstance(v, list):
+                return [str(x)[:200] for x in v if str(x).strip()][:20]
+            return "" if v is None else str(v)[:2000]
+
+        d["antworten"] = {str(k)[:20]: wert_von(v)
+                          for k, v in list(antworten.items())[:40]}
         self._aendern(nummer, None, d)
         zeilen = []
         for i, frage in enumerate(d.get("fragen") or [], 1):
             titel = frage.get("titel") or frage.get("frage") or f"Frage {i}"
-            wert = (d["antworten"].get(str(frage.get("nr", i))) or "").strip()
+            wert = d["antworten"].get(str(frage.get("nr", i)))
+            if isinstance(wert, list):
+                wert = ", ".join(wert)
+            wert = (wert or "").strip()
             zeilen.append(f"{i}. {titel}: {wert or '(offen gelassen)'}")
-        auftrag = d.get("auftrag") or 0
-        projekt = d.get("projekt") or ""
-        text = (f"Meine Antworten auf die offenen Fragen von Auftrag {auftrag}"
-                f"{' im Projekt ' + projekt if projekt else ''}. Gib sie als "
-                "Folgeauftrag an den Arbeiter weiter und lass ihn sie "
-                "einbauen:\n" + "\n".join(zeilen))
+
+        # Die Antworten gehoeren in den Faden des Formulars. Ist gerade ein
+        # anderer aktiv, wird erst gewechselt -- dieselbe Schlange, also
+        # garantiert vor dem Zuruf.
+        if alt.get("faden") and alt["faden"] != gespraeche.aktiv():
+            self.schlange.put_nowait(("faden", "wechseln", alt["faden"]))
+
+        if d.get("zweck") == "rueckfrage":
+            text = (f"Meine Antworten auf „{d.get('titel') or alt.get('text')}“:\n"
+                    + "\n".join(zeilen))
+        else:
+            auftrag = d.get("auftrag") or 0
+            projekt = d.get("projekt") or ""
+            text = (f"Meine Antworten auf die offenen Fragen von Auftrag {auftrag}"
+                    f"{' im Projekt ' + projekt if projekt else ''}. Gib sie als "
+                    "Folgeauftrag an den Arbeiter weiter und lass ihn sie "
+                    "einbauen:\n" + "\n".join(zeilen))
+        self._formular_zuruf = text
         await self._zuruf_vom_netz(text, geraet)
+
+    def _rueckfragen_schliessen(self, gesagt: str) -> None:
+        """Offene Rueckfrage-Formulare zu, wenn anders geantwortet wurde.
+
+        Wer per Stimme oder freiem Text antwortet, waehrend Sarvis' Fragen
+        noch als Formular daliegen, hat sie damit beantwortet. Das Formular
+        bleibt sonst ewig ausfuellbar und meint etwas, das schon erledigt
+        ist. Auftrags-Formulare bleiben offen: Die beantwortet man oft erst
+        spaeter.
+        """
+        if gesagt == self.__dict__.pop("_formular_zuruf", None):
+            return
+        try:
+            offene = gespraeche.offene_formulare(gespraeche.aktiv())
+        except Exception:
+            return
+        for e in offene:
+            d = dict(e.get("daten") or {})
+            if d.get("zweck") != "rueckfrage":
+                continue
+            d["offen"] = False
+            d["erledigt"] = "anders"
+            self._aendern(e["id"], None, d)
 
     async def _oberflaeche_da(self, geraet: str) -> None:
         """Eine Oberflaeche ist neu verbunden: Sie braucht die Fadenliste."""
@@ -1231,6 +1286,7 @@ class Sarvis:
         # neue Karten im Verlauf.
         self._zug_karten = {}
         if als_eintrag is None:
+            self._rueckfragen_schliessen(gesagt)
             self._eintragen("du", "text", gesagt)
         else:
             # Eine geplante Aufgabe: Sascha hat nichts gesagt, also keine
@@ -1619,6 +1675,7 @@ class Sarvis:
     async def _auto_vom_netz(self, an: bool, geraet: str) -> None:
         """Die Oberflaeche steckt jetzt im Auto -- oder eben nicht mehr."""
         self.horcher.im_auto(an, geraet)
+        anzeige_modul.auto_setzen(an)
 
     async def _strom_vom_netz(self, daten: str, rate: int, geraet: str) -> None:
         """Ein Stueck Dauerstrom fuers Weckwort.

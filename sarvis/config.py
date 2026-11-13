@@ -1150,6 +1150,10 @@ WERKZEUG_STUFEN = {
     # (bericht._ziel prueft das zweifach).
     "blatt_zeigen":       "still",
     "blatt_weg":          "still",
+    # Seit 13.11.2026: Fragen zum Anhaken legen nur etwas hin, Lesen
+    # aendert nichts.
+    "fragen_stellen":     "still",
+    "blatt_lesen":        "still",
     "dokument_erstellen": "still",
     # Name -> still (Eingang/Ablage), Pfad -> schutz.versenden_stufe.
     # Siehe hirn._pfadstufe.
