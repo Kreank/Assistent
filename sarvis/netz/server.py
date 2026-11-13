@@ -409,6 +409,17 @@ class Endpunkt:
 
         await asyncio.to_thread(formulare_ergaenzen)
 
+        def begleit_ergaenzen():
+            # mime/seiten/pdf/vorschau aus netz/begleiter.py (13.11.2026).
+            from . import begleiter
+            for d in liste:
+                if d["sorte"] in ("html", "datei"):
+                    for k, v in begleiter.felder(d["schluessel"]).items():
+                        if k != "bytes" or not d.get("bytes"):
+                            d[k] = v
+
+        await asyncio.to_thread(begleit_ergaenzen)
+
         def von_dir():
             try:
                 alle = sorted((d for d in config.EINGANG.glob("*")
@@ -455,8 +466,12 @@ class Endpunkt:
             blaetter.FRIST_VERSAND_TAGE if zeile["sorte"] == "datei" else 0.0)
         if not bis:
             return self._json({"fehler": "liegt nicht mehr da"}, 410)
-        return self._json({"sorte": zeile["sorte"], "titel": zeile["titel"],
-                           "datei": zeile["datei"], "bytes": zeile["bytes"],
+        from . import begleiter
+        extra = await asyncio.to_thread(begleiter.auffrischen, schl)
+        return self._json({**{k: v for k, v in extra.items() if k != "bytes"},
+                           "sorte": zeile["sorte"], "titel": zeile["titel"],
+                           "datei": zeile["datei"],
+                           "bytes": zeile["bytes"] or extra.get("bytes", 0),
                            "adresse": blaetter.adresse(schl), "bis": bis})
 
     _HAKEN = re.compile(r"^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])")

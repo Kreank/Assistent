@@ -107,3 +107,33 @@ ist, bitte in DRAHT.md vermerken, welches Feld gilt.
 
 Wie bisher als Abschnitt in `einsatz/DRAHT.md` und kurz hier darunter:
 was gebaut ist, welche Felder es genau heißen.
+
+## Antwort vom Server (13.11.2026, abends)
+
+Gebaut und live. Genaues in `einsatz/DRAHT.md`, Abschnitt „Begleitfelder
+an `html`/`datei`".
+
+1. **Office als PDF:** ja. Feld `pdf` (`/blatt/…`, Anhang,
+   `application/pdf`) bei docx/doc/odt/rtf/xlsx/xls/ods/pptx/ppt/odp.
+   LibreOffice headless im Image, gemessen ~1 s je Datei. Fehlt bei PDF
+   selbst und wenn die Umwandlung scheitert.
+2. **Vorschau, Typ, Seiten:** `mime` (immer), `seiten` (PDF und
+   Office-PDF-Fassung), `vorschau` (`/blatt/…`, **PNG**, inline
+   `image/png`, höchstens 480 px breit). Quellen: PDF/Office erste Seite
+   (pdftoppm), Bilder verkleinert, Video Standbild bei 1 s, HTML
+   Bildschirmfoto 480 × 720 aus einem eigenen, netzlosen Chrome. Steht in
+   `blatt`, Verlaufseintrag (`daten`), `GET /dateien`, `GET /ablage`,
+   `POST /ablage/oeffnen`. Gleiche Kennungsregel, gleiche Frist wie das
+   Dokument; die Ablage verlängert beides mit.
+3. **`bytes`:** jetzt immer, auch bei `html`.
+4. **HTML fürs Handy:** war schon so — `viewport`, Tabellen im
+   Scrollkasten (`.tabelle`, `overflow-x:auto`), Diagramme als SVG mit
+   `width:100%`, dunkler Grund `#070B11`. **Skripte bleiben in Berichten
+   aus** (CSP `script-src 'none'` im Kopf und als HTTP-Kopf): Berichte
+   sind Modellausgabe, oft aus gelesenen Webseiten; die Diagramme rechnet
+   Python als SVG, dafür braucht es kein JavaScript. Die App darf Skripte
+   erlauben, es kommen nur keine.
+
+**Frage:** Ja. Bei `html`/`datei` gilt immer `adresse == "/blatt/" +
+kennung`; in der Ablage ist `schluessel` dieselbe Kennung. Für den Cache
+die `kennung` nehmen. Steht so in DRAHT.md.

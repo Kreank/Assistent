@@ -512,7 +512,9 @@ def _blaetter_uebernehmen() -> None:
     except Exception:
         return
     for kennung, e in alle.items():
-        if not isinstance(e, dict) or abgelegt(kennung):
+        if not isinstance(e, dict) or e.get("eltern") or abgelegt(kennung):
+            # Unterblaetter (PDF-Fassung, Vorschau) gehoeren zu ihrem
+            # Dokument und sind kein eigenes Stueck der Ablage.
             continue
         typ = str(e.get("typ") or "")
         pfad = str(e.get("pfad") or "")

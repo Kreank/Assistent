@@ -317,6 +317,11 @@ class Anzeige:
     def _senden(self, **felder) -> None:
         if self._traeger is None:
             return
+        # Begleitfelder am Blatt (netz/begleiter.py) FEHLEN, wenn es sie
+        # nicht gibt -- kein null. So steht es in DRAHT.md.
+        for leer in ("mime", "seiten", "pdf", "vorschau"):
+            if leer in felder and felder[leer] is None:
+                del felder[leer]
         self._traeger.senden(felder)
 
     def fragen(self, art: str, sekunden: float = 8.0, **felder):
@@ -416,8 +421,12 @@ class Anzeige:
 
     def blatt(self, kennung: str, sorte: str = "markdown", titel: str = "",
               adresse: str = "", inhalt: str = "", datei: str = "",
-              bytes_: int = 0, sekunden: float = 0.0) -> None:
+              bytes_: int = 0, sekunden: float = 0.0,
+              extra: dict | None = None) -> None:
         """Etwas zum Lesen zeigen -- groesser als eine Kachel.
+
+        extra traegt die Begleitfelder aus netz/begleiter.py (mime,
+        seiten, pdf, vorschau, bytes) -- alle optional, fehlende fehlen.
 
         Drei Sorten, ein Begriff (siehe netz/blaetter.py):
 
@@ -442,16 +451,21 @@ class Anzeige:
             # Fehler in Sarvis und ist einer in der Uebertragung.
             text = text[:MARKDOWN_MAX] + "\n\n*(gekürzt — der Rest passt "
             text += "nicht auf ein Blatt)*"
+        zusatz = {k: v for k, v in (extra or {}).items()
+                  if k in ("mime", "seiten", "pdf", "vorschau")}
+        groesse = int(bytes_ or (extra or {}).get("bytes") or 0)
         self._senden(art="blatt", kennung=str(kennung),
                      sorte=str(sorte or "markdown"), titel=str(titel or ""),
                      adresse=str(adresse or ""), inhalt=text,
-                     datei=str(datei or ""), bytes=int(bytes_ or 0),
-                     sekunden=round(float(sekunden), 1))
+                     datei=str(datei or ""), bytes=groesse,
+                     sekunden=round(float(sekunden), 1),
+                     mime=zusatz.get("mime"), seiten=zusatz.get("seiten"),
+                     pdf=zusatz.get("pdf"), vorschau=zusatz.get("vorschau"))
         _mitschreiben("blatt", {
             "kennung": str(kennung), "sorte": str(sorte or "markdown"),
             "titel": str(titel or ""), "adresse": str(adresse or ""),
             "inhalt": text, "datei": str(datei or ""),
-            "bytes": int(bytes_ or 0)})
+            "bytes": groesse, **zusatz})
 
     def formular(self, kennung: str, titel: str, fragen: list,
                  auftrag: int = 0, projekt: str = "",

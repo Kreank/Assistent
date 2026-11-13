@@ -155,9 +155,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return antwort(f"Bereitstellen ging nicht: {e}", True)
 
         groesse = pfad.stat().st_size
+        from ..netz import begleiter
+        extra = await asyncio.to_thread(begleiter.anreichern, kennung)
         sicht.blatt(kennung, sorte="datei", titel=titel,
                     adresse=blaetter.adresse(kennung), datei=name,
-                    bytes_=groesse)
+                    bytes_=groesse, extra=extra)
         if leuchten:
             leuchten("Dateien")
         if protokoll is not None:

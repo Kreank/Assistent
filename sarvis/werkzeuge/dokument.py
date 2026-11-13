@@ -376,9 +376,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     f"bereitstellen: {e}"}], "is_error": True}
 
         groesse = ziel.stat().st_size
+        from ..netz import begleiter
+        extra = await asyncio.to_thread(begleiter.anreichern, kennung)
         sicht.blatt(kennung, sorte="datei", titel=titel,
                     adresse=blaetter.adresse(kennung),
-                    datei=f"{stamm}{endung}", bytes_=groesse)
+                    datei=f"{stamm}{endung}", bytes_=groesse, extra=extra)
         if leuchten:
             # "Dateien" und nicht "Websuche" wie bei der Seite: Hier
             # entsteht wirklich eine Datei, die danach liegen bleibt.

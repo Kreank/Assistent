@@ -247,6 +247,23 @@ RUN set -eux; \
     ln -s /opt/blender/blender /usr/local/bin/blender; \
     ffmpeg -version | head -1
 
+# --- Dokumente fuer die App (Wunsch 13.11.2026) ---------------------------
+#
+# netz/begleiter.py legt zu jeder Office-Datei eine PDF-Fassung an
+# (LibreOffice headless) und zu PDFs eine Miniatur der ersten Seite
+# (pdftoppm). Die -nogui-Pakete ziehen kein X/Java nach. Carlito/Caladea
+# sind metrisch gleich zu Calibri/Cambria -- ohne sie bricht jede
+# Word-Datei aus Office an anderen Stellen um als beim Absender.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        libreoffice-writer-nogui libreoffice-calc-nogui \
+        libreoffice-impress-nogui poppler-utils \
+        fonts-dejavu-core fonts-liberation2 \
+        fonts-crosextra-carlito fonts-crosextra-caladea; \
+    rm -rf /var/lib/apt/lists/*; \
+    soffice --version; pdftoppm -v 2>&1 | head -1
+
 # --- Wer hier arbeitet ----------------------------------------------------
 #
 # Nicht root. Sarvis schreibt in /srv/data/sarvis und -- wenn er an

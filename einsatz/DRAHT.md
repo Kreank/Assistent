@@ -133,8 +133,9 @@ Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
 | `freigabe` | `text`, `sekunden` | was gerade ohne Rückfrage durchgeht |
 | `kachel` | `name`, `sorte`, `kopf`, `gross`, `stand`, `punkte`, `form`, `spalten`, `weggelassen`, `sekunden` | eine Datenkachel |
 | `kachel_weg` | `name` | Kachel ausblenden |
-| `blatt` | `kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`, `sekunden` | etwas zum Lesen |
+| `blatt` | `kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`, `sekunden`; optional `mime`, `seiten`, `pdf`, `vorschau` | etwas zum Lesen |
 | `blatt_weg` | `kennung` | Blatt zuklappen |
+| `geplant` | `eintraege` | Timer und geplante Aufgaben — immer die ganze Liste, Form wie `GET /geplant` |
 | `ton` | `daten`, `rate`, `runde` | gesprochenes Audio, satzweise |
 | `ton_stopp` | `runde` | sofort still sein |
 | `radio` | `url`, `name` | diesen Sender abspielen — Adresse, kein Ton |
@@ -246,6 +247,38 @@ dieselbe heißt dasselbe Blatt mit neuem Inhalt, nicht zwei
 `/blatt/` (Ausnahme nur `seite`, siehe oben). Nie eine fremde Adresse — und eine Oberfläche, die etwas
 anderes bekommt, zeigt es nicht an. Der Draht ist authentifiziert, was
 über ihn kommt, ist trotzdem aus Modellausgabe gebaut.
+
+### Begleitfelder an `html`/`datei` (seit 13.11.2026)
+
+Auf Wunsch der Android-App (`WUNSCH-APP-DOKUMENTE-2026-11-13.md`). Sie
+stehen **gleich benannt** im `blatt`, in seinem Verlaufseintrag
+(`daten`), in `GET /dateien` (`von_sarvis`), in `GET /ablage`
+(`eintraege`) und in `POST /ablage/oeffnen`:
+
+| Feld | Inhalt | wann |
+|---|---|---|
+| `bytes` | Größe der ausgelieferten Datei | **immer**, auch bei `html` |
+| `mime` | echter Typ, z. B. `application/pdf`, `text/html`, `image/jpeg` | immer |
+| `seiten` | Seitenzahl (Zahl) | PDF und Office mit PDF-Fassung |
+| `pdf` | `/blatt/<k>` der PDF-Fassung | nur Office (`docx`, `doc`, `odt`, `rtf`, `xlsx`, `xls`, `ods`, `pptx`, `ppt`, `odp`) |
+| `vorschau` | `/blatt/<k>` eines **PNG**, höchstens 480 px breit | PDF/Office: erste Seite · Bild: verkleinert · Video: Standbild bei 1 s · `html`: Bildschirmfoto 480 × 720 aus einem eigenen, netzlosen Chrome |
+
+- **Jedes Feld außer `bytes`/`mime` kann fehlen** (Umwandlung ging nicht,
+  Art ohne Vorschau, z. B. ZIP, CSV, Text). Dann Typ-Symbol, kein Fehler.
+  Ist die Datei selbst ein PDF, gibt es kein `pdf`.
+- `pdf` und `vorschau` sind eigene Blätter: 192 Bit Zufall, **dieselbe
+  Frist wie das Dokument**, `POST /ablage/oeffnen` verlängert sie mit
+  (oder baut sie neu, wenn sie schon weggeräumt waren). Sie tauchen nie
+  als eigener Eintrag in `/dateien` oder in der Ablage auf.
+- `pdf` kommt als Anhang (`Content-Disposition: attachment`, Typ
+  `application/pdf`), `vorschau` inline als `image/png` — taugt also auch
+  für ein `<img>`.
+- „Öffnen mit …", „Teilen", „In Downloads speichern" nehmen weiter
+  `adresse` (das Original).
+- **Kennung = letztes Stück der Adresse.** Bei `blatt`-Einträgen der
+  Sorte `html`/`datei` gilt immer `adresse == "/blatt/" + kennung`, und in
+  der Ablage ist `schluessel` dieselbe Kennung. Für den Cache der App
+  also die `kennung` nehmen.
 
 Die Adresse trägt keinen Geräteschlüssel, weil sie keinen tragen kann:
 Ein `<iframe>` schickt keine eigenen Kopfzeilen, ein Download-Knopf
@@ -827,7 +860,8 @@ X-Sarvis-Schluessel: <Geräteschlüssel>
   "von_sarvis": [
     {"kennung": "…", "titel": "Angebot Müller", "datei": "Angebot.pdf",
      "adresse": "/blatt/…", "bytes": 48211, "seit": 1794350000.1,
-     "bis": 1796942000.1}
+     "bis": 1796942000.1, "mime": "application/pdf", "seiten": 3,
+     "vorschau": "/blatt/…"}
   ],
   "von_dir": [
     {"datei": "2026-11-10-2205-Plan.pdf", "bytes": 226503,
@@ -963,7 +997,7 @@ nur in der Wechselsekunde vor).
 | `sarvis` | `text` | die ganze Antwort, wie gesprochen | `{}`, oder `unterbrochen: true`, wenn reingeredet wurde (dann nur der Teil bis dahin) |
 | `sarvis` | `meldung` | von selbst gesagt: Timer, fertiger Auftrag | `{}` |
 | `sarvis` | `frage` | die Rückfrage vor einer Handlung | `offen`, `werkzeug`; geschlossen zusätzlich `entscheidung` (`ja`·`nein`·`anders`·`abgebrochen`) und `antwort` (Wortlaut) |
-| `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`) |
+| `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`, dazu die Begleitfelder `mime`, `seiten`, `pdf`, `vorschau`, soweit vorhanden) |
 | `sarvis` | `auftrag` | Statuskarte eines Hintergrundauftrags, mehrzeilig (Laufzeit, Aufgabe, zuletzt erledigt, als Nächstes) — **dieselbe `id` wird laufend ersetzt** | `nummer`, `zustand` (`läuft`, `fertig`, `gestoppt`, `abgebrochen`), `projekt`; seit 13.11.2026 zusätzlich `seit` (Start, Unix-Sekunden), `schritte` (Modellzüge bisher), `pensum` (Höchstzahl, derzeit 250) — **können fehlen**, dann unbestimmter Balken |
 | `sarvis` | `formular` | Titel | `kennung`, `fragen` (Liste aus `nr`, `titel`, `frage`), `auftrag`, `projekt`, `offen`, nach dem Abschicken `antworten` (`{"<nr>": "Text"}`) |
 | `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
@@ -1119,7 +1153,8 @@ GET /ablage                 (optional ?sorte=markdown|html|datei)
 POST /ablage/oeffnen        { "schluessel": "…" }
 → markdown: { "sorte": "markdown", "titel": "…", "inhalt": "…" }
 → sonst:    { "sorte": "html|datei", "titel", "datei", "bytes",
-              "adresse": "/blatt/…", "bis": 1796984619.1 }
+              "adresse": "/blatt/…", "bis": 1796984619.1,
+              "mime", "seiten"?, "pdf"?, "vorschau"? }
 → 404 unbekannt · 410 {"fehler": "liegt nicht mehr da"}
 ```
 

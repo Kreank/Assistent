@@ -1097,8 +1097,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 return {"content": [{"type": "text", "text":
                         f"Die Seite ist geschrieben, aber ich konnte sie "
                         f"nicht bereitstellen: {e}"}], "is_error": True}
+            # Groesse, Typ und Bildschirmfoto fuer die Karte in der App
+            # (Wunsch 13.11.2026) -- 0,3 s, laeuft im Thread.
+            from ..netz import begleiter
+            extra = await asyncio.to_thread(begleiter.anreichern, kennung)
             sicht.blatt(kennung, sorte="html", titel=titel,
-                        adresse=blaetter.adresse(kennung))
+                        adresse=blaetter.adresse(kennung),
+                        bytes_=ziel.stat().st_size,
+                        extra=extra)
             # Ueber Netz gibt es keine Rueckfrage ans Fenster, aber
             # etwas Besseres: Der Traeger weiss, wie viele Oberflaechen
             # verbunden sind. Null heisst, es sieht gerade niemand hin

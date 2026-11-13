@@ -66,6 +66,7 @@ import json
 import logging
 import mimetypes
 import secrets
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote
@@ -108,7 +109,15 @@ TYPEN = {
     # HTML- oder SVG-Datei vom Server wuerde sonst auf unserer Domain
     # ausgefuehrt.
     "beliebig": ("application/octet-stream", True),
+    # Miniatur zu einem Dokument (netz/begleiter.py). Inline, damit ein
+    # <img> sie zeigen kann; gebaut wird sie nur vom Server selbst.
+    "vorschau": ("image/png", False),
 }
+
+# Lesen-Aendern-Schreiben am Verzeichnis kommt aus mehreren Threads
+# (Werkzeuge per to_thread, Begleiter, Ablage). Ohne Sperre gewinnt der
+# letzte Schreiber, und ein frisch hingelegtes Blatt ist wieder weg.
+_SPERRE = threading.RLock()
 
 # Was aus dem Server verschickt wurde, bleibt laenger abrufbar als ein
 # Bericht: Man laedt es nicht immer sofort herunter, und die App fuehrt
@@ -194,6 +203,12 @@ def hinlegen(pfad, typ: str = "html", titel: str = "",
     if typ not in TYPEN:
         raise ValueError(f"Unbekannte Blattsorte: {typ!r}")
     kennung = secrets.token_urlsafe(24)
+    with _SPERRE:
+        _hinlegen(kennung, datei, typ, titel, dateiname, tage)
+    return kennung
+
+
+def _hinlegen(kennung, datei, typ, titel, dateiname, tage) -> None:
     alle = _aufraeumen(_laden())
     alle[kennung] = {
         "pfad": str(datei),
@@ -206,7 +221,15 @@ def hinlegen(pfad, typ: str = "html", titel: str = "",
         "bis": time.time() + (float(tage) or FRIST_TAGE) * 86400.0,
     }
     _schreiben(alle)
-    return kennung
+
+
+def markieren(kennung: str, felder: dict) -> None:
+    """Zusatzfelder an einen Eintrag haengen (Begleiter: extra, eltern)."""
+    with _SPERRE:
+        alle = _laden()
+        if isinstance(alle.get(kennung), dict):
+            alle[kennung].update(felder)
+            _schreiben(alle)
 
 
 def erneuern(kennung: str, pfad, typ: str, titel: str = "",
@@ -224,6 +247,11 @@ def erneuern(kennung: str, pfad, typ: str, titel: str = "",
     datei = Path(pfad)
     if typ not in TYPEN or not datei.is_file():
         return 0.0
+    with _SPERRE:
+        return _erneuern(kennung, datei, typ, titel, dateiname, tage)
+
+
+def _erneuern(kennung, datei, typ, titel, dateiname, tage) -> float:
     alle = _aufraeumen(_laden())
     alt = alle.get(kennung) if isinstance(alle.get(kennung), dict) else {}
     bis = max(float(alt.get("bis") or 0),
@@ -234,6 +262,10 @@ def erneuern(kennung: str, pfad, typ: str, titel: str = "",
         "datei": str(dateiname or alt.get("datei") or datei.name),
         "seit": float(alt.get("seit") or time.time()), "bis": bis,
     }
+    # Begleitfelder (netz/begleiter.py) ueberleben die Verlaengerung.
+    for feld in ("extra", "eltern"):
+        if feld in alt:
+            alle[kennung][feld] = alt[feld]
     _schreiben(alle)
     return bis
 
@@ -314,7 +346,7 @@ def dateien() -> list:
     """
     liste = []
     for kennung, e in _aufraeumen(_laden()).items():
-        if e.get("typ") == "html":
+        if e.get("typ") == "html" or e.get("eltern"):
             continue
         datei = Path(e.get("pfad") or "")
         try:
@@ -324,7 +356,9 @@ def dateien() -> list:
         liste.append({"kennung": kennung, "titel": e.get("titel") or "",
                       "datei": e.get("datei") or datei.name,
                       "adresse": adresse(kennung), "bytes": groesse,
-                      "seit": e.get("seit") or 0, "bis": e.get("bis") or 0})
+                      "seit": e.get("seit") or 0, "bis": e.get("bis") or 0,
+                      **{k: v for k, v in (e.get("extra") or {}).items()
+                         if k != "bytes"}})
     liste.sort(key=lambda x: x["seit"], reverse=True)
     return liste
 
