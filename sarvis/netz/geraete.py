@@ -35,6 +35,8 @@ import hashlib
 import json
 import os
 import secrets
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -48,6 +50,15 @@ LAENGE = 32
 # Wo die Abdruecke liegen. Unter DATEN, weil es Zustand ist und kein
 # Quelltext, und weil DATEN auf einer eigenen Platte liegt.
 DATEI = config.DATEN / "geraete.json"
+
+# Eine Sperre fuer jedes Lesen-Aendern-Schreiben. WARUM: pruefen()
+# laeuft per asyncio.to_thread, und beim Verbinden fragt die App mehrere
+# Endpunkte gleichzeitig ab (Draht, /dateien, /verlauf ...). Am
+# 13.11.2026 schrieben zwei Threads gleichzeitig in dieselbe
+# Nebendatei -- heraus kam ein ueberzaehliges "]" am Ende, json.load scheiterte, _laden()
+# lieferte [] und JEDER Schluessel galt als falsch (HTTP 401 ueberall,
+# nur der schon offene Draht lief weiter).
+_SPERRE = threading.Lock()
 
 
 def _abdruck(schluessel: str) -> str:
@@ -70,13 +81,20 @@ def _sichern(geraete: list[dict]) -> None:
     verraet, wie viele Geraete es gibt und wann sie zuletzt da waren.
     """
     DATEI.parent.mkdir(parents=True, exist_ok=True)
-    neben = DATEI.with_suffix(".json.neu")
-    with neben.open("w", encoding="utf-8") as f:
-        json.dump(geraete, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.chmod(neben, 0o600)
-    neben.replace(DATEI)
+    # Eigene Nebendatei je Aufruf (nicht ein fester Name): Selbst wenn
+    # doch einmal zwei schreiben, zerschreibt keiner den anderen.
+    fd, name = tempfile.mkstemp(dir=DATEI.parent, prefix="geraete.", suffix=".neu")
+    neben = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(geraete, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(neben, 0o600)
+        neben.replace(DATEI)
+    except BaseException:
+        neben.unlink(missing_ok=True)
+        raise
 
 
 def anlegen(name: str) -> str:
@@ -87,14 +105,15 @@ def anlegen(name: str) -> str:
     """
     name = (str(name or "").strip() or "namenlos")[:40]
     schluessel = secrets.token_urlsafe(LAENGE)
-    geraete = _laden()
-    geraete.append({
-        "name": name,
-        "abdruck": _abdruck(schluessel),
-        "angelegt": time.time(),
-        "zuletzt": 0.0,
-    })
-    _sichern(geraete)
+    with _SPERRE:
+        geraete = _laden()
+        geraete.append({
+            "name": name,
+            "abdruck": _abdruck(schluessel),
+            "angelegt": time.time(),
+            "zuletzt": 0.0,
+        })
+        _sichern(geraete)
     return schluessel
 
 
@@ -109,19 +128,20 @@ def pruefen(schluessel: str) -> str | None:
     if not schluessel:
         return None
     gesucht = _abdruck(str(schluessel))
-    geraete = _laden()
-    treffer = None
-    for i, g in enumerate(geraete):
-        if secrets.compare_digest(str(g.get("abdruck", "")), gesucht):
-            treffer = i
-    if treffer is None:
-        return None
-    geraete[treffer]["zuletzt"] = time.time()
-    try:
-        _sichern(geraete)
-    except OSError:
-        pass  # Der Zeitstempel ist Komfort, keine Bedingung
-    return str(geraete[treffer].get("name") or "namenlos")
+    with _SPERRE:
+        geraete = _laden()
+        treffer = None
+        for i, g in enumerate(geraete):
+            if secrets.compare_digest(str(g.get("abdruck", "")), gesucht):
+                treffer = i
+        if treffer is None:
+            return None
+        geraete[treffer]["zuletzt"] = time.time()
+        try:
+            _sichern(geraete)
+        except OSError:
+            pass  # Der Zeitstempel ist Komfort, keine Bedingung
+        return str(geraete[treffer].get("name") or "namenlos")
 
 
 def liste() -> list[dict]:
@@ -138,9 +158,10 @@ def widerrufen(name: str) -> int:
     Handy" eine Frage ist, die man beantworten kann, "welcher Abdruck"
     nicht.
     """
-    geraete = _laden()
-    bleiben = [g for g in geraete if g.get("name") != name]
-    weg = len(geraete) - len(bleiben)
-    if weg:
-        _sichern(bleiben)
+    with _SPERRE:
+        geraete = _laden()
+        bleiben = [g for g in geraete if g.get("name") != name]
+        weg = len(geraete) - len(bleiben)
+        if weg:
+            _sichern(bleiben)
     return weg
