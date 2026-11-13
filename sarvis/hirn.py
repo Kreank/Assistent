@@ -113,7 +113,13 @@ class Hirn:
                 # fehlen deshalb absichtlich -- sie fallen auf den Modus
                 # "default" durch und landen dadurch bei can_use_tool.
                 allowed_tools=self._stille_werkzeuge(),
-                disallowed_tools=["NotebookEdit"],
+                # Die Planungswerkzeuge von Claude Code (CronCreate & Co.)
+                # gehen hart weg: Sie liefen ohne Rueckfrage durch, ihre
+                # Dauerauftraege verfallen nach sieben Tagen und haengen an
+                # einer CLI-Sitzung. Am 13.11.2026 legte Sarvis so das
+                # taegliche Sicherheitsbriefing an. Geplant wird nur noch
+                # ueber timer_stellen mit 'auftrag' (werkzeuge/zeit.py).
+                disallowed_tools=["NotebookEdit", *config.PLANUNG_GESPERRT],
                 permission_mode="default",
                 can_use_tool=self.darf_ich,
                 # Nichts aus dem Projekt laden. Der Werkzeugserver laeuft

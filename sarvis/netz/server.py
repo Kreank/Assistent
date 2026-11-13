@@ -99,6 +99,10 @@ class Endpunkt:
         Alle werden in der Ereignisschleife von Sarvis gerufen.
         """
         self.faden_an = faden_an
+        # Seit 13.11.2026, von main.py gesetzt: der Wecker (GET /geplant)
+        # und wer erfahren muss, dass Sascha etwas vergessen liess.
+        self.wecker = None
+        self.vergessen_an = None
         self.da_an = da_an
         self.zuruf_an = zuruf_an
         self.sprache_an = sprache_an
@@ -305,6 +309,80 @@ class Endpunkt:
         wort = anfrage.query.get("q", "")
         return self._json({"treffer": await asyncio.to_thread(
             gespraeche.suchen, wort)})
+
+    # --- Geplant und Gedaechtnis (seit 13.11.2026) -----------------------
+    #
+    # Loeschen und Pausieren sind Handlungen des Menschen in seiner
+    # eigenen App -- ohne Rueckfrage. Vertrag: einsatz/DRAHT.md.
+
+    @staticmethod
+    async def _json_koerper(anfrage: web.Request) -> dict:
+        try:
+            k = await anfrage.json()
+        except Exception:
+            return {}
+        return k if isinstance(k, dict) else {}
+
+    async def _geplant(self, anfrage: web.Request) -> web.Response:
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        if self.wecker is None:
+            return self._json({"eintraege": []})
+        return self._json({"eintraege": self.wecker.liste()})
+
+    async def _geplant_nummer(self, anfrage):
+        k = await self._json_koerper(anfrage)
+        try:
+            return k, int(k.get("nummer"))
+        except (TypeError, ValueError):
+            return k, None
+
+    async def _geplant_loeschen(self, anfrage: web.Request) -> web.Response:
+        wer = await self._wer(anfrage)
+        if wer is None:
+            return self._kein_zugang()
+        _, nummer = await self._geplant_nummer(anfrage)
+        if nummer is None:
+            return self._json({"fehler": "nummer fehlt"}, 400)
+        if self.wecker is None or not self.wecker.abbrechen(nummer):
+            return self._json({"fehler": "diesen Eintrag gibt es nicht"}, 404)
+        log.info("geplant %s geloescht von %s", nummer, wer)
+        return self._json({"gut": True})
+
+    async def _geplant_pausieren(self, anfrage: web.Request) -> web.Response:
+        wer = await self._wer(anfrage)
+        if wer is None:
+            return self._kein_zugang()
+        k, nummer = await self._geplant_nummer(anfrage)
+        if nummer is None or "an" not in k:
+            return self._json({"fehler": "nummer und an noetig"}, 400)
+        if self.wecker is None or not self.wecker.pausieren(nummer, bool(k["an"])):
+            return self._json({"fehler": "diesen Eintrag gibt es nicht"}, 404)
+        log.info("geplant %s pausiert=%s von %s", nummer, bool(k["an"]), wer)
+        return self._json({"gut": True})
+
+    async def _gedaechtnis(self, anfrage: web.Request) -> web.Response:
+        if await self._wer(anfrage) is None:
+            return self._kein_zugang()
+        from ..werkzeuge import erinnern
+        return self._json(await asyncio.to_thread(erinnern.fuer_app))
+
+    async def _gedaechtnis_vergessen(self, anfrage: web.Request) -> web.Response:
+        wer = await self._wer(anfrage)
+        if wer is None:
+            return self._kein_zugang()
+        k = await self._json_koerper(anfrage)
+        kennung = str(k.get("id") or "")
+        if not kennung:
+            return self._json({"fehler": "id fehlt"}, 400)
+        from ..werkzeuge import erinnern
+        weg = await asyncio.to_thread(erinnern.per_kennung_vergessen, kennung)
+        if weg is None:
+            return self._json({"fehler": "diesen Eintrag gibt es nicht"}, 404)
+        log.info("gedaechtnis %s vergessen von %s", kennung, wer)
+        if self.vergessen_an is not None:
+            self.vergessen_an(weg)
+        return self._json({"gut": True})
 
     async def _ablage(self, anfrage: web.Request) -> web.Response:
         """Was Sarvis erzeugt hat -- und was du ihm geschickt hast."""
@@ -652,6 +730,11 @@ class Endpunkt:
         app.router.add_get("/verlauf", self._verlauf)
         app.router.add_get("/suche", self._suche)
         app.router.add_get("/ablage", self._ablage)
+        app.router.add_get("/geplant", self._geplant)
+        app.router.add_post("/geplant/loeschen", self._geplant_loeschen)
+        app.router.add_post("/geplant/pausieren", self._geplant_pausieren)
+        app.router.add_get("/gedaechtnis", self._gedaechtnis)
+        app.router.add_post("/gedaechtnis/vergessen", self._gedaechtnis_vergessen)
         app.router.add_post("/ablage/oeffnen", self._ablage_oeffnen)
         app.router.add_get("/push/schluessel", self._push_schluessel)
         app.router.add_post("/push/abo", self._push_abo)

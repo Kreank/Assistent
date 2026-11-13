@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from claude_agent_sdk import (
+    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     PermissionResultAllow,
@@ -380,6 +381,9 @@ class Auftrag:
     # aber gegen "main" verglichen -- git brach mit "ambiguous argument"
     # ab und jeder unterbrochene Auftrag meldete "noch kein Commit".
     basis: str = ""
+    # Modellzuege in diesem Lauf (fuer den Fortschrittsbalken der App).
+    # Zaehlt ab dem letzten Start/Fortsetzen -- das Pensum auch.
+    schritte: int = 0
 
     def dauer(self) -> int:
         ende = self.beendet or datetime.now()
@@ -983,7 +987,9 @@ class Werkstatt:
             if schluss:
                 zeilen.append(schluss)
             anzeige_modul.aktuelle().auftrag_stand(
-                auftrag.nummer, "\n".join(zeilen), zustand, auftrag.projekt)
+                auftrag.nummer, "\n".join(zeilen), zustand, auftrag.projekt,
+                seit=auftrag.begonnen.timestamp(),
+                schritte=auftrag.schritte, pensum=config.AUFTRAG_ZUEGE)
         except Exception as e:
             print(f"  (Auftragsstand nicht gezeigt: {e})")
 
@@ -997,6 +1003,8 @@ class Werkstatt:
                 model=config.MODELL,
                 system_prompt=ARBEITER_PROMPT,
                 cwd=str(auftrag.ordner),
+                # Kein Arbeiter plant Dinge fuer spaeter -- siehe hirn.py.
+                disallowed_tools=list(config.PLANUNG_GESPERRT),
                 allowed_tools=[],                 # nichts vorab genehmigen --
                 can_use_tool=self._wachhund(auftrag.ordner),   # alles prüfen
                 permission_mode="default",
@@ -1031,7 +1039,16 @@ class Werkstatt:
                 )
             letzter = ""
             schluss = None
+            auftrag.schritte = 0
+            # Nach message_id zaehlen: Eine Modellantwort mit Text und
+            # Werkzeugaufruf kommt als mehrere AssistantMessage an.
+            gezaehlt: set = set()
             async for nachricht in klient.receive_response():
+                if isinstance(nachricht, AssistantMessage):
+                    mid = getattr(nachricht, "message_id", None) or id(nachricht)
+                    if mid not in gezaehlt:
+                        gezaehlt.add(mid)
+                        auftrag.schritte += 1
                 if hasattr(nachricht, "content"):
                     for block in getattr(nachricht, "content", []) or []:
                         if isinstance(block, TextBlock) and block.text.strip():

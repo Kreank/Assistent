@@ -158,6 +158,12 @@ def zustand_zeile(wecker) -> str:
     teile = []
     for t in offen:
         faellig = (jetzt + timedelta(seconds=t["rest"])).strftime("%H:%M")
+        if t.get("sorte") == "aufgabe":
+            # Geplante Aufgaben nur kurz -- der volle Auftragstext gehoert
+            # nicht in jeden Vorspann.
+            teile.append(f"Geplant {t['nummer']} ({t['was'][:50]}) um {faellig}"
+                         + (" pausiert" if t.get("pausiert") else ""))
+            continue
         teile.append(
             f"Timer {t['nummer']}"
             + (f" ({t['was']})" if t["was"] else "")

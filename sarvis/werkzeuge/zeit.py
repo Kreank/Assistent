@@ -10,6 +10,7 @@ import asyncio
 import calendar
 import re
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -81,11 +82,20 @@ class Wecker:
     sagen: callable            # wird gerufen, wenn ein Timer ablaeuft
     leuchten: callable = None  # Werkzeug im Kranz aufleuchten lassen
     melden: callable = None    # Windows-Benachrichtigung (titel, text)
+    # Seit 13.11.2026: Eintraege der Sorte "aufgabe" sprechen beim
+    # Faelligwerden keinen festen Satz, sondern fuehren einen Auftrag aus
+    # (ausfuehren(was, nummer) -- main.py reiht ihn als Zug des Hirns ein).
+    # Vorher legte Sarvis Daueraufgaben mit dem eingebauten CronCreate von
+    # Claude Code an, und die laufen nach sieben Tagen aus.
+    ausfuehren: callable = None
+    # Wird nach jeder Aenderung der Liste gerufen (Draht-Art "geplant").
+    geaendert: callable = None
     laufende: dict = field(default_factory=dict)
     _naechste_nummer: int = 1
 
     def stellen(self, sekunden: int, was: str,
-                wiederholt: str | None = None) -> tuple[int, datetime]:
+                wiederholt: str | None = None,
+                sorte: str = "timer") -> tuple[int, datetime]:
         # Eine Dauer meint echte Zeit, keine Wanduhrzeit: astimezone()
         # haelt den Zeitversatz von jetzt fest, dann bleibt "in einer
         # Stunde" auch in der Umstellungsnacht eine Stunde. Bewusst keine
@@ -93,22 +103,33 @@ class Wecker:
         # der Timer soll den Neustart ueberleben.
         return self.stellen_bis(
             datetime.now().astimezone() + timedelta(seconds=sekunden), was,
-            wiederholt=wiederholt)
+            wiederholt=wiederholt, sorte=sorte)
 
     def stellen_bis(self, faellig: datetime, was: str,
-                    wiederholt: str | None = None) -> tuple[int, datetime]:
+                    wiederholt: str | None = None, sorte: str = "timer",
+                    pausiert: bool = False, zuletzt: float | None = None,
+                    nummer: int | None = None) -> tuple[int, datetime]:
         """Auf einen festen Zeitpunkt stellen.
 
         Fuer genannte Uhrzeiten der genauere Weg: Der Umweg ueber eine
         Dauer schneidet zweimal Nachkommastellen ab und landet dadurch
         rund eine Sekunde zu frueh.
+
+        nummer: nur beim Neustellen eines wiederkehrenden Eintrags und
+        beim Wiederherstellen. Die Nummer bleibt dann dieselbe -- die App
+        loescht und pausiert ueber sie, und eine Nummer, die nach jedem
+        Klingeln wechselt, ist als Griff nichts wert.
         """
-        nummer = self._naechste_nummer
-        self._naechste_nummer += 1
+        if nummer is None:
+            nummer = self._naechste_nummer
+        self._naechste_nummer = max(self._naechste_nummer, nummer + 1)
 
         aufgabe = asyncio.get_running_loop().create_task(self._warten(nummer))
         self.laufende[nummer] = {"was": was, "faellig": faellig,
-                                 "aufgabe": aufgabe, "wiederholt": wiederholt}
+                                 "aufgabe": aufgabe, "wiederholt": wiederholt,
+                                 "sorte": sorte if sorte == "aufgabe" else "timer",
+                                 "pausiert": bool(pausiert),
+                                 "zuletzt": zuletzt}
         self._sichern()
         return nummer, faellig
 
@@ -155,6 +176,12 @@ class Wecker:
                 faellig = eintrag["faellig"]
                 rest = (faellig - _jetzt_wie(faellig)).total_seconds()
                 if rest <= 0:
+                    # Ein pausierter EINMALIGER Eintrag wartet, bis er
+                    # wieder an ist -- dann kommt er sofort. Ein
+                    # wiederkehrender ueberspringt nur diesen Termin.
+                    if eintrag.get("pausiert") and not eintrag.get("wiederholt"):
+                        await asyncio.sleep(1.0)
+                        continue
                     break
                 await asyncio.sleep(min(1.0, rest))
         except asyncio.CancelledError:
@@ -165,6 +192,9 @@ class Wecker:
             self._sichern()
             return
         was = eintrag["was"]
+        sorte = eintrag.get("sorte") or "timer"
+        pausiert = bool(eintrag.get("pausiert"))
+        zuletzt = eintrag.get("zuletzt") if pausiert else time.time()
 
         # Wiederkehrend? Dann sofort den naechsten stellen, noch bevor
         # gesprochen wird. Erst zu reden und dann neu zu stellen hiesse:
@@ -175,9 +205,22 @@ class Wecker:
         if wiederholt:
             self.stellen_bis(
                 self._naechster_termin(eintrag["faellig"], wiederholt),
-                was, wiederholt=wiederholt)
+                was, wiederholt=wiederholt, sorte=sorte, pausiert=pausiert,
+                zuletzt=zuletzt, nummer=nummer)
         else:
             self._sichern()
+        if pausiert:
+            print(f"  (Geplant {nummer} pausiert -- Termin übersprungen)")
+            return
+        if sorte == "aufgabe" and self.ausfuehren is not None:
+            # Kein Satz, sondern ein Zug: Das Hirn bekommt den Auftrag,
+            # als haette Sascha ihn gerade gesagt. Gesprochen und gezeigt
+            # wird, was dabei herauskommt.
+            try:
+                await self.ausfuehren(was, nummer)
+            except Exception as e:
+                print(f"  ! Geplante Aufgabe {nummer} nicht ausgeführt: {e}")
+            return
         # Erst die Benachrichtigung, dann die Stimme: Die Benachrichtigung
         # bleibt stehen, falls gerade niemand am Rechner sitzt.
         if self.melden is not None:
@@ -200,6 +243,30 @@ class Wecker:
         eintrag["aufgabe"].cancel()
         self._sichern()
         return True
+
+    def pausieren(self, nummer: int, an: bool) -> bool:
+        """Pausieren heisst: Der Eintrag bleibt, tut aber nichts."""
+        eintrag = self.laufende.get(nummer)
+        if eintrag is None:
+            return False
+        eintrag["pausiert"] = bool(an)
+        self._sichern()
+        return True
+
+    def liste(self) -> list[dict]:
+        """Fuer GET /geplant und die Draht-Art "geplant" (DRAHT.md)."""
+        aus = []
+        for n, e in sorted(self.laufende.items()):
+            try:
+                faellig = e["faellig"].timestamp()
+            except (OSError, ValueError, OverflowError):
+                faellig = 0.0
+            aus.append({"nummer": n, "sorte": e.get("sorte") or "timer",
+                        "was": e["was"], "faellig": faellig,
+                        "wiederholt": e.get("wiederholt"),
+                        "pausiert": bool(e.get("pausiert")),
+                        "zuletzt": e.get("zuletzt")})
+        return aus
 
     # --- ueber einen Neustart retten ---------------------------------------
 
@@ -224,7 +291,10 @@ class Wecker:
                       # Timer den ersten Neustart als EINMALIGER -- er
                       # klingelt noch einmal und ist dann still. Das
                       # faellt erst in der Woche darauf auf.
-                      "wiederholt": e.get("wiederholt")}
+                      "wiederholt": e.get("wiederholt"),
+                      "sorte": e.get("sorte") or "timer",
+                      "pausiert": bool(e.get("pausiert")),
+                      "zuletzt": e.get("zuletzt")}
                      for n, e in self.laufende.items()],
                     ensure_ascii=False, indent=1,
                 ),
@@ -237,6 +307,11 @@ class Wecker:
             # Start neu angesagt. Aufhalten soll es Sarvis weiter nicht,
             # aber sichtbar muss es sein.
             print(f"  ! timer.json ließ sich nicht schreiben: {e}")
+        if self.geaendert is not None:
+            try:
+                self.geaendert()
+            except Exception as e:
+                print(f"  (Geplant-Liste nicht gemeldet -- {e})")
 
     async def wiederherstellen(self) -> list[str]:
         """Beim Start: was noch laeuft, wieder scharf machen.
@@ -273,13 +348,26 @@ class Wecker:
             except (KeyError, TypeError, ValueError):
                 continue
             was = e.get("was", "")
+            sorte = e.get("sorte") or "timer"
+            mehr = {"sorte": sorte, "pausiert": bool(e.get("pausiert")),
+                    "zuletzt": e.get("zuletzt")}
+            try:
+                mehr["nummer"] = int(e["nummer"])
+            except (KeyError, TypeError, ValueError):
+                pass
+            if mehr.get("nummer") in self.laufende:
+                mehr.pop("nummer")
             jetzt = _jetzt_wie(faellig)
             if faellig <= jetzt:
                 stunden = (jetzt - faellig).total_seconds() / 3600
-                if stunden <= config.TIMER_NACHMELDEN_STUNDEN:
+                if mehr["pausiert"]:
+                    pass
+                elif stunden <= config.TIMER_NACHMELDEN_STUNDEN:
                     verpasst.append(
-                        f"Dein Timer{' für ' + was if was else ''} ist "
-                        "abgelaufen, während ich aus war."
+                        (f"Die geplante Aufgabe „{was[:80]}“ ist ausgefallen, "
+                         "während ich aus war." if sorte == "aufgabe" else
+                         f"Dein Timer{' für ' + was if was else ''} ist "
+                         "abgelaufen, während ich aus war.")
                     )
                 else:
                     # Zu alt, um noch eine Nachricht zu sein. Nicht
@@ -298,13 +386,18 @@ class Wecker:
                     naechster = faellig
                     while naechster <= jetzt:
                         naechster = self._naechster_termin(naechster, wdh)
-                    self.stellen_bis(naechster, was, wiederholt=wdh)
+                    self.stellen_bis(naechster, was, wiederholt=wdh, **mehr)
+                elif mehr["pausiert"]:
+                    # Pausiert und einmalig: bleibt liegen, bis er wieder
+                    # an ist (siehe _warten).
+                    self.stellen_bis(faellig, was, **mehr)
                 continue
             # Direkt auf den gespeicherten Zeitpunkt, nicht ueber eine
             # Dauer: Der Umweg schneidet Nachkommastellen ab und legt
             # einen Wecker auf 06:00:00 bis zu eine Sekunde daneben --
             # genau deshalb gibt es stellen_bis.
-            self.stellen_bis(faellig, was, wiederholt=e.get("wiederholt"))
+            self.stellen_bis(faellig, was, wiederholt=e.get("wiederholt"),
+                             **mehr)
 
         # Auch das stille Wegraeumen muss auf die Platte: Ohne das taucht
         # ein zu alter Timer bei jedem Start erneut auf und wird jedes Mal
@@ -316,6 +409,9 @@ class Wecker:
     def alle(self) -> list[dict]:
         return [
             {"nummer": n, "was": e["was"],
+             "sorte": e.get("sorte") or "timer",
+             "pausiert": bool(e.get("pausiert")),
+             "wiederholt": e.get("wiederholt"),
              "rest": max(0, int((e["faellig"]
                                  - _jetzt_wie(e["faellig"])).total_seconds()))}
             for n, e in sorted(self.laufende.items())
@@ -406,7 +502,13 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         "Dauer ab jetzt (sekunden) ODER eine Uhrzeit angeben, nicht beides. "
         "Bei einer genannten Uhrzeit immer 'uhrzeit' benutzen und die Dauer "
         "NICHT selbst ausrechnen. Für einen anderen Tag zusätzlich 'datum'. "
-        "Für 'jeden Montag' oder 'jeden Morgen' zusätzlich 'wiederholt'.",
+        "Für 'jeden Montag' oder 'jeden Morgen' zusätzlich 'wiederholt'. "
+        "Soll zu der Zeit etwas GETAN werden (Briefing, Nachrichten "
+        "zusammenfassen, Wetter nachsehen), den Auftrag in 'auftrag' "
+        "schreiben: Dann führst du ihn zu der Zeit selbst aus. Das ist der "
+        "einzige Weg für geplante und wiederkehrende Aufgaben; er läuft "
+        "nie ab und übersteht Neustarts. Sascha sieht und verwaltet diese "
+        "Einträge in der App unter 'Geplant'.",
         {
             "type": "object",
             "properties": {
@@ -455,6 +557,14 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                     "description": "Wofür der Timer ist, kurz. Wird beim "
                                    "Ablaufen vorgelesen, z. B. 'die Nudeln'.",
                 },
+                "auftrag": {
+                    "type": "string",
+                    "description": "Statt einer Erinnerung: was du zu der "
+                                   "Zeit tun sollst, als vollständiger, "
+                                   "für sich verständlicher Auftrag an dich "
+                                   "selbst (Quellen, Form des Ergebnisses). "
+                                   "Dann entfällt 'wofuer'.",
+                },
             },
         },
     )
@@ -463,6 +573,10 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         roh = (args.get("uhrzeit") or "").strip()
         rohdatum = (args.get("datum") or "").strip()
         wiederholt = (args.get("wiederholt") or "").strip() or None
+        auftrag = (args.get("auftrag") or "").strip()
+        sorte = "aufgabe" if auftrag else "timer"
+        if auftrag:
+            wofuer = auftrag
 
         tag = None
         if rohdatum:
@@ -509,11 +623,13 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                 ziel += timedelta(days=1)   # heute vorbei -> morgen
             sekunden = int(round((ziel - jetzt).total_seconds()))
             nummer, faellig = wecker.stellen_bis(ziel, wofuer,
-                                                 wiederholt=wiederholt)
+                                                 wiederholt=wiederholt,
+                                                 sorte=sorte)
         elif args.get("sekunden") is not None:
             sekunden = int(args["sekunden"])
             nummer, faellig = wecker.stellen(sekunden, wofuer,
-                                             wiederholt=wiederholt)
+                                             wiederholt=wiederholt,
+                                             sorte=sorte)
         else:
             return {"content": [{"type": "text", "text":
                     "Ich brauche entweder eine Dauer oder eine Uhrzeit."}],
@@ -534,6 +650,12 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
                   "woechentlich": ", danach wöchentlich",
                   "monatlich": ", danach monatlich"}.get(wiederholt, "")
         leuchten()
+        if auftrag:
+            vermerken(f"timer_stellen: geplante Aufgabe {nummer}, fällig "
+                      f"{wann}{wieder}: {auftrag[:120]}")
+            return {"content": [{"type": "text", "text":
+                    f"Geplante Aufgabe {nummer} steht: fällig {wann}{wieder}. "
+                    "Sie läuft nicht ab."}]}
         vermerken(f"timer_stellen: Timer {nummer}"
                   + (f" für {wofuer}" if wofuer else "")
                   + f", fällig {wann}{wieder} — läuft.")
@@ -544,8 +666,9 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
 
     @tool(
         "timer_liste",
-        "Zeigt alle laufenden Timer mit Restzeit. Benutze das, wenn gefragt "
-        "wird, wie lange noch, oder was gerade läuft.",
+        "Zeigt alle laufenden Timer und geplanten Aufgaben mit Restzeit. "
+        "Benutze das, wenn gefragt wird, wie lange noch, oder was gerade "
+        "läuft oder geplant ist.",
         {"type": "object", "properties": {}},
     )
     async def timer_liste(args):
@@ -554,16 +677,21 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         if not offen:
             return {"content": [{"type": "text", "text": "Es läuft kein Timer."}]}
         zeilen = [
-            f"Timer {t['nummer']}"
-            + (f" ({t['was']})" if t["was"] else "")
+            ("Geplante Aufgabe" if t["sorte"] == "aufgabe" else "Timer")
+            + f" {t['nummer']}"
+            + (f" ({t['was'][:100]})" if t["was"] else "")
             + f": noch {_dauer_sagen(t['rest'])}"
+            + ({"taeglich": ", täglich", "woechentlich": ", wöchentlich",
+                "monatlich": ", monatlich"}.get(t["wiederholt"] or "", ""))
+            + (" — pausiert" if t["pausiert"] else "")
             for t in offen
         ]
         return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
 
     @tool(
         "timer_abbrechen",
-        "Bricht einen laufenden Timer ab. Die Nummer steht in timer_liste.",
+        "Bricht einen laufenden Timer oder eine geplante Aufgabe ab. Die "
+        "Nummer steht in timer_liste.",
         {
             "type": "object",
             "properties": {

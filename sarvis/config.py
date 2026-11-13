@@ -1423,6 +1423,12 @@ WERKZEUG_STUFEN = {
 # Wie lange Sarvis auf eine Antwort wartet. Danach: abgelehnt.
 RUECKFRAGE_SEKUNDEN = 75   # 25 reichte in der App nicht: Frage uebersehen, Auftrag weg (13.11.2026)
 
+# Eingebaute Planungswerkzeuge von Claude Code, die NIE benutzt werden
+# duerfen (hirn.py, auftrag.py). Wiederkehrende Auftraege verfallen dort
+# nach sieben Tagen; Sarvis plant ueber seinen eigenen Wecker.
+PLANUNG_GESPERRT = ("CronCreate", "CronDelete", "CronList",
+                    "ScheduleWakeup", "RemoteTrigger")
+
 # Eingebaute Werkzeuge von Claude Code, die Sarvis mitbenutzen darf.
 # Bash steht bewusst nicht hier und soll auch nie hier stehen.
 EINGEBAUTE_WERKZEUGE = [

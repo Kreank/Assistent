@@ -964,10 +964,11 @@ nur in der Wechselsekunde vor).
 | `sarvis` | `meldung` | von selbst gesagt: Timer, fertiger Auftrag | `{}` |
 | `sarvis` | `frage` | die Rückfrage vor einer Handlung | `offen`, `werkzeug`; geschlossen zusätzlich `entscheidung` (`ja`·`nein`·`anders`·`abgebrochen`) und `antwort` (Wortlaut) |
 | `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`) |
-| `sarvis` | `auftrag` | Statuskarte eines Hintergrundauftrags, mehrzeilig (Laufzeit, Aufgabe, zuletzt erledigt, als Nächstes) — **dieselbe `id` wird laufend ersetzt** | `nummer`, `zustand` (`läuft`, `fertig`, `gestoppt`, `abgebrochen`), `projekt` |
+| `sarvis` | `auftrag` | Statuskarte eines Hintergrundauftrags, mehrzeilig (Laufzeit, Aufgabe, zuletzt erledigt, als Nächstes) — **dieselbe `id` wird laufend ersetzt** | `nummer`, `zustand` (`läuft`, `fertig`, `gestoppt`, `abgebrochen`), `projekt`; seit 13.11.2026 zusätzlich `seit` (Start, Unix-Sekunden), `schritte` (Modellzüge bisher), `pensum` (Höchstzahl, derzeit 250) — **können fehlen**, dann unbestimmter Balken |
 | `sarvis` | `formular` | Titel | `kennung`, `fragen` (Liste aus `nr`, `titel`, `frage`), `auftrag`, `projekt`, `offen`, nach dem Abschicken `antworten` (`{"<nr>": "Text"}`) |
 | `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
 | `system` | `text` | Hinweis des Systems („keine Antwort — …“) | `{}` |
+| `system` | `text` | „Geplante Aufgabe 7: …“ — eine geplante Aufgabe ist fällig und läuft; die Antwort folgt als `sarvis`/`text` (seit 13.11.2026) | `{}` |
 
 `geraet` ist bei `du` das Gerät, von dem es kam; sonst leer.
 
@@ -1097,6 +1098,74 @@ POST /ablage/oeffnen        { "schluessel": "…" }
   antippbar machen.
 - `schluessel` ist bei `html`/`datei` die geheime Blatt-Kennung, bei
   Markdown `md-<eintrag>`. Die Liste ist also vertraulich wie `/dateien`.
+
+## Geplant — Timer und geplante Aufgaben (seit 13.11.2026)
+
+Zwei Sorten Eintrag in einer Liste: `timer` sagt beim Fälligwerden einen
+Satz („Dein Timer ist abgelaufen: die Nudeln“), `aufgabe` führt einen
+Auftrag aus — Sarvis macht dann einen ganzen Zug, als hätte Sascha ihn
+gerade gesagt (im Verlauf als `system`-Zeile „Geplante Aufgabe …“, danach
+die Antwort an **alle** Geräte plus Push „Geplant“). Läuft gerade ein
+Gespräch, wartet die Aufgabe, bis es ruhig ist; sie unterbricht nie.
+
+**Kein Ablaufdatum.** Wiederkehrende Einträge stellen sich nach jedem
+Termin neu und überstehen Neustarts (`timer.json`). Angelegt wird **nur
+beim Sprechen** („jeden Morgen um sieben ein Briefing“) — die App braucht
+keinen eigenen Weg zum Anlegen.
+
+```
+GET  /geplant                         (X-Sarvis-Schluessel)
+→ { "eintraege": [ { "nummer": 7, "sorte": "timer" | "aufgabe",
+                     "was": "Morgenbriefing: …",
+                     "faellig": 1794466800.0, "wiederholt": "taeglich"
+                       | "woechentlich" | "monatlich" | null,
+                     "pausiert": false, "zuletzt": 1794380400.0 | null } ] }
+
+POST /geplant/loeschen   { "nummer": 7 }             → { "gut": true } · 404
+POST /geplant/pausieren  { "nummer": 7, "an": true } → { "gut": true } · 404
+```
+
+- **`nummer` bleibt** über Wiederholungen und Neustarts dieselbe.
+- `faellig` ist der nächste Termin; `zuletzt` der letzte tatsächlich
+  ausgeführte (bei Timern und bei nie ausgeführten Aufgaben `null`).
+- Pausiert: Ein wiederkehrender Eintrag überspringt seine Termine, ein
+  einmaliger wartet und kommt sofort, wenn er wieder an ist.
+- Löschen und Pausieren sind Handlungen des Menschen in seiner eigenen
+  App — **ohne Rückfrage**, sofort.
+
+Nach **jeder** Änderung (anlegen, löschen, pausieren, Termin vorbei) kommt
+auf dem Draht die ganze Liste, ein Zustand wie `faeden`:
+
+```json
+{ "art": "geplant", "eintraege": [ … wie oben … ] }
+```
+
+## Gedächtnis ansehen und löschen (seit 13.11.2026)
+
+Dieselben Daten, die Sarvis mit `gedaechtnis_zeigen`/`vergessen` benutzt.
+Vertraulich wie `/dateien`, also mit Schlüssel.
+
+```
+GET  /gedaechtnis
+→ { "gemerkt":     [ { "id": "g-…", "text": "…", "seit": 1794… } ],
+    "beobachtet":  [ { "id": "b-…", … } ],
+    "entschieden": [ { "id": "e-…", … } ],
+    "personen":    [ { "id": "p-mueller", "name": "…", "text": "…",
+                       "seit": … } ] }
+
+POST /gedaechtnis/vergessen  { "id": "…" }  → { "gut": true } · 404
+```
+
+- **`gemerkt`** hat Sascha ausdrücklich gesagt (gilt als Tatsache),
+  **`beobachtet`** hat Sarvis geschlossen (Vermutung — so anzeigen),
+  **`entschieden`** sind Entscheidungen mit `[thema: …]` am Ende.
+- `id` ist ein Hash der Zeile, keine laufende Nummer: Wird die Zeile
+  geändert, ist es eine neue `id`. Nach dem Löschen die Liste neu holen.
+- `seit` ist das Datum am Anfang des Eintrags (0, wenn keins dasteht).
+- Eine **Person** zu löschen löscht ihre ganze Akte (`text` ist die Akte,
+  höchstens 4000 Zeichen).
+- Sarvis erfährt es beim nächsten Zug („gilt nicht mehr“) — auch wenn der
+  Eintrag noch in seiner laufenden Sitzung steckt.
 
 ## Benachrichtigungen bei geschlossener App (Web Push, seit 11.11.2026)
 

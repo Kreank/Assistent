@@ -302,6 +302,92 @@ def lesen(art: str) -> list[str]:
     return _zeilen(_datei(art))
 
 
+# --- Fuer die App: ansehen und loeschen (seit 13.11.2026) ----------------
+#
+# GET /gedaechtnis und POST /gedaechtnis/vergessen (DRAHT.md,
+# "Gedaechtnis"). Dieselben Dateien wie gedaechtnis_zeigen/vergessen. Die
+# Kennung ist ein Hash der Zeile: Die Dateien sind von Hand editierbar,
+# eine laufende Nummer waere nach jeder Aenderung eine andere Zeile.
+
+_ART_KUERZEL = {"entschieden": "e", "gesagt": "g", "bemerkt": "b"}
+
+
+def _kennung(art: str, zeile: str) -> str:
+    import hashlib
+    return (_ART_KUERZEL[art] + "-"
+            + hashlib.sha1(zeile.strip().encode("utf-8")).hexdigest()[:12])
+
+
+def _seit(zeile: str) -> float:
+    try:
+        return datetime.strptime(_datum_von(zeile), "%Y-%m-%d").timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _ohne_strich(zeile: str) -> str:
+    """'- 2026-08-28 — Text' -> 'Text' (das Datum steht in 'seit')."""
+    t = re.sub(r"^\s*-\s*", "", zeile).strip()
+    return re.sub(r"^\d{4}-\d{2}-\d{2}\s*[—–-]\s*", "", t).strip() or t
+
+
+def fuer_app() -> dict:
+    """Alles, was die App zeigt: drei Zeilenlisten plus Personenakten."""
+    aus = {}
+    for art, schluessel in (("gesagt", "gemerkt"), ("bemerkt", "beobachtet"),
+                            ("entschieden", "entschieden")):
+        aus[schluessel] = [{"id": _kennung(art, z), "text": _ohne_strich(z),
+                            "seit": _seit(z)} for z in lesen(art)]
+    personen = []
+    ordner = config.GEDAECHTNIS / "personen"
+    if ordner.is_dir():
+        for d in sorted(ordner.glob("*.md")):
+            # Nur echte Akten: Vorlagen (BEISPIEL.md) tragen Grossbuchstaben,
+            # _sauberer_name erzeugt nie welche.
+            if not re.fullmatch(r"[a-z0-9-]{1,60}", d.stem):
+                continue
+            try:
+                text = d.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            erste = next((z for z in text.splitlines()
+                          if z.strip() and not z.lstrip().startswith("<!--")),
+                         d.stem)
+            personen.append({"id": "p-" + d.stem,
+                             "name": erste.lstrip("# ").strip() or d.stem,
+                             "text": text[:4000],
+                             "seit": d.stat().st_mtime})
+    aus["personen"] = personen
+    return aus
+
+
+def per_kennung_vergessen(kennung: str) -> str | None:
+    """Einen Eintrag (oder eine Personenakte) loeschen.
+
+    Gibt den geloeschten Text zurueck, None wenn es ihn nicht gibt.
+    """
+    # _geschrieben bleibt bewusst unberuehrt: Er misst, ob in einem Zug
+    # etwas GEMERKT wurde (gedaechtnis.entscheidung_verpasst).
+    kennung = str(kennung or "")
+    if kennung.startswith("p-"):
+        name = kennung[2:]
+        if not re.fullmatch(r"[a-z0-9-]{1,60}", name):
+            return None
+        d = config.GEDAECHTNIS / "personen" / f"{name}.md"
+        if not d.is_file():
+            return None
+        d.unlink()
+        return f"alles über {name}"
+    for art in _ART_KUERZEL:
+        pfad = _datei(art)
+        zeilen = _zeilen(pfad)
+        treffer = [z for z in zeilen if _kennung(art, z) == kennung]
+        if treffer:
+            _schreiben(pfad, [z for z in zeilen if z not in treffer])
+            return _ohne_strich(treffer[0])
+    return None
+
+
 def werkzeuge(protokoll=None, leuchten=None) -> list:
     def vermerken(text: str):
         if protokoll is not None:

@@ -177,6 +177,10 @@ class Sarvis:
             # Server -- siehe _benachrichtigen.
             melden=self._benachrichtigen,
         )
+        # Geplante Aufgaben fuehrt die Hauptschleife aus, und jede
+        # Aenderung der Liste geht an die Oberflaechen (DRAHT.md).
+        self.wecker.ausfuehren = self._geplant_faellig
+        self.wecker.geaendert = self._geplant_melden
         # Freigaben auf Zeit. Bewusst hier und nicht im Hirn: Sie
         # gehoeren zum Gespraech, nicht zum Modell -- ein Neustart hebt
         # jede auf.
@@ -368,6 +372,11 @@ class Sarvis:
             nummer = int(f.get("nummer") or 0)
             daten = {"nummer": nummer, "zustand": f.get("zustand") or "",
                      "projekt": f.get("projekt") or ""}
+            # Fortschritt (seit 13.11.2026) -- nur wenn bekannt, damit die
+            # App ohne die Felder beim unbestimmten Balken bleibt.
+            for feld in ("seit", "schritte", "pensum"):
+                if f.get(feld):
+                    daten[feld] = f[feld]
             karten = self.__dict__.setdefault("_auftrag_karten", {})
             vorhanden = karten.get(nummer)
             e = (self._aendern(vorhanden, f.get("text") or "", daten)
@@ -1204,7 +1213,8 @@ class Sarvis:
         self.horcher.nachhoeren()
         self.anzeige.nachhoeren(config.NACHHOEREN_SEK)
 
-    async def _antworten(self, gesagt: str, t_los: float) -> None:
+    async def _antworten(self, gesagt: str, t_los: float,
+                         als_eintrag: str | None = None) -> None:
         # Die Freigabe-Anzeige bei jedem Zuruf nachziehen: Sie zaehlt
         # zwar von selbst herunter, aber die Minutenangabe stammt vom
         # Zeitpunkt der Erteilung und waere sonst bald falsch.
@@ -1220,9 +1230,17 @@ class Sarvis:
         # Ein neuer Zug: Was jetzt an Blaettern und Kacheln kommt, sind
         # neue Karten im Verlauf.
         self._zug_karten = {}
-        self._eintragen("du", "text", gesagt)
+        if als_eintrag is None:
+            self._eintragen("du", "text", gesagt)
+        else:
+            # Eine geplante Aufgabe: Sascha hat nichts gesagt, also keine
+            # "du"-Zeile -- sonst stuende ein Satz im Verlauf, den er nie
+            # gesagt hat.
+            self._eintragen("system", "text", als_eintrag, geraet="")
 
-        if rueckfrage.ist_stopp(gesagt):
+        # Die Sonderworte unten ("hör auf", "nochmal", "sei still") gelten
+        # nur fuer Gesagtes -- nie fuer den Text einer geplanten Aufgabe.
+        if als_eintrag is None and rueckfrage.ist_stopp(gesagt):
             await self._alles_stoppen()
             return
 
@@ -1231,12 +1249,13 @@ class Sarvis:
         # hoeren und keine Antwort AUF das Wort "nochmal". Und wer um
         # Ruhe bittet, will Ruhe, nicht die gesprochene Zusage, ab jetzt
         # still zu sein.
-        if rueckfrage.ist_wieder_da(gesagt) and self._ruhe_bis:
+        if (als_eintrag is None and rueckfrage.ist_wieder_da(gesagt)
+                and self._ruhe_bis):
             self._ruhe_bis = 0.0
             await self._sagen("Bin wieder da.")
             return
 
-        minuten = rueckfrage.ist_ruhe(gesagt)
+        minuten = rueckfrage.ist_ruhe(gesagt) if als_eintrag is None else 0
         if minuten:
             self._ruhe_bis = time.monotonic() + minuten * 60
             # Diese eine Ansage kommt noch, sonst weiss niemand, ob es
@@ -1246,20 +1265,22 @@ class Sarvis:
             await self._sagen(f"Bin {lang} still.")
             return
 
-        if rueckfrage.ist_nochmal(gesagt):
+        if als_eintrag is None and rueckfrage.ist_nochmal(gesagt):
             if self._zuletzt_gesagt:
                 await self._sagen(self._zuletzt_gesagt)
             else:
                 await self._sagen("Ich habe noch nichts gesagt.")
             return
 
-        # Der Anstupser gilt fuer genau diesen einen Zuruf. Ob Sarvis
-        # ihn befolgt hat, entscheidet sich unten; stehenbleiben darf er
-        # nicht, sonst mahnt er dieselbe Sache in jedem weiteren Zug an.
-        self._anstupser = ""
+        # Der Anstupser gilt fuer genau diesen einen Zuruf. Geloescht wird
+        # er erst NACH dem Zug (siehe unten): Bis 13.11.2026 stand das
+        # Loeschen hier, also VOR dem Aufruf des Hirns -- die Zustandszeile
+        # wird aber erst beim Absenden gelesen, und so kam der Anstupser
+        # nie an.
         # Merkposten fuer nachher: Fiel hier ein Entscheidungswort, und
         # wie oft war bis jetzt etwas gemerkt worden?
-        klang_entschieden = klingt_nach_entscheidung(gesagt)
+        klang_entschieden = (als_eintrag is None
+                             and klingt_nach_entscheidung(gesagt))
         stand_vorher = erinnern.schreibstand()
 
         sammler = Satzsammler()
@@ -1355,6 +1376,9 @@ class Sarvis:
         # in jedem weiteren Zuruf -- und wuerde damit genau das, was der
         # Auftragshinweis vorher getan hat.
         self._eingang_gesehen = time.time()
+        # Er ist mitgelaufen -- stehenbleiben darf er nicht, sonst mahnt
+        # er dieselbe Sache in jedem weiteren Zug an.
+        self._anstupser = ""
 
         if klang_entschieden and erinnern.schreibstand() == stand_vorher:
             self._anstupser = entscheidung_verpasst(gesagt)
@@ -1438,10 +1462,11 @@ class Sarvis:
             self.aufgabe = None
             self.horcher.pause(False)
 
-    async def _weckwort_durchgang(self, zuruf: str) -> None:
+    async def _weckwort_durchgang(self, zuruf: str,
+                                  als_eintrag: str | None = None) -> None:
         """Wie _durchgang, aber der Text steht schon fest."""
         try:
-            await self._antworten(zuruf, time.perf_counter())
+            await self._antworten(zuruf, time.perf_counter(), als_eintrag)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -1551,6 +1576,8 @@ class Sarvis:
                                         weg_an=self._oberflaeche_weg,
                                         faden_an=self._faden_vom_netz,
                                         da_an=self._oberflaeche_da)
+        self.endpunkt.wecker = self.wecker
+        self.endpunkt.vergessen_an = self.gedaechtnis_vergessen_gemeldet
         await server.starten(self.endpunkt, self.traeger, config.NETZ_HAFEN)
         print(f"  Endpunkt  : 127.0.0.1:{config.NETZ_HAFEN}")
 
@@ -1624,6 +1651,56 @@ class Sarvis:
         # dasselbe Geraet wie die Stimme, kommt aber nicht am
         # Lautsprecher vorbei an diese Information.
         anzeige_modul.zielen(geraet)
+
+    # --- Geplante Aufgaben (seit 13.11.2026, DRAHT.md "Geplant") --------
+
+    async def _geplant_faellig(self, was: str, nummer: int) -> None:
+        """Vom Wecker gerufen: einreihen, nicht selbst ausfuehren.
+
+        Die Hauptschleife entscheidet, wann -- sie weiss, ob gerade
+        geredet wird.
+        """
+        self.schlange.put_nowait(("geplant", was, nummer))
+
+    async def _geplant_durchgang(self, was: str, nummer: int) -> None:
+        """Ein Zug des Hirns, den niemand gesprochen hat.
+
+        An ALLE Geraete wie eine Timer-Meldung: Wer das Briefing
+        bestellt hat, sitzt vielleicht nicht mehr da, wo er es bestellt
+        hat. Danach eine Benachrichtigung mit dem Ergebnis.
+        """
+        print(f"\n  Geplant {nummer}: {was[:100]}")
+        self._antwort_an(None)
+        vorher = self._zuletzt_gesagt
+        await self._weckwort_durchgang(
+            "[Geplante Aufgabe — von selbst ausgelöst, Sascha hat gerade "
+            "nichts gesagt. Führe sie jetzt aus und berichte das Ergebnis. "
+            "Lege dafür keinen neuen Timer an, sie wiederholt sich von "
+            f"selbst.]\n\n{was}",
+            als_eintrag=f"Geplante Aufgabe {nummer}: {was}")
+        ergebnis = self._zuletzt_gesagt
+        if ergebnis and ergebnis != vorher:
+            self._benachrichtigen("Geplant", ergebnis[:240])
+
+    def _geplant_melden(self) -> None:
+        """Die ganze Liste an alle Oberflaechen -- ein Zustand wie faeden."""
+        try:
+            self.anzeige.geplant(self.wecker.liste())
+        except Exception as fehler:
+            print(f"  (Geplant-Liste nicht gemeldet -- {fehler})")
+
+    def gedaechtnis_vergessen_gemeldet(self, text: str) -> None:
+        """Sascha hat in der App einen Gedaechtniseintrag geloescht.
+
+        Die Datei ist schon bereinigt. Was fehlt: Das Hirn hat den
+        Eintrag noch im Systemprompt seiner laufenden Sitzung (der wird
+        nur beim Verbinden gebaut). Ein Hinweis fuer den naechsten Zug
+        sagt ihm, dass er nicht mehr gilt.
+        """
+        hinweis = (f"[Sascha hat in der App aus deinem Gedächtnis gelöscht: "
+                   f"„{text[:200]}“. Das gilt nicht mehr — nicht mehr "
+                   "verwenden und nicht erneut merken.]")
+        self._anstupser = " ".join(z for z in (self._anstupser, hinweis) if z)
 
     async def _oberflaeche_weg(self, geraet: str) -> None:
         """Eine Oberflaeche hat sich verabschiedet."""
@@ -1812,6 +1889,21 @@ class Sarvis:
                         await self._faden_setzen(befehl[1], befehl[2])
                     except Exception as e:
                         print(f"  Fadenwechsel ging nicht: {type(e).__name__}: {e}")
+                    continue
+
+                # Eine geplante Aufgabe ist faellig (werkzeuge/zeit.py).
+                # Sie unterbricht NIE: Laeuft gerade ein Zug oder steht
+                # eine Frage offen, kommt sie in fuenf Sekunden wieder.
+                if isinstance(befehl, tuple) and befehl[0] == "geplant":
+                    if (antwortet or self.arbeitet
+                            or self.aufgabe is not None):
+                        asyncio.get_running_loop().call_later(
+                            5.0, self.schlange.put_nowait, befehl)
+                        continue
+                    self.abgebrochen = False
+                    self.arbeitet = True
+                    self.aufgabe = asyncio.create_task(
+                        self._geplant_durchgang(befehl[1], befehl[2]))
                     continue
 
                 # Weckwort: der Zuruf steckt schon im selben Satz, es muss

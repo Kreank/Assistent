@@ -454,14 +454,17 @@ class Anzeige:
             "projekt": str(projekt or "")})
 
     def auftrag_stand(self, nummer: int, text: str, zustand: str,
-                      projekt: str = "") -> None:
+                      projekt: str = "", seit: float = 0.0,
+                      schritte: int = 0, pensum: int = 0) -> None:
         """Statuskarte eines Hintergrundauftrags in den Verlauf (13.11.2026).
 
         Ein Eintrag je Auftrag, der sich aendert (gleiche id) -- keine
-        neue Zeile je Minute."""
+        neue Zeile je Minute. seit/schritte/pensum: fuer einen
+        Fortschrittsbalken in der App (Wunschblatt 13.11., Punkt 3)."""
         _mitschreiben("auftrag_stand", {
             "nummer": int(nummer), "text": str(text), "zustand": str(zustand),
-            "projekt": str(projekt or "")})
+            "projekt": str(projekt or ""), "seit": float(seit or 0),
+            "schritte": int(schritte or 0), "pensum": int(pensum or 0)})
 
     def blatt_weg(self, kennung: str) -> None:
         """Ein Blatt zuklappen."""
@@ -622,6 +625,14 @@ class Anzeige:
         """
         self._senden(art="faeden", aktiv=str(aktiv or ""),
                      liste=list(liste or []), wechselt=bool(wechselt))
+
+    def geplant(self, eintraege) -> None:
+        """Timer und geplante Aufgaben -- immer die ganze Liste (13.11.2026).
+
+        Gleiche Form wie GET /geplant. Ein Zustand wie "faeden": Wer sie
+        bekommt, ersetzt seine Liste.
+        """
+        self._senden(art="geplant", eintraege=list(eintraege or []))
 
     def freigabe(self, text: str, sekunden: float = 0.0) -> None:
         """Was gerade ohne Rueckfrage durchgeht -- leerer Text: nichts.

@@ -149,3 +149,31 @@ dahin nichts tun.**
 - Live Updates: androidauthority.com („Android 16 QPR1 adds full support for
   Live Updates“), androidpolice.com (Anforderungen)
 - UnifiedPush: unifiedpush.org (FAQ, Distributors, Developers/Intro)
+
+---
+
+## Antwort vom Server (13.11.2026, abends)
+
+Gebaut, Vertrag in `DRAHT.md` („Geplant“, „Gedächtnis ansehen und
+löschen“, Tabelle `eintrag`). Wirksam ab dem nächsten Neustart des
+Containers.
+
+1. **Geplant — erledigt.** Die „sieben Tage“ waren echt: Sarvis hatte das
+   Sicherheitsbriefing mit dem eingebauten `CronCreate` von Claude Code
+   angelegt, nicht mit seinem Wecker. Das ist jetzt hart gesperrt
+   (`config.PLANUNG_GESPERRT`, im Hirn und im Arbeiter). Der Wecker kennt
+   `sorte: "aufgabe"` (Werkzeug `timer_stellen` mit `auftrag`), die Nummer
+   bleibt über Wiederholungen und Neustarts gleich. `GET /geplant`,
+   `POST /geplant/loeschen`, `POST /geplant/pausieren`, Draht-Art
+   `geplant` nach jeder Änderung — Form wie vorgeschlagen. Ausführung:
+   ein Zug des Hirns, im Verlauf als `system`-Zeile „Geplante Aufgabe N: …“,
+   Antwort an alle Geräte, danach Push mit Titel „Geplant“. Unterbricht
+   nie ein laufendes Gespräch.
+2. **Gedächtnis — erledigt**, Form wie vorgeschlagen, zusätzlich `seit` bei
+   Personen. `text` ohne das führende Datum (steht in `seit`). Die
+   `id` ist ein Zeilen-Hash, nach dem Löschen neu laden.
+3. **Fortschritt — erledigt:** `seit`, `schritte`, `pensum` in `daten`
+   der `sorte: auftrag`; `schritte` zählt Modellzüge seit dem letzten
+   Start/Fortsetzen.
+4. Satzende-Erkennung: noch nicht. Erst messen, dann entscheiden.
+5. Push bei beendeter App: wartet auf Saschas Freigabe, wie vereinbart.
