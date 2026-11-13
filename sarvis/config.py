@@ -1214,7 +1214,11 @@ WERKZEUG_STUFEN = {
 
     # Auftraege: Starten fragt nach -- ein Arbeiter schreibt danach
     # selbstaendig Dateien. Status und Abbrechen sind harmlos.
-    "auftrag_geben":      "fragen",
+    # Seit 13.11.2026 still: Sascha gibt den Auftrag selbst -- danach noch
+    # "darf ich?" zu fragen war doppelt, und die Frage lief ab, waehrend er
+    # nicht am Handy war ("ich schick eine Nachricht ab und bin mal ne
+    # Stunde nicht dran"). Der Arbeiter bleibt in seinem Projektordner.
+    "auftrag_geben":      "still",
     "auftrag_status":     "still",
     # Nachlesen, was schon einmal gesagt wurde -- aus der eigenen
     # Sicherung und dem bericht.md des Zweigs. Aendert nichts.
@@ -1222,7 +1226,7 @@ WERKZEUG_STUFEN = {
     "auftrag_abbrechen":  "still",
     # Fortsetzen startet wieder einen Arbeiter, der selbstaendig Dateien
     # schreibt -- also dieselbe Stufe wie auftrag_geben.
-    "auftrag_fortsetzen": "fragen",
+    "auftrag_fortsetzen": "still",
 
     # Programme: Oeffnen ist harmlos und jederzeit rueckgaengig zu machen
     # -- ein Fenster schliesst man wieder. Beenden fragt nach, weil dabei

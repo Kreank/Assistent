@@ -175,6 +175,46 @@ Runden. Bilder vorher klein halten (Breite höchstens 1600 Pixel), sonst
 wird die Nachricht zu groß."""
 
 
+def _stand_lesen(ordner: Path) -> tuple[str, str]:
+    """(zuletzt erledigt, als Naechstes) aus fortschritt.md.
+
+    Der Arbeiter fuehrt die Datei waehrend der Arbeit (ARBEITER_PROMPT):
+    "- [x] Was fertig ist ... Nächstes: Was kommt." Gelesen wird der
+    letzte abgehakte Punkt.
+    """
+    try:
+        text = (ordner / "fortschritt.md").read_text(encoding="utf-8")
+    except OSError:
+        return "", ""
+    punkte = re.findall(r"^\s*-\s*\[x\]\s*(.+?)(?=^\s*-\s*\[|^#|^>|\Z)",
+                        text, re.M | re.S | re.I)
+    if not punkte:
+        return "", ""
+    letzter = " ".join(punkte[-1].split())
+    naechstes = ""
+    m = re.search(r"N(?:ä|ae)chste[sr]?:\s*(.+)$", letzter)
+    if m:
+        naechstes = m.group(1).strip()
+        letzter = letzter[:m.start()].strip()
+    letzter = re.sub(r"[`*]", "", letzter)
+    naechstes = re.sub(r"[`*]", "", naechstes)
+    return _satzweise(letzter, 260), _satzweise(naechstes, 160)
+
+
+def _satzweise(text: str, grenze: int) -> str:
+    """Auf hoechstens grenze Zeichen kuerzen -- am Satzende, nicht mitten
+    im Wort. ("Offen ist, ob noch eine Datenschutze Er hat 4 Fragen" war
+    der Anlass, 13.11.2026.)"""
+    text = " ".join((text or "").split())
+    if len(text) <= grenze:
+        return text
+    stueck = text[:grenze]
+    ende = max(stueck.rfind(". "), stueck.rfind("! "), stueck.rfind("? "))
+    if ende >= grenze // 3:
+        return stueck[:ende + 1]
+    return stueck.rsplit(" ", 1)[0] + " …"
+
+
 def offene_fragen(ordner: Path) -> list[dict]:
     """Die Fragen aus "## Offene Fragen an Sascha" in bericht.md.
 
@@ -921,10 +961,37 @@ class Werkstatt:
                 f"noch einen Bericht. Nachsehen kannst du auf dem Zweig "
                 f"{a.zweig}."), False
 
+    def _stand_zeigen(self, auftrag: Auftrag, zustand: str = "läuft",
+                      schluss: str = "") -> None:
+        """Die Statuskarte des Auftrags im Verlauf -- neu oder aktualisiert.
+
+        Seit 13.11.2026. Vorher sah man nach einer Stunde Abwesenheit
+        einen einzigen Satz und wusste nicht, was gerade passiert.
+        """
+        try:
+            from .. import anzeige as anzeige_modul
+            erledigt, naechstes = _stand_lesen(auftrag.ordner)
+            minuten = max(1, auftrag.dauer() // 60)
+            kopf = (f"Auftrag {auftrag.nummer} · {auftrag.projekt} · "
+                    + (f"läuft seit {minuten} Min." if zustand == "läuft"
+                       else f"{zustand} nach {minuten} Min."))
+            zeilen = [kopf, "Aufgabe: " + _satzweise(auftrag.was, 160)]
+            if erledigt:
+                zeilen.append("Zuletzt erledigt: " + erledigt)
+            if naechstes and zustand == "läuft":
+                zeilen.append("Als Nächstes: " + naechstes)
+            if schluss:
+                zeilen.append(schluss)
+            anzeige_modul.aktuelle().auftrag_stand(
+                auftrag.nummer, "\n".join(zeilen), zustand, auftrag.projekt)
+        except Exception as e:
+            print(f"  (Auftragsstand nicht gezeigt: {e})")
+
     async def _arbeiten(self, auftrag: Auftrag, fortsetzen: bool = False) -> None:
         klient = None
         letztes_werkzeug = ""
         letztes_zeichen = time.monotonic()
+        self._stand_zeigen(auftrag)
         try:
             klient = ClaudeSDKClient(options=ClaudeAgentOptions(
                 model=config.MODELL,
@@ -981,6 +1048,7 @@ class Werkstatt:
                     auftrag.zuletzt_gesehen = datetime.now().isoformat(
                         timespec="seconds")
                     journal(auftrag.nummer, "lebt", werkzeug=letztes_werkzeug)
+                    self._stand_zeigen(auftrag)
                 if isinstance(nachricht, ResultMessage):
                     schluss = nachricht
                     break
@@ -1048,8 +1116,14 @@ class Werkstatt:
 
     async def _melden(self, auftrag: Auftrag) -> None:
         minuten = max(1, auftrag.dauer() // 60)
+        self._stand_zeigen(
+            auftrag,
+            {"fertig": "fertig", "abgebrochen": "abgebrochen"}.get(
+                auftrag.status, "gestoppt"),
+            "" if auftrag.status == "fertig"
+            else _satzweise(auftrag.ergebnis, 300))
         if auftrag.status == "fertig":
-            kurz = " ".join(auftrag.ergebnis.split())[:400]
+            kurz = _satzweise(auftrag.ergebnis, 400)
             fragen = offene_fragen(auftrag.ordner)
             if fragen:
                 # Seit 13.11.2026: Die Fragen des Arbeiters standen nur im
@@ -1250,6 +1324,10 @@ def werkzeuge(werkstatt: Werkstatt, protokoll=None, leuchten=None) -> list:
         "in einer Frage. Bei Webseiten zusätzlich fragen, ob es ein "
         "Vorbild oder eine Stimmung gibt. Sagt der Nutzer 'weiß ich noch "
         "nicht', dann bleibt es offen — aber gefragt wird. "
+        "Dieses Werkzeug fragt NICHT mehr nach — benutze es nur, wenn der "
+        "Nutzer die Arbeit ausdrücklich will ('mach', 'bau', 'starte', "
+        "'kannst du … erstellen'). Ist unklar, ob er nur laut denkt, frag "
+        "im Gespräch. "
         "LÄUFT SCHON EIN AUFTRAG im selben Projekt, wird dieser NICHT "
         "angenommen. Versprich dann nie, ihn 'danach anzuhängen' — das "
         "kannst du nicht. Sag ehrlich, dass er erst nach dem laufenden "

@@ -364,6 +364,19 @@ class Sarvis:
         Zustandskacheln ("Auftrag laeuft ...") gehoeren nicht hinein: Sie
         aendern sich im Sekundentakt und sagen danach nichts mehr.
         """
+        if art == "auftrag_stand":
+            nummer = int(f.get("nummer") or 0)
+            daten = {"nummer": nummer, "zustand": f.get("zustand") or "",
+                     "projekt": f.get("projekt") or ""}
+            karten = self.__dict__.setdefault("_auftrag_karten", {})
+            vorhanden = karten.get(nummer)
+            e = (self._aendern(vorhanden, f.get("text") or "", daten)
+                 if vorhanden else
+                 self._eintragen("sarvis", "auftrag", f.get("text") or "",
+                                 daten, ""))
+            if e:
+                karten[nummer] = e["id"]
+            return
         if art == "formular":
             daten = dict(f)
             daten["offen"] = True

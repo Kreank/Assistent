@@ -120,6 +120,13 @@ body{display:flex;flex-direction:column;
   border-bottom-left-radius:5px}
 .meldung .blase{border-color:rgba(255,179,71,.35);background:rgba(255,179,71,.07)}
 .meldung .blase::before{content:"\1F514  ";}
+/* Statuskarte eines Hintergrundauftrags: aktualisiert sich an Ort und
+   Stelle (gleiche id), zeigt Laufzeit, zuletzt Erledigtes, Nächstes. */
+.auftrag .blase{white-space:pre-line;border-color:rgba(120,170,255,.4);
+  background:rgba(120,170,255,.06);font-size:13.5px}
+.auftrag.z-läuft .blase::before{content:"⏳  "}
+.auftrag.z-fertig .blase::before{content:"✅  "}
+.auftrag.z-gestoppt .blase::before,.auftrag.z-abgebrochen .blase::before{content:"⚠️  "}
 .e .zeit{font-size:10px;color:rgba(232,241,253,.35);margin:3px 6px 0}
 .e .zeit .unterbrochen{color:rgba(255,120,140,.75)}
 /* Rückfrage: dieselben Worte wie gesprochen, dazu Ja/Nein. Die Knöpfe

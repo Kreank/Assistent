@@ -453,6 +453,16 @@ class Anzeige:
             "fragen": list(fragen or []), "auftrag": int(auftrag or 0),
             "projekt": str(projekt or "")})
 
+    def auftrag_stand(self, nummer: int, text: str, zustand: str,
+                      projekt: str = "") -> None:
+        """Statuskarte eines Hintergrundauftrags in den Verlauf (13.11.2026).
+
+        Ein Eintrag je Auftrag, der sich aendert (gleiche id) -- keine
+        neue Zeile je Minute."""
+        _mitschreiben("auftrag_stand", {
+            "nummer": int(nummer), "text": str(text), "zustand": str(zustand),
+            "projekt": str(projekt or "")})
+
     def blatt_weg(self, kennung: str) -> None:
         """Ein Blatt zuklappen."""
         self._senden(art="blatt_weg", kennung=str(kennung))

@@ -116,6 +116,15 @@ Siehe `DRAHT.md` → „Formulare“. Hat ein Auftrag offene Fragen, kommt ein `
 **Fertig, wenn:** Ein Formular in der App ausgefüllt und abgeschickt wird und Sarvis daraufhin einen
 Folgeauftrag startet (Rückfrage „Soll ich einen Auftrag … starten?“ erscheint).
 
+## Aufgabe 6: Statuskarte laufender Aufträge
+
+Solange ein Hintergrundauftrag läuft, liegt im Verlauf ein `eintrag` mit `sorte: auftrag`.
+Er wird **laufend mit derselben `id` ersetzt** (etwa jede Minute): Laufzeit, Aufgabe, zuletzt
+erledigt, als Nächstes — am Ende „fertig“ oder „gestoppt“ mit Grund. `text` ist mehrzeilig
+(Zeilenumbrüche anzeigen), `daten.zustand` ist `läuft` | `fertig` | `gestoppt` | `abgebrochen`
+(z. B. Symbol ⏳ / ✅ / ⚠️). Ohne Aufgabe 1 (Verlauf + `eintrag` per Draht) sieht man sie nicht —
+das ist der Grund, warum Sascha nach einer Stunde Abwesenheit nicht wusste, was los ist.
+
 ## Nicht nötig (serverseitig schon erledigt)
 
 - Sarvis liest URLs und Dateipfade nicht mehr vor — das macht der Server vor der Sprachausgabe.
@@ -125,4 +134,4 @@ Folgeauftrag startet (Rückfrage „Soll ich einen Auftrag … starten?“ ersch
 ## Prüfen
 
 - `python einsatz/draht_pruefen.py` auf dem Server: DRAHT.md stimmt mit dem Code überein.
-- Reihenfolge: Aufgabe 1 → 2 → 3 → 4 → 5. Nach jeder Aufgabe einzeln testbar.
+- Reihenfolge: Aufgabe 1 → 6 → 2 → 3 → 4 → 5. Nach jeder Aufgabe einzeln testbar.

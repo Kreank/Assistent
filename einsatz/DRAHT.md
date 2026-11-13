@@ -964,6 +964,7 @@ nur in der Wechselsekunde vor).
 | `sarvis` | `meldung` | von selbst gesagt: Timer, fertiger Auftrag | `{}` |
 | `sarvis` | `frage` | die Rückfrage vor einer Handlung | `offen`, `werkzeug`; geschlossen zusätzlich `entscheidung` (`ja`·`nein`·`anders`·`abgebrochen`) und `antwort` (Wortlaut) |
 | `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`) |
+| `sarvis` | `auftrag` | Statuskarte eines Hintergrundauftrags, mehrzeilig (Laufzeit, Aufgabe, zuletzt erledigt, als Nächstes) — **dieselbe `id` wird laufend ersetzt** | `nummer`, `zustand` (`läuft`, `fertig`, `gestoppt`, `abgebrochen`), `projekt` |
 | `sarvis` | `formular` | Titel | `kennung`, `fragen` (Liste aus `nr`, `titel`, `frage`), `auftrag`, `projekt`, `offen`, nach dem Abschicken `antworten` (`{"<nr>": "Text"}`) |
 | `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
 | `system` | `text` | Hinweis des Systems („keine Antwort — …“) | `{}` |

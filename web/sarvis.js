@@ -3501,6 +3501,10 @@ function eintragEl(e) {
       + (d.bytes ? `<div class="vorschau">${menge(d.bytes)}</div>` : '') + `</div>`;
   } else if (e.sorte !== 'kachel') {
     if (e.sorte === 'meldung') el.classList.add('meldung');
+    if (e.sorte === 'auftrag') {
+      el.classList.add('auftrag');
+      el.classList.add('z-' + String((e.daten || {}).zustand || '').replace(/[^a-zä]/g, ''));
+    }
     innen = `<div class="blase">${verlinkt(e.text)}</div>`;
   }
   el.innerHTML = innen;
