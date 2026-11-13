@@ -397,6 +397,18 @@ class Hirn:
                             "geändert noch einmal an. Frag nicht, ob du "
                             "darfst — tu es einfach richtig."
                 )
+            if not wortlaut:
+                # Zeit abgelaufen, nichts gehoert. Das ist KEIN Nein --
+                # am 13.11.2026 meldete Sarvis danach "der Auftrag wurde
+                # abgelehnt", obwohl Sascha ihn ausdruecklich wollte und
+                # die Frage in der App nur nicht gesehen hatte.
+                return PermissionResultDeny(
+                    message="Auf die Rückfrage kam keine Antwort (Zeit "
+                            "abgelaufen) — das ist KEINE Ablehnung. Nicht "
+                            "ausgeführt. Sag dem Nutzer kurz, dass du auf "
+                            "sein Ja wartest; sagt er ja oder wiederholt er "
+                            "die Bitte, setz es sofort an."
+                )
             return PermissionResultDeny(
                 message=f"Der Nutzer hat abgelehnt.{gesagt} Tu es nicht und "
                         "frag nicht nochmal nach."

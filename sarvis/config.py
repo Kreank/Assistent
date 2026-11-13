@@ -1417,7 +1417,7 @@ WERKZEUG_STUFEN = {
 }
 
 # Wie lange Sarvis auf eine Antwort wartet. Danach: abgelehnt.
-RUECKFRAGE_SEKUNDEN = 25
+RUECKFRAGE_SEKUNDEN = 75   # 25 reichte in der App nicht: Frage uebersehen, Auftrag weg (13.11.2026)
 
 # Eingebaute Werkzeuge von Claude Code, die Sarvis mitbenutzen darf.
 # Bash steht bewusst nicht hier und soll auch nie hier stehen.

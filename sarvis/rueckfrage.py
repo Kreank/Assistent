@@ -674,4 +674,4 @@ def genauer(werkzeug: str, eingabe: dict) -> str | None:
 
 NACHHAKEN = "Ich habe das nicht verstanden. Ja oder nein?"
 ABGELEHNT = "Gut, ich lasse es."
-ABGELAUFEN = "Ich habe keine Antwort bekommen und lasse es lieber."
+ABGELAUFEN = "Ich habe kein Ja bekommen. Sag einfach ja, dann lege ich los."
