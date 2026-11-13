@@ -364,6 +364,12 @@ class Sarvis:
         Zustandskacheln ("Auftrag laeuft ...") gehoeren nicht hinein: Sie
         aendern sich im Sekundentakt und sagen danach nichts mehr.
         """
+        if art == "formular":
+            daten = dict(f)
+            daten["offen"] = True
+            self._eintragen("sarvis", "formular", f.get("titel") or "",
+                            daten, "")
+            return
         if art == "kachel":
             if f.get("sorte") == "zustand":
                 return
@@ -473,6 +479,9 @@ class Sarvis:
 
     async def _faden_vom_netz(self, art: str, m: dict, geraet: str) -> None:
         """Fadenbefehle einer Oberflaeche (DRAHT.md, "Gespraechsfaeden")."""
+        if art == "formular_antwort":
+            await self._formular_antwort(m, geraet)
+            return
         kennung = str(m.get("faden") or "")
         if art == "faden_umbenennen":
             if gespraeche.umbenennen(kennung, str(m.get("titel") or "")):
@@ -493,6 +502,48 @@ class Sarvis:
                                       str(m.get("titel") or "")))
         elif art == "faden_wechseln" and kennung:
             self.schlange.put_nowait(("faden", "wechseln", kennung))
+
+    async def _formular_antwort(self, m: dict, geraet: str) -> None:
+        """Ein ausgefuelltes Formular kommt zurueck.
+
+        Das Formular wird als beantwortet markiert (mit den Antworten, damit
+        man spaeter sieht, was gesagt wurde), und der Inhalt geht als
+        gewoehnlicher Zuruf ans Hirn -- mit dem Hinweis, wohin er gehoert.
+        """
+        try:
+            nummer = int(m.get("eintrag") or 0)
+        except (TypeError, ValueError):
+            return
+        antworten = m.get("antworten") or {}
+        if not nummer or not isinstance(antworten, dict):
+            return
+        alt = None
+        try:
+            alt = next((e for e in gespraeche.verlauf(
+                gespraeche.aktiv(), 0, 200)["eintraege"]
+                if e.get("id") == nummer), None)
+        except Exception:
+            alt = None
+        if alt is None or alt.get("sorte") != "formular":
+            return
+        d = dict(alt.get("daten") or {})
+        if not d.get("offen"):
+            return                       # zweimal abgeschickt: nichts tun
+        d["offen"] = False
+        d["antworten"] = {str(k): str(v)[:2000] for k, v in antworten.items()}
+        self._aendern(nummer, None, d)
+        zeilen = []
+        for i, frage in enumerate(d.get("fragen") or [], 1):
+            titel = frage.get("titel") or frage.get("frage") or f"Frage {i}"
+            wert = (d["antworten"].get(str(frage.get("nr", i))) or "").strip()
+            zeilen.append(f"{i}. {titel}: {wert or '(offen gelassen)'}")
+        auftrag = d.get("auftrag") or 0
+        projekt = d.get("projekt") or ""
+        text = (f"Meine Antworten auf die offenen Fragen von Auftrag {auftrag}"
+                f"{' im Projekt ' + projekt if projekt else ''}. Gib sie als "
+                "Folgeauftrag an den Arbeiter weiter und lass ihn sie "
+                "einbauen:\n" + "\n".join(zeilen))
+        await self._zuruf_vom_netz(text, geraet)
 
     async def _oberflaeche_da(self, geraet: str) -> None:
         """Eine Oberflaeche ist neu verbunden: Sie braucht die Fadenliste."""

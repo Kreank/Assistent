@@ -462,6 +462,7 @@ gerade **alles** fertig geworden ist.
 | `faden_wechseln` | `faden` | in ein anderes Gespräch wechseln |
 | `faden_umbenennen` | `faden`, `titel` | einem Gespräch einen Namen geben |
 | `faden_archivieren` | `faden`, `an` | ins Archiv legen (`an: false` holt zurück) |
+| `formular_antwort` | `eintrag`, `antworten` | ein ausgefülltes Formular abschicken (seit 13.11.2026) |
 
 <!-- /draht:hinaus -->
 
@@ -963,6 +964,7 @@ nur in der Wechselsekunde vor).
 | `sarvis` | `meldung` | von selbst gesagt: Timer, fertiger Auftrag | `{}` |
 | `sarvis` | `frage` | die Rückfrage vor einer Handlung | `offen`, `werkzeug`; geschlossen zusätzlich `entscheidung` (`ja`·`nein`·`anders`·`abgebrochen`) und `antwort` (Wortlaut) |
 | `sarvis` | `blatt` | Titel | alle Felder des `blatt` (`kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`) |
+| `sarvis` | `formular` | Titel | `kennung`, `fragen` (Liste aus `nr`, `titel`, `frage`), `auftrag`, `projekt`, `offen`, nach dem Abschicken `antworten` (`{"<nr>": "Text"}`) |
 | `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
 | `system` | `text` | Hinweis des Systems („keine Antwort — …“) | `{}` |
 
@@ -1015,6 +1017,27 @@ Stufen vorbei. Danach kommt derselbe Eintrag mit `offen: false`.
 - `faden_umbenennen` mit leerem `titel` gibt den Namen an die Automatik
   zurück. Höchstens 80 Zeichen.
 - Antwort ist immer ein `faeden` an alle. Unbekannte Fäden: still nichts.
+
+### Formulare (seit 13.11.2026)
+
+Hat ein Auftrag offene Fragen an Sascha (Abschnitt „Offene Fragen an
+Sascha“ in seinem Bericht), legt Sarvis sie als **`eintrag` mit `sorte:
+formular`** in den Verlauf. Eine eigene Draht-Art gibt es dafür nicht.
+
+Solange `daten.offen` wahr ist: je Frage ein Eingabefeld (Beschriftung
+`titel`, darunter klein `frage`), dazu „Absenden“. Abschicken:
+
+```json
+{ "art": "formular_antwort", "eintrag": 812,
+  "antworten": { "1": "kontakt@…", "2": "", "3": "Sascha …" } }
+```
+
+Leere Antwort heißt „weiß ich noch nicht“. Der Server setzt `offen` auf
+`false`, legt `antworten` dazu (der Eintrag kommt als `eintrag` mit
+derselben `id` neu) und gibt die Antworten als Folgeauftrag weiter.
+Ein zweites Abschicken desselben Formulars wird still übergangen.
+Wie `zuruf` gehört `formular_antwort` in die Warteschlange, solange die
+Leitung nicht steht.
 
 ### HTTP: Verlauf nachladen und durchsuchen
 

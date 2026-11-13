@@ -101,6 +101,21 @@ erscheint in der App bedienbar (scrollen, Hell/Dunkel umschalten).
 
 ---
 
+## Aufgabe 5: Formulare (offene Fragen ausfüllen)
+
+Siehe `DRAHT.md` → „Formulare“. Hat ein Auftrag offene Fragen, kommt ein `eintrag` mit
+`sorte: formular`. Vorlage: `web/sarvis.js`, Funktion `formularKarte` und der Klick auf
+`data-formular`.
+
+- Solange `daten.offen`: je Frage Überschrift (`titel`), darunter klein `frage`, darunter ein
+  mehrzeiliges Eingabefeld. Unten „Absenden“.
+- Absenden schickt `{"art":"formular_antwort","eintrag":<id>,"antworten":{"<nr>":"…"}}` — leere
+  Felder als leeren Text. Wie `zuruf` in die Warteschlange, wenn die Leitung nicht steht.
+- Danach kommt derselbe Eintrag neu (`offen: false`, `antworten`) → Antworten nur noch anzeigen.
+
+**Fertig, wenn:** Ein Formular in der App ausgefüllt und abgeschickt wird und Sarvis daraufhin einen
+Folgeauftrag startet (Rückfrage „Soll ich einen Auftrag … starten?“ erscheint).
+
 ## Nicht nötig (serverseitig schon erledigt)
 
 - Sarvis liest URLs und Dateipfade nicht mehr vor — das macht der Server vor der Sprachausgabe.
@@ -110,4 +125,4 @@ erscheint in der App bedienbar (scrollen, Hell/Dunkel umschalten).
 ## Prüfen
 
 - `python einsatz/draht_pruefen.py` auf dem Server: DRAHT.md stimmt mit dem Code überein.
-- Reihenfolge: Aufgabe 1 → 2 → 3 → 4. Nach jeder Aufgabe einzeln testbar.
+- Reihenfolge: Aufgabe 1 → 2 → 3 → 4 → 5. Nach jeder Aufgabe einzeln testbar.

@@ -547,6 +547,12 @@ class Endpunkt:
         # wechselt, wechselt fuer jede Oberflaeche; alle bekommen danach
         # "faeden" mit dem neuen Stand. Was die Befehle tun, entscheidet
         # main.py -- hier wird nur weitergereicht.
+        elif art == "formular_antwort":
+            # Ein ausgefuelltes Formular (seit 13.11.2026). main.py prueft,
+            # ob es das Formular gibt und ob es noch offen ist.
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
         elif art == "faden_neu":
             if self.faden_an is not None:
                 await self.faden_an(art, m, o.name)

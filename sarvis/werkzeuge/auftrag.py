@@ -147,7 +147,10 @@ nicht — aber bau auch keine großen sichtbaren TODO-Kästen in das
 Ergebnis. Lass den Teil schlicht und unauffällig weg oder nimm einen
 dezenten Platzhalter, und schreib im Bericht unter der Überschrift
 "## Offene Fragen an Sascha" jede fehlende Angabe als konkrete Frage auf.
-Sarvis stellt sie ihm dann.
+Sarvis legt sie ihm als Formular hin. Genau dieses Format, eine Frage je
+Nummer, damit es sich lesen lässt:
+    1. **Kurzer Titel:** Die Frage in einem Satz. (Vorschlag, falls du einen hast)
+Nur fragen, was Sascha wirklich entscheiden muss — höchstens zehn Fragen.
 
 Werkstatt und Handbuch (nur lesen) unter /opt/handbuch — zuerst
 /opt/handbuch/README.md lesen, wenn eins davon passt:
@@ -170,6 +173,42 @@ selbst an, bevor du fertig meldest — Screenshot machen, mit Read
 öffnen, kritisch prüfen wie ein Gestalter, nachbessern. Mindestens zwei
 Runden. Bilder vorher klein halten (Breite höchstens 1600 Pixel), sonst
 wird die Nachricht zu groß."""
+
+
+def offene_fragen(ordner: Path) -> list[dict]:
+    """Die Fragen aus "## Offene Fragen an Sascha" in bericht.md.
+
+    Format, wie der Arbeiter es schreibt (ARBEITER_PROMPT):
+        1. **Kontakt-E-Mail:** Welche Adresse soll ...
+           (Vorschlag: ...)
+    -> [{"nr": 1, "titel": "Kontakt-E-Mail", "frage": "Welche Adresse ..."}]
+    Folgezeilen gehoeren zur Frage davor. Hoechstens 20 Fragen.
+    """
+    try:
+        text = (ordner / "bericht.md").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    m = re.search(r"^##+\s*Offene Fragen[^\n]*\n(.*?)(?=^##?\s|^---\s*$|\Z)",
+                  text, re.M | re.S)
+    if not m:
+        return []
+    fragen, aktuell = [], None
+    for zeile in m.group(1).splitlines():
+        neu = re.match(r"^\s*(\d+)[.)]\s+(.*)$", zeile)
+        if neu:
+            aktuell = {"nr": int(neu.group(1)), "roh": neu.group(2).strip()}
+            fragen.append(aktuell)
+        elif aktuell is not None and zeile.strip():
+            aktuell["roh"] += " " + zeile.strip()
+    aus = []
+    for f in fragen[:20]:
+        roh = f["roh"]
+        t = re.match(r"^\*\*(.+?)\*\*:?\s*(.*)$", roh)
+        titel, frage = (t.group(1).rstrip(":").strip(), t.group(2).strip()) if t \
+            else ("", roh)
+        frage = re.sub(r"[*`]", "", frage).strip()
+        aus.append({"nr": f["nr"], "titel": titel[:80], "frage": frage[:400]})
+    return aus
 
 
 def _eingang_kopieren(ordner: Path, namen: list) -> tuple[int, list]:
@@ -1011,9 +1050,25 @@ class Werkstatt:
         minuten = max(1, auftrag.dauer() // 60)
         if auftrag.status == "fertig":
             kurz = " ".join(auftrag.ergebnis.split())[:400]
+            fragen = offene_fragen(auftrag.ordner)
+            if fragen:
+                # Seit 13.11.2026: Die Fragen des Arbeiters standen nur im
+                # Bericht, und niemand stellte sie. Jetzt liegen sie als
+                # Formular im Verlauf.
+                from .. import anzeige as anzeige_modul
+                anzeige_modul.aktuelle().formular(
+                    f"auftrag-{auftrag.nummer}-fragen",
+                    f"Fragen zu Auftrag {auftrag.nummer} ({auftrag.projekt})",
+                    fragen, auftrag.nummer, auftrag.projekt)
+                frage_satz = (f" Er hat {len(fragen)} "
+                              f"{'Frage' if len(fragen) == 1 else 'Fragen'} "
+                              "an dich. Ich habe sie dir als Formular "
+                              "hingelegt, füll es aus, dann geht es weiter.")
+            else:
+                frage_satz = " Soll ich es dir zeigen?"
             text = (f"Auftrag {auftrag.nummer} im Projekt {auftrag.projekt} "
-                    f"ist fertig, nach {minuten} Minuten. {kurz} "
-                    "Soll ich es dir zeigen?")
+                    f"ist fertig, nach {minuten} Minuten. {kurz}"
+                    + frage_satz)
             titel = f"Auftrag fertig: {auftrag.projekt}"
         elif auftrag.status == "abgebrochen":
             text = f"Auftrag {auftrag.nummer} wurde abgebrochen."

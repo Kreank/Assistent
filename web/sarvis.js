@@ -2178,7 +2178,7 @@ function senden(o) {
     draht.send(JSON.stringify(o));
     return;
   }
-  if (o.art === 'zuruf') {
+  if (o.art === 'zuruf' || o.art === 'formular_antwort') {
     wartet.push({ o, zeit: Date.now() });
     // Steht die Leitung gar nicht, sofort neu verbinden statt auf den
     // nächsten Wiederholversuch zu warten.
@@ -3433,6 +3433,32 @@ function verlinkt(text) {
   });
 }
 
+// Offene Fragen eines Auftrags als Formular. Offen: Eingabefelder und
+// "Absenden". Beantwortet: die Antworten zum Nachlesen.
+function formularKarte(e) {
+  const d = e.daten || {};
+  const fragen = Array.isArray(d.fragen) ? d.fragen : [];
+  const antworten = d.antworten || {};
+  let h = `<div class="blase"><strong>${sicher(e.text || 'Fragen')}</strong>`;
+  fragen.forEach((f, i) => {
+    const nr = String(f.nr != null ? f.nr : i + 1);
+    const titel = f.titel || f.frage || `Frage ${nr}`;
+    const hinweis = f.titel ? (f.frage || '') : '';
+    h += `<div class="feld"><label for="f-${e.id}-${sicher(nr)}">${sicher(nr)}. ${sicher(titel)}</label>`
+      + (hinweis ? `<div class="hinweis">${sicher(hinweis)}</div>` : '');
+    h += d.offen
+      ? `<textarea id="f-${e.id}-${sicher(nr)}" data-nr="${sicher(nr)}" rows="1"
+           placeholder="leer lassen = weiß ich noch nicht"></textarea>`
+      : `<div class="antwort">${sicher(antworten[nr] || '— offen gelassen')}</div>`;
+    h += `</div>`;
+  });
+  h += d.offen
+    ? `<div class="knoepfe"><button type="button" data-formular="${e.id}">Absenden</button>`
+      + `<span class="klein">Sarvis gibt es an den Arbeiter weiter.</span></div>`
+    : `<div class="knoepfe"><span class="klein">Beantwortet und weitergegeben.</span></div>`;
+  return h + `</div>`;
+}
+
 function blattKarte(e) {
   const d = e.daten || {};
   const art = d.sorte === 'html' ? 'Bericht' : d.sorte === 'datei' ? 'Datei'
@@ -3464,6 +3490,9 @@ function eintragEl(e) {
       ? `<div class="knoepfe"><button type="button" data-antwort="Ja">Ja</button>`
         + `<button type="button" class="nein" data-antwort="Nein">Nein</button></div>`
       : `<div class="ausgang">${sicher(AUSGANG[d.entscheidung] || '')}</div>`);
+  } else if (e.sorte === 'formular') {
+    el.classList.add('formular');
+    innen = formularKarte(e);
   } else if (e.sorte === 'blatt') {
     innen = blattKarte(e);
   } else if (e.sorte === 'datei') {
@@ -3495,6 +3524,18 @@ function eintragEl(e) {
 }
 
 eintraegeEl.addEventListener('click', e => {
+  const absenden = e.target.closest('button[data-formular]');
+  if (absenden) {
+    const karte = absenden.closest('.formular');
+    const antworten = {};
+    karte.querySelectorAll('textarea[data-nr]').forEach(t => {
+      antworten[t.dataset.nr] = t.value.trim();
+    });
+    senden({ art: 'formular_antwort', eintrag: Number(absenden.dataset.formular), antworten });
+    absenden.disabled = true;
+    karte.querySelectorAll('textarea').forEach(t => { t.disabled = true; });
+    return;
+  }
   const antwort = e.target.closest('button[data-antwort]');
   if (antwort) {
     // Dieselbe Antwort, als wäre sie gesagt worden -- der Server sieht

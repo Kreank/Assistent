@@ -439,6 +439,20 @@ class Anzeige:
             "inhalt": text, "datei": str(datei or ""),
             "bytes": int(bytes_ or 0)})
 
+    def formular(self, kennung: str, titel: str, fragen: list,
+                 auftrag: int = 0, projekt: str = "") -> None:
+        """Fragen zum Ausfuellen in den Verlauf legen (seit 13.11.2026).
+
+        Kommt nur als eintrag (sorte "formular") ueber den Draht, keine
+        eigene Art: Ein Formular ist etwas, das man spaeter noch findet,
+        kein Augenblickszustand. Die Antwort kommt als
+        "formular_antwort" zurueck (DRAHT.md).
+        """
+        _mitschreiben("formular", {
+            "kennung": str(kennung), "titel": str(titel or ""),
+            "fragen": list(fragen or []), "auftrag": int(auftrag or 0),
+            "projekt": str(projekt or "")})
+
     def blatt_weg(self, kennung: str) -> None:
         """Ein Blatt zuklappen."""
         self._senden(art="blatt_weg", kennung=str(kennung))
