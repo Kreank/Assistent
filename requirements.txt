@@ -22,6 +22,11 @@ nvidia-cublas-cu12
 nvidia-cudnn-cu12
 
 # --- Mund -----------------------------------------------------------------
+# Pocket TTS (Stimme seit 14.11.2026) steht NICHT hier: Es braucht torch
+# aus dem CPU-Index, sonst kommt das CUDA-torch mit (~2,5 GB). Installiert
+# wird es im Dockerfile in eigener Schicht. Ausserhalb des Containers:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.15.0
+#   pip install pocket-tts==4.0.1
 piper-tts
 # stimmfarbe.py: resample_poly fuer die Effektkette hinter Piper.
 scipy

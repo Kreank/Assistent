@@ -71,7 +71,10 @@ def _ist_titelsitzung(datei) -> bool:
                 if isinstance(inhalt, list):
                     inhalt = " ".join(b.get("text", "") for b in inhalt
                                       if isinstance(b, dict))
-                return str(inhalt or "").startswith("Erster Zuruf: ")
+                # Auch die Uebersetzungen der sichtbaren Gedanken
+                # (denken.py, seit 14.11.2026) sind keine Gespraeche.
+                return str(inhalt or "").startswith(
+                    ("Erster Zuruf: ", "Gedanke übersetzen: "))
     except (OSError, ValueError):
         pass
     return False

@@ -190,7 +190,12 @@ class Lautsprecher:
                 if still and self.melden is not None:
                     self.melden(0.0)
 
-    def sagen(self, proben: np.ndarray, rate: int) -> None:
+    def sagen(self, proben: np.ndarray, rate: int,
+              ausklang: bool = True) -> None:
+        # ausklang wird lokal bewusst ignoriert: sd.play() je Block bricht
+        # ohne die Stille die letzte Silbe ab (siehe _abspielen). Lokal
+        # gibt es zwischen gestreamten Stuecken deshalb kleine Pausen --
+        # der Server laeuft ueber Netz, dort gilt der Schalter.
         with self._tor:
             self._abbruch.clear()
             self.leer.clear()

@@ -13,6 +13,8 @@ import sys
 import time
 from datetime import datetime
 
+import numpy as np
+
 # Windows-Konsole auf UTF-8, sonst zerfallen Umlaute in Claudes Antworten.
 for strom in (sys.stdout, sys.stderr):
     try:
@@ -20,7 +22,7 @@ for strom in (sys.stdout, sys.stderr):
     except (AttributeError, OSError):
         pass
 
-from . import anmeldung, config, gespraeche, klang, rueckfrage, schutz  # noqa: E402
+from . import anmeldung, config, denken, gespraeche, klang, rueckfrage, schutz  # noqa: E402
 from . import anzeige as anzeige_modul  # noqa: E402
 from .anzeige import DENKT, FRAGT, HOERT, RUHIG, SPRICHT, Anzeige  # noqa: E402
 from .klang import gong  # noqa: E402
@@ -789,9 +791,7 @@ class Sarvis:
             # Erst der Ton, dann die Worte: Wer nicht direkt am Rechner
             # sitzt, verpasst sonst den Anfang des Satzes.
             self.lautsprecher.sagen(*gong())
-        proben, rate = await asyncio.to_thread(self.mund.sprechen, text)
-        if len(proben):
-            self.lautsprecher.sagen(proben, rate)
+        if await asyncio.to_thread(self._gestreamt_sagen, text):
             await asyncio.to_thread(self.lautsprecher.warten)
         self.anzeige.zustand(RUHIG)
         self.horcher.spricht(None)
@@ -1126,12 +1126,30 @@ class Sarvis:
         """Einen Satz sprechen und abwarten, bis er zu Ende ist."""
         self.horcher.spricht(text)
         try:
-            proben, rate = self.mund.sprechen(text)
-            if len(proben):
-                self.lautsprecher.sagen(proben, rate)
+            if self._gestreamt_sagen(text):
                 self.lautsprecher.warten()
         finally:
             self.horcher.spricht(None)
+
+    def _gestreamt_sagen(self, text: str) -> bool:
+        """Text sprechen, Stueck fuer Stueck, sobald es fertig ist.
+
+        Seit Pocket TTS (14.11.2026) noetig: Es rechnet nur knapp
+        schneller als Echtzeit, ein ganzer Satz vorab hiesse Sekunden
+        Stille. Bei Piper ist es genau ein Stueck. True = es kam Ton."""
+        heraus = False
+        strom = self.mund.sprechen_strom(text)
+        try:
+            for proben, rate, letztes in strom:
+                if not len(proben):
+                    if letztes and heraus:
+                        self.lautsprecher.sagen(np.zeros(1, dtype="float32"), rate)
+                    continue
+                self.lautsprecher.sagen(proben, rate, ausklang=letztes)
+                heraus = True
+        finally:
+            strom.close()
+        return heraus
 
     async def _sagen(self, text: str) -> None:
         print(f"  Sarvis : {text}")
@@ -1277,9 +1295,7 @@ class Sarvis:
         # selbst weckt.
         self.horcher.spricht(text)
         try:
-            proben, rate = self.mund.sprechen(text)
-            if len(proben):
-                self.lautsprecher.sagen(proben, rate)
+            if self._gestreamt_sagen(text):
                 self.lautsprecher.warten()
         except Exception as e:
             print(f"  (Begruessung fehlgeschlagen: {e})")
@@ -1380,19 +1396,33 @@ class Sarvis:
             self.horcher.spricht(satz)
             heraus = False
             try:
-                proben, rate = self.mund.sprechen(satz)
-                # Die Synthese laeuft in einem Faden und laesst sich nicht
-                # abbrechen -- also danach nochmal nachsehen, sonst rutscht
-                # der gerade fertige Satz nach dem Abbruch doch noch heraus.
-                if (len(proben) and not self.abgebrochen
-                        and self.durchgang == marke):
-                    if erster_ton is None:
-                        erster_ton = time.perf_counter()
-                        self.anzeige.zustand(SPRICHT)
-                    gesprochen.append(satz)
-                    self.anzeige.untertitel("sarvis", " ".join(gesprochen))
-                    self.lautsprecher.sagen(proben, rate)
-                    heraus = True
+                # In Stuecken (Pocket TTS, seit 14.11.2026): Jedes Stueck
+                # geht hinaus, sobald es fertig ist -- Pocket rechnet nur
+                # knapp schneller als Echtzeit. Piper liefert ein Stueck.
+                # Vor jedem Stueck nachsehen, ob abgebrochen wurde, sonst
+                # rutscht nach dem Abbruch doch noch etwas heraus; das
+                # Schliessen des Stroms haelt auch Pocket an.
+                strom = self.mund.sprechen_strom(satz)
+                try:
+                    for proben, rate, letztes in strom:
+                        if self.abgebrochen or self.durchgang != marke:
+                            break
+                        if not len(proben):
+                            if letztes and heraus:
+                                # Nur noch der Ausklang hinter dem Satz.
+                                self.lautsprecher.sagen(
+                                    np.zeros(1, dtype="float32"), rate)
+                            continue
+                        if erster_ton is None:
+                            erster_ton = time.perf_counter()
+                            self.anzeige.zustand(SPRICHT)
+                        if not heraus:
+                            gesprochen.append(satz)
+                            self.anzeige.untertitel("sarvis", " ".join(gesprochen))
+                        self.lautsprecher.sagen(proben, rate, ausklang=letztes)
+                        heraus = True
+                finally:
+                    strom.close()
             finally:
                 # Wurde der Satz nicht gesagt, wird seine Anmeldung wieder
                 # zurueckgenommen. Sonst blieb der Horcher nach einem
@@ -1412,6 +1442,67 @@ class Sarvis:
                 if not heraus:
                     self.horcher.spricht(None)
 
+        # Die sichtbaren Gedanken dieses Zugs (denken.py): EINE Karte im
+        # Verlauf, angelegt beim ersten Schritt, danach mit neuem Stand
+        # ersetzt. Steht damit zwischen Zuruf und Antwort. Ein Zug ohne
+        # Denken und ohne Werkzeug bekommt keine Karte.
+        denkkarte = {"id": None, "schritte": [], "seit": time.time(),
+                     "fertig": False, "abgebrochen": False,
+                     "schloss": threading.Lock()}
+
+        def denk_schreiben(fertig: bool | None = None,
+                           abgebrochen: bool = False) -> None:
+            # Ohne fertig: der Stand bleibt, wie er ist (Uebersetzung,
+            # die nach dem Zug eintrifft).
+            if fertig is not None:
+                denkkarte["fertig"] = fertig
+            if abgebrochen:
+                denkkarte["abgebrochen"] = True
+            fertig = denkkarte["fertig"]
+            abgebrochen = denkkarte["abgebrochen"]
+            schritte = denkkarte["schritte"]
+            if not schritte:
+                return
+            dauer = time.time() - denkkarte["seit"]
+            daten = {"schritte": schritte, "fertig": fertig,
+                     "seit": denkkarte["seit"], "dauer": round(dauer, 1)}
+            if abgebrochen:
+                daten["abgebrochen"] = True
+            text = denken.zusammenfassung(schritte, dauer, fertig)
+            with denkkarte["schloss"]:
+                if denkkarte["id"] is None:
+                    e = self._eintragen("sarvis", "denken", text, daten, geraet="")
+                    if e:
+                        denkkarte["id"] = e["id"]
+                else:
+                    self._aendern(denkkarte["id"], text, daten)
+
+        def denk_uebersetzen(schritt: dict) -> None:
+            deutsch = denken.uebersetzen(schritt["text"])
+            if deutsch:
+                schritt["text"] = deutsch
+                denk_schreiben()
+
+        def denk_melden(art: str, schritt: dict) -> None:
+            schritte = denkkarte["schritte"]
+            if art == "neu":
+                schritte.append(schritt)
+                if (schritt.get("art") == "gedanke"
+                        and denken.ist_englisch(schritt.get("text", ""))):
+                    threading.Thread(target=denk_uebersetzen, args=(schritt,),
+                                     name="gedanke", daemon=True).start()
+            else:
+                for s in reversed(schritte):
+                    if s.get("id") and s.get("id") == schritt.get("id"):
+                        s["stand"] = "fehler" if schritt.get("fehler") else "fertig"
+                        if schritt.get("ergebnis"):
+                            s["ergebnis"] = schritt["ergebnis"]
+                        break
+                else:
+                    return
+            denk_schreiben(False)
+
+        self.hirn.denkschritt = denk_melden
         try:
             async for schnipsel in self.hirn.fragen(gesagt):
                 if erstes_wort is None:
@@ -1424,6 +1515,8 @@ class Sarvis:
             if rest:
                 await asyncio.to_thread(vorlesen, rest)
         except asyncio.CancelledError:
+            self.hirn.denkschritt = None
+            denk_schreiben(True, abgebrochen=True)
             # Reingeredet: Was bis dahin kam, steht trotzdem im Verlauf --
             # als unterbrochen markiert, damit niemand es fuer die ganze
             # Antwort haelt.
@@ -1432,6 +1525,12 @@ class Sarvis:
                 self._eintragen("sarvis", "text", teil,
                                 {"unterbrochen": True}, geraet="")
             raise
+        except Exception:
+            self.hirn.denkschritt = None
+            denk_schreiben(True, abgebrochen=True)
+            raise
+        self.hirn.denkschritt = None
+        denk_schreiben(True)
 
         text = "".join(ganze_antwort).strip()
         if text:

@@ -393,3 +393,93 @@ def ohne_links(text: str) -> str:
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text
+
+
+# --- Alle Ziffern ausschreiben (fuer Pocket TTS) ---------------------------
+#
+# Piper liest Ziffern ueber espeak selbst -- vorlesbar() korrigiert dort
+# nur, was espeak falsch macht. Pocket TTS (seit 14.11.2026) liest
+# Ziffern GAR NICHT: "8 bis 12 Grad" wurde in der Hoerprobe zu
+# Kauderwelsch ("tepesgliedsbassgrad"). Fuer Pocket muss deshalb jede
+# Ziffer als Wort ankommen. Der Bildschirmtext bleibt unberuehrt -- das
+# hier laeuft nur in Mund.sprechen.
+
+# Ein paar haeufige weibliche Woerter, damit "1 Stunde" nicht "ein
+# Stunde" heisst. Was fehlt, bekommt "ein" -- verstaendlich, nur unschoen.
+_WEIBLICH = {
+    "stunde", "minute", "sekunde", "woche", "nacht", "person", "mail",
+    "e-mail", "nachricht", "datei", "aufgabe", "seite", "frage", "zeile",
+    "rechnung", "erinnerung", "sache", "idee", "liste", "version", "stimme",
+    "folge", "runde", "tasse", "flasche", "million", "milliarde", "einheit",
+}
+
+_PROZENT = re.compile(r"\s*%")
+_GRAD = re.compile(r"\s*°\s*C?\b|\s*°")
+_BEREICH = re.compile(r"(?<![\d.,])(\d+)\s*[-–]\s*(\d+)(?![\d.,])")
+_KOMMAZAHL = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+|\d+),(\d+)(?![\d,])")
+_PUNKTZAHL = re.compile(r"(?<![\d.,])(\d+)\.(\d+)(?![\d.,])")
+_TAUSENDER = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+)(?![\d,]|\.\d)")
+_FUEHRENDE_NULL = re.compile(r"(?<![\d.,])0\d+(?:[ /-]\d+)*")
+_VERSION = re.compile(r"(?<![\d.,])(?!\d{1,3}(?:\.\d{3})+(?![\d.]))\d+(?:\.\d+){2,}(?![\d,])")
+_JAHR = re.compile(r"\b([Ii]m|Jahr|[Ss]eit|[Aa]nno)\s+(1[1-9]\d\d)\b")
+_EINS_VOR = re.compile(r"(?<![\d.,])1\s+(Uhr\b|([A-ZÄÖÜ][\wäöüß-]*))")
+_GANZ = re.compile(r"\d+")
+
+
+def _ziffernweise(s: str) -> str:
+    return " ".join(_EINER[int(z)] for z in s if z.isdigit())
+
+
+def _eins_vor(m: re.Match) -> str:
+    wort = m.group(1)
+    if wort == "Uhr":
+        return "ein Uhr"
+    return ("eine " if wort.lower() in _WEIBLICH else "ein ") + wort
+
+
+def _ganzwort(m: re.Match) -> str:
+    s = m.group(0)
+    # Sehr lange Ziffernfolgen (Kennungen, Nummern) ziffernweise.
+    wort = _ziffernweise(s) if len(s) > 15 else zahlwort(int(s))
+    # "MP3" -> "MP drei", "3D" -> "drei D": an Buchstaben kleben lassen
+    # klingt fuer das Modell wie ein unbekanntes Wort.
+    davor = m.string[m.start() - 1] if m.start() else " "
+    danach = m.string[m.end()] if m.end() < len(m.string) else " "
+    return ((" " if davor.isalpha() else "") + wort
+            + (" " if danach.isalpha() else ""))
+
+
+_ALLES = (
+    (_PROZENT, " Prozent"),
+    (_GRAD, " Grad"),
+    (_JAHR, lambda m: m[1] + " " + jahreszahl(int(m[2]))),
+    (_BEREICH, lambda m: m[1] + " bis " + m[2]),
+    (_VERSION, lambda m: " Punkt ".join(_ziffernweise(t) if len(t) > 3 else zahlwort(int(t)) for t in m[0].split("."))),
+    (_KOMMAZAHL, lambda m: zahlwort(_ganz(m[1])) + " Komma " + _ziffernweise(m[2])),
+    (_TAUSENDER, lambda m: zahlwort(_ganz(m[1]))),
+    (_PUNKTZAHL, lambda m: m[1] + " Punkt " + _ziffernweise(m[2])),
+    (_FUEHRENDE_NULL, lambda m: _ziffernweise(m[0])),
+    (_EINS_VOR, _eins_vor),
+    (_GANZ, _ganzwort),
+)
+
+
+def alles_ausschreiben(text: str) -> str:
+    """Wie vorlesbar(), danach aber KEINE Ziffer mehr im Text.
+
+    Reihenfolge: erst vorlesbar() (Datum, Uhrzeit, Geld, Ordnungszahlen
+    -- dort steckt die Sprachlogik), dann die Reste: Prozent, Grad,
+    Bereiche, Kommazahlen, Versionsnummern, Nummern mit fuehrender Null,
+    zuletzt jede uebrige ganze Zahl. Faellt etwas um, kommt das Ergebnis
+    von vorlesbar() zurueck -- ein unschoener Satz ist besser als keiner.
+    """
+    text = vorlesbar(text)
+    if not text or not _ZIFFER.search(text):
+        return text
+    zwischen = text
+    try:
+        for muster, ersatz in _ALLES:
+            text = muster.sub(ersatz, text)
+        return re.sub(r"\s{2,}", " ", text).strip()
+    except Exception:
+        return zwischen

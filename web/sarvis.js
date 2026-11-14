@@ -3473,7 +3473,45 @@ function blattKarte(e) {
     + `${d.sorte === 'datei' ? 'Holen' : 'Öffnen'}</button></div></div>`;
 }
 
+// Sarvis' Denken (seit 14.11.2026): eine zugeklappte Zeile über der
+// Antwort, aufgeklappt die Schritte -- was er überlegt hat, welche
+// Werkzeuge er benutzt hat, was dabei herauskam. Dieselbe id kommt
+// mehrmals (live); ob sie aufgeklappt war, merkt sich offeneGedanken.
+const offeneGedanken = new Set();
+
+function denkenEl(e) {
+  const d = e.daten || {};
+  const schritte = Array.isArray(d.schritte) ? d.schritte : [];
+  const el = document.createElement('div');
+  el.dataset.id = e.id;
+  el.className = 'e sarvis denken' + (d.fertig ? '' : ' laeuft')
+    + (d.abgebrochen ? ' abgebrochen' : '');
+  const auf = document.createElement('details');
+  auf.open = offeneGedanken.has(e.id);
+  auf.addEventListener('toggle', () => {
+    if (auf.open) offeneGedanken.add(e.id); else offeneGedanken.delete(e.id);
+  });
+  const zeile = d.abgebrochen ? (e.text || 'Gedanken') + ' · abgebrochen' : (e.text || 'Gedanken');
+  let h = `<summary><span class="punkt"></span>${sicher(zeile)}</summary><ol>`;
+  for (const s of schritte) {
+    if (s.art === 'gedanke') {
+      const t = String(s.text || '').replace(/\*\*([^*]+)\*\*/g, '$1');
+      h += `<li class="gedanke"><div class="was">Überlegt</div><div class="text">${sicher(t)}</div></li>`;
+    } else if (s.art === 'werkzeug') {
+      const stand = s.stand === 'fehler' ? 'fehler' : s.stand === 'fertig' ? 'fertig' : 'laeuft';
+      h += `<li class="werkzeug ${stand}"><div class="was">${sicher(s.titel || 'Werkzeug')}</div>`
+        + (s.text ? `<div class="text">${sicher(s.text)}</div>` : '')
+        + (s.ergebnis ? `<div class="ergebnis">${sicher(s.ergebnis)}</div>` : '')
+        + `</li>`;
+    }
+  }
+  auf.innerHTML = h + '</ol>';
+  el.appendChild(auf);
+  return el;
+}
+
 function eintragEl(e) {
+  if (e.sorte === 'denken') return denkenEl(e);
   const el = document.createElement('div');
   el.dataset.id = e.id;
   const d = e.daten || {};

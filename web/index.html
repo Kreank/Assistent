@@ -158,6 +158,34 @@ body{display:flex;flex-direction:column;
   background:rgba(120,170,255,.18);color:#dbe8ff}
 .formular .knoepfe button:disabled{opacity:.4}
 .formular .knoepfe .klein{font-size:11.5px;color:rgba(232,241,253,.5)}
+/* Gedanken (seit 14.11.2026): leise, zugeklappt, über der Antwort.
+   Aufgeklappt eine Zeitleiste: Überlegung, Werkzeug (Haken/Kreuz),
+   kurzer Auszug aus dem Ergebnis. */
+.denken details{font-size:12.5px;color:rgba(232,241,253,.55);max-width:min(560px,86vw)}
+.denken summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;
+  gap:7px;padding:3px 10px 3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.03);user-select:none}
+.denken summary::-webkit-details-marker{display:none}
+.denken summary::after{content:"▸";font-size:10px;opacity:.6;transition:transform .15s}
+.denken details[open] summary::after{transform:rotate(90deg)}
+.denken .punkt{width:7px;height:7px;border-radius:50%;background:rgba(120,170,255,.55)}
+.denken.laeuft .punkt{background:#7ab8ff;animation:denkpuls 1s ease-in-out infinite}
+.denken.abgebrochen .punkt{background:rgba(255,120,140,.7)}
+@keyframes denkpuls{50%{opacity:.25;transform:scale(.7)}}
+.denken ol{list-style:none;margin:8px 0 2px 11px;padding:0 0 0 14px;
+  border-left:1px solid rgba(120,170,255,.25)}
+.denken li{position:relative;margin:0 0 9px}
+.denken li::before{position:absolute;left:-21px;top:1px;width:13px;text-align:center;
+  font-size:11px;background:#0a0f18}
+.denken li.gedanke::before{content:"💭"}
+.denken li.werkzeug.laeuft::before{content:"⏳"}
+.denken li.werkzeug.fertig::before{content:"✓";color:#7be0a0}
+.denken li.werkzeug.fehler::before{content:"✗";color:#ff8c9c}
+.denken .was{font-weight:600;color:rgba(232,241,253,.78)}
+.denken .text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+.denken li.gedanke .text{font-style:italic}
+.denken .ergebnis{margin-top:2px;font-size:11.5px;color:rgba(232,241,253,.42);
+  overflow-wrap:anywhere}
 /* Karten: Blatt, Bericht, Datei, Kachel. */
 .karte{border-radius:12px;padding:10px 12px;min-width:min(260px,70vw);
   border:1px solid rgba(255,179,71,.30);background:rgba(10,15,24,.92)}

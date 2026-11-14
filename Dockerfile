@@ -146,6 +146,16 @@ RUN set -eux; \
     apt-get purge -y --auto-remove gcc libc6-dev linux-libc-dev; \
     rm -rf /var/lib/apt/lists/*
 
+# --- Pocket TTS (Sarvis' Stimme seit 14.11.2026) ---------------------------
+#
+# Eigene Schicht, damit die grosse Schicht darueber aus dem Cache kommt.
+# torch ZUERST aus dem CPU-Index: Ohne das zieht pip das CUDA-torch mit
+# rund 2,5 GB GPU-Bibliotheken, obwohl Pocket nur auf der CPU rechnet
+# (gemessen in der Hoerprobe, stimmproben/2026-11-14). Fassungen genau die
+# getesteten. Das Modell selbst kommt beim ersten Start nach HF_HOME.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.15.0 \
+ && pip install --no-cache-dir pocket-tts==4.0.1
+
 # --- Das VAD-Modell -------------------------------------------------------
 #
 # openwakeword bringt silero_vad.onnx NICHT mit. Das Rad ist 60 KB

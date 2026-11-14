@@ -72,6 +72,17 @@ class Mund:
             self.eleven = Eleven()
             print(f"  {self.eleven.stand_satz()}")
 
+        # Pocket TTS (seit 14.11.2026, siehe pocket.py). Laedt es nicht --
+        # Paket fehlt, Modell nicht holbar --, spricht Sarvis mit Piper
+        # weiter, statt gar nicht zu starten.
+        self.pocket = None
+        if getattr(config, "STIMME_DIENST", "piper") == "pocket":
+            try:
+                from .pocket import Pocket
+                self.pocket = Pocket()
+            except Exception as e:
+                print(f"  Pocket TTS nicht verfuegbar ({e!r}) -- Piper spricht")
+
     def sprechen(self, text: str) -> tuple[np.ndarray, int]:
         """Ein Stueck Text zu Audio. Gibt (Proben, Abtastrate) zurueck.
 
@@ -86,6 +97,13 @@ class Mund:
         text = aussprache.ohne_links(text)
         if not text:
             return np.zeros(0, dtype="float32"), config.ABTASTRATE
+        if self.pocket is not None:
+            teile, rate = [], config.ABTASTRATE
+            for proben, rate, _ in self.sprechen_strom(text):
+                teile.append(proben)
+            if teile:
+                return np.concatenate(teile), rate
+            return np.zeros(0, dtype="float32"), rate
         if self.eleven is not None:
             fertig = self.eleven.sprechen(text)
             if fertig is not None:
@@ -106,6 +124,48 @@ class Mund:
         if not teile:
             return np.zeros(0, dtype="float32"), rate
         return stimmfarbe.faerben(np.concatenate(teile), rate, self.farbe)
+
+    def sprechen_strom(self, text: str):
+        """Wie sprechen(), aber in Stuecken: (proben, rate, letztes).
+
+        Nur Pocket liefert wirklich mehrere Stuecke -- es rechnet knapp
+        schneller als Echtzeit, und einen ganzen Satz abzuwarten hiesse
+        sekundenlange Stille vor dem ersten Ton. Piper und ElevenLabs
+        geben EIN Stueck. Bricht Pocket vor dem ersten Stueck ab, spricht
+        Piper den Satz; bricht es mittendrin ab, endet der Satz dort --
+        ihn doppelt zu hoeren waere schlimmer.
+
+        Bei Pocket ist das letzte Stueck LEER (letztes=True, 0 Proben):
+        Jedes Stueck geht sofort hinaus, ohne auf das naechste zu warten
+        -- ob es das letzte war, weiss man erst hinterher. Der Aufrufer
+        haengt dann nur noch den Ausklang an.
+        """
+        if self.pocket is None:
+            proben, rate = self.sprechen(text)
+            yield proben, rate, True
+            return
+        text = aussprache.ohne_links(text)
+        if not text:
+            return
+        text = aussprache.alles_ausschreiben(text)
+        rate = self.pocket.rate
+        schon = False
+        try:
+            for stueck in self.pocket.strom(text):
+                schon = True
+                yield stueck, rate, False
+        except Exception as e:
+            print(f"  (Pocket TTS fehlgeschlagen: {e!r})")
+            if not schon:
+                # Ohne Pocket: der alte Weg ueber Piper.
+                pocket, self.pocket = self.pocket, None
+                try:
+                    proben, rate = self.sprechen(text)
+                finally:
+                    self.pocket = pocket
+                yield proben, rate, True
+                return
+        yield np.zeros(0, dtype="float32"), rate, True
 
     def aufwaermen(self) -> None:
         self.sprechen("Bereit.")

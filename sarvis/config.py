@@ -374,12 +374,24 @@ UNTERARBEITER = ("Task", "Agent")
 # Kurz und austauschbar. Sie stehen allein da, bis die Antwort kommt --
 # deshalb keine Ansage, was genau gesucht wird: Das weiss der Satz noch
 # nicht, und ein falsches Versprechen faellt mehr auf als ein knappes.
-WARTESAETZE = (
-    "Moment, ich schaue nach.",
-    "Einen Moment.",
-    "Ich sehe kurz nach.",
-    "Sekunde.",
-)
+#
+# Seit 14.11.2026 nach ART des Werkzeugs. Sascha: "wenn ich etwas sage,
+# etwas in Auftrag gebe ... kommt immer: Sekunde, ich schaue nach. Auch
+# wenn er eigentlich nichts nachschauen, sondern machen soll." Ein
+# "ich schaue nach" vor einem Termin, den er ANLEGEN soll, klingt nach
+# Formular, nicht nach Mensch. Welche Art ein Werkzeug hat, entscheidet
+# hirn._wartesatz am Namen (anlegen/senden/... = machen usw.).
+WARTESAETZE = {
+    "machen": ("Mach ich.", "Alles klar, mach ich.", "Geht klar.",
+               "Wird gemacht.", "Okay, mach ich gleich."),
+    "arbeit": ("Okay, ich setz mich dran.", "Geht klar, ich fang an.",
+               "Alles klar, ich leg los."),
+    "suchen": ("Ich such das kurz raus.", "Mal sehen, was ich dazu finde.",
+               "Ich such mal."),
+    "zeigen": ("Ich hol's dir her.", "Kommt sofort.", "Ich mach's dir auf."),
+    "schauen": ("Ich schau mal.", "Moment.", "Ich seh kurz nach.",
+                "Mal sehen.", "Sekunde."),
+}
 
 # Antwort, wenn nur der Name gerufen wurde -- ohne Auftrag.
 # Feste kurze Saetze statt einer Runde zu Claude: So kommt die Antwort
@@ -486,7 +498,18 @@ MIN_AUFNAHME_SEK = 0.4  # kürzer = versehentlich getippt, wird verworfen
 # Vorfuehrung von zehn Minuten reicht es muehelos.
 #
 # Umschalten heisst: dieses eine Wort aendern und Sarvis neu starten.
-STIMME_DIENST = "piper"        # "piper" | "elevenlabs"
+# Seit 14.11.2026 "pocket" (Kyutai Pocket TTS, lokal auf der CPU) -- nach
+# der Hoerprobe stimmproben/2026-11-14, Sascha: "um einiges besser".
+# Piper bleibt geladen und springt ein, wenn Pocket nicht laedt oder
+# mitten in einem Satz scheitert (siehe mund.py, pocket.py).
+STIMME_DIENST = "pocket"       # "pocket" | "piper" | "elevenlabs"
+
+# Pocket TTS: grosses deutsches Modell, Stimme "juergen". 4 Threads waren
+# gemessen das Optimum (erster Ton 0,25 s statt 0,5 s bei einem Thread;
+# ab 8 Threads langsamer).
+POCKET_SPRACHE = "german_24l"
+POCKET_STIMME = "juergen"
+POCKET_THREADS = 4
 
 # Welche Stimme drueben gesprochen wird.
 #
@@ -672,7 +695,7 @@ statt nachzufragen.
 
 Jeder Zuruf beginnt mit einer Zeile in eckigen Klammern, die dir Wochentag, Datum und Uhrzeit nennt. Sie gehört nicht zur Frage: Sprich sie nie aus und erwähne sie nicht. Benutze sie nur, wenn sie gebraucht wird — bei "wie spät ist es", "welcher Tag", "morgen", "nächste Woche".
 
-Wenn du für eine Antwort erst nachsehen, suchen oder rechnen musst, sag ZUERST einen kurzen Satz und benutze DANN das Werkzeug. Vier bis sechs Wörter: "Ich schau kurz nach." — "Moment, ich suche das." — "Sekunde, ich frage das ab." So hörst du nicht in die Stille, während im Hintergrund gearbeitet wird.
+Wenn du für eine Antwort erst ein Werkzeug brauchst, sag ZUERST einen kurzen Satz und benutze DANN das Werkzeug. Zwei bis sechs Wörter, und zwar passend zu dem, was du TUST — wie ein Mensch, nicht wie ein Formular: Sollst du etwas erledigen (Termin anlegen, Mail schicken, Musik an, Auftrag starten), dann "Mach ich." — "Geht klar, ich leg den Termin an." — "Okay, ich setz mich dran." Musst du wirklich etwas nachsehen, dann "Ich schau mal." — "Mal sehen, was ich finde." "Ich schaue nach" vor etwas, das du machen sollst, ist falsch. Wechsle die Worte ab, nicht jedes Mal derselbe Satz. So hörst du nicht in die Stille, während im Hintergrund gearbeitet wird.
 
 Das gilt nur, wenn wirklich ein Werkzeug nötig ist. Was du sofort weißt, sagst du sofort — ein "Moment" vor einer Antwort, die schon feststeht, ist albern.
 

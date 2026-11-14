@@ -136,7 +136,7 @@ Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
 | `blatt` | `kennung`, `sorte`, `titel`, `adresse`, `inhalt`, `datei`, `bytes`, `sekunden`; optional `mime`, `seiten`, `pdf`, `vorschau` | etwas zum Lesen |
 | `blatt_weg` | `kennung` | Blatt zuklappen |
 | `geplant` | `eintraege` | Timer und geplante Aufgaben — immer die ganze Liste, Form wie `GET /geplant` |
-| `ton` | `daten`, `rate`, `runde` | gesprochenes Audio, satzweise |
+| `ton` | `daten`, `rate`, `runde` | gesprochenes Audio, satzweise (ein Satz ggf. in mehreren Blöcken, nahtlos anhängen) |
 | `ton_stopp` | `runde` | sofort still sein |
 | `radio` | `url`, `name` | diesen Sender abspielen — Adresse, kein Ton |
 | `radio_aus` | — | Radio beenden |
@@ -548,6 +548,13 @@ Unterschied zwischen „fühlt sich an wie reden" und „fühlt sich an wie ein
 Formular": Während Satz eins klingt, baut der Server schon Satz zwei. Die
 Blöcke gehören **nahtlos aneinandergehängt**, nicht einzeln abgespielt
 mit Lücken dazwischen.
+
+**Seit 14.11.2026 kann ein Satz aus mehreren Blöcken bestehen** (Stimme
+Pocket TTS, gestreamt: erster Block ~0,4 s, dann ~1 s). Nur der letzte
+Block eines Satzes trägt die 0,3 s Ausklang-Stille. Am Format ändert sich
+nichts — wer schon nahtlos anhängt, muss nichts tun. Wer jeden Block
+einzeln mit Pause abspielt, stottert jetzt mitten im Satz. `rate` ist bei
+Pocket **24000** (Piper 22050) — immer aus dem Feld lesen.
 
 **Die `runde` ist die Wahrheit.** Reinreden ist ausdrücklich erlaubt —
 wer Sarvis unterbricht, soll ihn sofort zum Schweigen bringen. Über Netz
@@ -1013,6 +1020,7 @@ nur in der Wechselsekunde vor).
 | `sarvis` | `auftrag` | Statuskarte eines Hintergrundauftrags, mehrzeilig (Laufzeit, Aufgabe, zuletzt erledigt, als Nächstes) — **dieselbe `id` wird laufend ersetzt** | `nummer`, `zustand` (`läuft`, `fertig`, `gestoppt`, `abgebrochen`), `projekt`; seit 13.11.2026 zusätzlich `seit` (Start, Unix-Sekunden), `schritte` (Modellzüge bisher), `pensum` (Höchstzahl, derzeit 250) — **können fehlen**, dann unbestimmter Balken |
 | `sarvis` | `formular` | Titel | `kennung`, `fragen` (Liste aus `nr`, `titel`, `frage`), `auftrag`, `projekt`, `offen`, nach dem Abschicken `antworten` (`{"<nr>": "Text"}`) |
 | `sarvis` | `kachel` | Kopfzeile | alle Felder der `kachel` außer `sekunden` |
+| `sarvis` | `denken` | Zusammenfassung für die zugeklappte Zeile: „Denkt nach …“ solange es läuft, danach z. B. „Gedanken · 3 Schritte · 4 s“ — **dieselbe `id` wird laufend ersetzt** (seit 14.11.2026) | `fertig` (bool), `abgebrochen` (bool, optional), `seit` (Unix-Sekunden), `dauer` (s), `schritte`: Liste, je Schritt `art` = `gedanke` (`text`: Überlegung, deutsch, kann kurz englisch sein und wird ersetzt) oder `werkzeug` (`id`, `titel` wie „Termine ansehen“, `text` = Eingabe in einer Zeile, `stand` = `läuft`·`fertig`·`fehler`, `ergebnis` = Auszug bis 220 Zeichen, sobald da). Steht zwischen Zuruf und Antwort. **Zugeklappt anzeigen**, aufklappbar; Aufgeklappt-Zustand über Ersetzungen hinweg halten. Ein Zug ohne Denken und ohne Werkzeug hat keinen. |
 | `system` | `text` | Hinweis des Systems („keine Antwort — …“) | `{}` |
 | `system` | `text` | „Geplante Aufgabe 7: …“ — eine geplante Aufgabe ist fällig und läuft; die Antwort folgt als `sarvis`/`text` (seit 13.11.2026) | `{}` |
 

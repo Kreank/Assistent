@@ -34,6 +34,7 @@ dem "Gestoppt.".
 """
 import base64
 import threading
+import time
 
 import numpy as np
 
@@ -56,25 +57,35 @@ class NetzLautsprecher:
         # haengt warten(): Der Server weiss nicht, wann der Client fertig
         # gespielt hat, aber er weiss, wie lang das Gesagte war.
         self._bis = 0.0
+        # Wann der zuletzt eingereihte Ton beim Client verklungen sein
+        # muesste (monotone Uhr). Der Client haengt nahtlos an -- ein Block
+        # beginnt also erst, wenn der vorige zu Ende ist.
+        self._ende = 0.0
         self._leer = threading.Event()
         self._leer.set()
 
     # --- Vertrag ---------------------------------------------------------
 
-    def sagen(self, proben: np.ndarray, rate: int) -> None:
+    def sagen(self, proben: np.ndarray, rate: int,
+              ausklang: bool = True) -> None:
         if proben is None or not len(proben):
             return
         # AUSKLANG anhaengen -- Sache der Umsetzung, nicht des Aufrufers.
         # Lokal umging er ein PortAudio-Verhalten; im Browser ist er der
         # Puffer zwischen zwei angehaengten Bloecken, damit die letzte
         # Silbe nicht am naechsten Satz haengenbleibt.
-        stille = np.zeros(int(rate * AUSKLANG), dtype="float32")
+        stille = np.zeros(int(rate * AUSKLANG) if ausklang else 0,
+                          dtype="float32")
         ganz = np.concatenate([np.asarray(proben, dtype="float32"), stille])
         klein = np.clip(ganz * 32768.0, -32768, 32767).astype("<i2")
 
         with self._schloss:
             runde = self._runde
             self._bis += len(ganz) / rate
+            jetzt = time.monotonic()
+            self._ende = max(self._ende, jetzt) + len(ganz) / rate
+            restzeit = self._ende - jetzt
+            mein_ende = self._ende
             self._leer.clear()
         self.traeger.senden_gezielt(self.ziel, {
             "art": "ton",
@@ -85,13 +96,20 @@ class NetzLautsprecher:
         # Der Pegel fuer den Ring wird hier NICHT gemeldet. Der Client
         # kennt die Huellkurve seines eigenen Tons genauer als wir --
         # und er weiss vor allem, wann er wirklich spielt.
-        threading.Timer(len(ganz) / rate, self._vielleicht_leer,
-                        args=(runde,)).start()
+        # Der Wecker zielt auf das Ende ALLES Eingereihten, nicht nur
+        # dieses Blocks: Seit Pocket TTS kommt ein Satz in mehreren
+        # Stuecken, und der Wecker des ersten durfte nicht "fertig"
+        # melden, waehrend die naechsten noch spielen. Nur der Wecker,
+        # dessen Ziel noch das aktuelle Ende ist, meldet leer.
+        threading.Timer(restzeit, self._vielleicht_leer,
+                        args=(runde, mein_ende)).start()
 
-    def _vielleicht_leer(self, runde: int) -> None:
+    def _vielleicht_leer(self, runde: int, ende: float | None = None) -> None:
         with self._schloss:
             if runde != self._runde:
                 return          # abgebrochen, jemand anders raeumt auf
+            if ende is not None and ende != self._ende:
+                return          # danach kam noch Ton -- dessen Wecker meldet
             self._bis = max(0.0, self._bis - 0.0)
             self._leer.set()
 
@@ -100,6 +118,7 @@ class NetzLautsprecher:
         with self._schloss:
             self._runde += 1
             self._bis = 0.0
+            self._ende = 0.0
             self._leer.set()
             runde = self._runde
         # Das Stoppen geht an ALLE. Wenn ein anderes Geraet noch einen

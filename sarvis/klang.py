@@ -172,8 +172,14 @@ class Aufnehmer(Protocol):
 class Lautsprecher(Protocol):
     """Spielt Bloecke der Reihe nach ab."""
 
-    def sagen(self, proben: np.ndarray, rate: int) -> None:
-        """Einreihen. Kehrt SOFORT zurueck (Zusage 2)."""
+    def sagen(self, proben: np.ndarray, rate: int,
+              ausklang: bool = True) -> None:
+        """Einreihen. Kehrt SOFORT zurueck (Zusage 2).
+
+        ausklang=False: ein Zwischenstueck eines Satzes, der noch
+        weiterlaeuft (Pocket TTS spricht gestreamt, seit 14.11.2026) --
+        dann KEINE Stille anhaengen, sonst stottert der Satz an jeder
+        Naht. Das letzte Stueck kommt wieder mit ausklang=True."""
 
     def abbrechen(self) -> int:
         """Sofort still. Gibt die neue Runde zurueck (Zusagen 1 und 3)."""

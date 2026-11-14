@@ -19,12 +19,13 @@ from claude_agent_sdk import (
     ResultMessage,
     StreamEvent,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
 
-from . import config, schutz
+from . import config, denken, schutz
 from .gedaechtnis import systemprompt
 from .werkzeuge import SERVER, kurzer_name, voller_name
 
@@ -83,6 +84,9 @@ class Hirn:
         # sie kurz nach, statt die alte Antwort auf die neue Frage zu sagen.
         self._leitung_unsauber = False
         self.protokoll = protokoll   # was in diesem Zug schon wirkte
+        # Rueckruf fuer die sichtbaren Gedanken (denken.py): melden(art,
+        # schritt) mit art 'neu' oder 'fertig'. Setzt main.py je Zug.
+        self.denkschritt = None
         self._nachtrag = ""          # Hinweis fuer den naechsten Zuruf
         # Liefert eine Zeile mit dem, was gerade laeuft (Arbeitsgedaechtnis)
         self.zustand_zeile = zustand_zeile
@@ -130,6 +134,12 @@ class Hirn:
                 strict_mcp_config=True,
                 # Kurze Zurufe brauchen keine Grundsatzueberlegung.
                 effort="low",
+                # Das Denken als Zusammenfassung mitliefern, damit Sascha es
+                # aufklappen kann (denken.py, 14.11.2026). Ohne "display"
+                # kamen die Denkbloecke LEER an -- nachgesehen in den
+                # Sitzungsdateien. Wie tief gedacht wird, regelt weiter
+                # effort; das hier aendert nur, was man davon sieht.
+                thinking={"type": "adaptive", "display": "summarized"},
                 # Wortweise Ausgabe, damit der Mund frueh anfangen kann.
                 include_partial_messages=True,
                 # Alle Werkzeuge von Anfang an laden statt erst suchen.
@@ -457,6 +467,44 @@ class Hirn:
             return not gesucht.issubset(config.SCHNELLE_WERKZEUGE)
         return name not in config.SCHNELLE_WERKZEUGE
 
+    # Woran man am Namen sieht, was ein Werkzeug TUT. Die Reihenfolge
+    # zaehlt: "auftrag_geben" ist Arbeit, bevor "geben" als machen gilt;
+    # "_zeigen" vor allem anderen, weil "termine_ansehen" kein zeigen ist.
+    _ARTEN = (
+        ("arbeit", ("auftrag_geben", "auftrag_fortsetzen", "projekt_anlegen",
+                    "Agent", "Task")),
+        ("suchen", ("WebSearch", "WebFetch", "_suchen", "nachrichten")),
+        ("zeigen", ("_zeigen", "projekt_oeffnen", "blatt_lesen")),
+        ("machen", ("anlegen", "senden", "schicken", "buchen", "umbuchen",
+                    "verschieben", "absagen", "abhaken", "stellen",
+                    "erstellen", "schreiben", "anhaengen", "teilen",
+                    "einsortieren", "starten", "beenden", "abspielen",
+                    "steuern", "radio_an", "radio_aus", "merken",
+                    "abbrechen", "tippen", "klicken", "vergessen", "Write",
+                    "Edit")),
+    )
+
+    def _wartesatz(self, block) -> str:
+        """Ein Wartesatz, der zu dem passt, was gleich passiert."""
+        name = kurzer_name(str(getattr(block, "name", "")))
+        if name == "ToolSearch":
+            frage = str((getattr(block, "input", None) or {}).get("query", ""))
+            gefunden = [kurzer_name(w) for w in
+                        re.findall(r"[A-Za-z_][A-Za-z0-9_]*", frage)]
+            name = next((w for w in gefunden if w != "select"), name)
+        art = "schauen"
+        for kandidat, merkmale in self._ARTEN:
+            if any(m == name or (m[0] in "_" or m.islower()) and m in name
+                   for m in merkmale):
+                art = kandidat
+                break
+        saetze = config.WARTESAETZE.get(art) or config.WARTESAETZE["schauen"]
+        # Nicht zweimal hintereinander derselbe Satz.
+        auswahl = [s for s in saetze if s != getattr(self, "_letzter_wartesatz", "")]
+        satz = random.choice(auswahl or saetze)
+        self._letzter_wartesatz = satz
+        return satz
+
     def _subagenten_verfolgen(self, nachricht) -> None:
         """Mitschreiben, welche Unter-Arbeiter gerade laufen.
 
@@ -482,6 +530,33 @@ class Hirn:
                 for block in inhalt:
                     if isinstance(block, ToolResultBlock):
                         self.subagenten.pop(block.tool_use_id, None)
+
+    def _denken_melden(self, nachricht) -> None:
+        """Denkbloecke und Werkzeugschritte an die Anzeige (denken.py).
+
+        Darf nie einen Zug stoeren -- alles hier ist Beiwerk."""
+        melden = self.denkschritt
+        if melden is None:
+            return
+        try:
+            if isinstance(nachricht, AssistantMessage):
+                for block in nachricht.content:
+                    if isinstance(block, ThinkingBlock):
+                        schritt = denken.gedanke(block.thinking)
+                        if schritt:
+                            melden("neu", schritt)
+                    elif isinstance(block, ToolUseBlock):
+                        melden("neu", denken.werkzeug(block))
+            elif isinstance(nachricht, UserMessage) and isinstance(
+                    nachricht.content, list):
+                for block in nachricht.content:
+                    if isinstance(block, ToolResultBlock):
+                        melden("fertig", {
+                            "id": str(block.tool_use_id or ""),
+                            "fehler": bool(block.is_error),
+                            "ergebnis": denken.ergebnis_kurz(block.content)})
+        except Exception as e:
+            print(f"  (Gedanken nicht mitgeschrieben: {e})")
 
     def _arbeiter_verloren(self) -> None:
         """Uebriggebliebene Unter-Arbeiter als abgebrochen vermerken.
@@ -703,6 +778,7 @@ class Hirn:
                 continue
 
             self._subagenten_verfolgen(nachricht)
+            self._denken_melden(nachricht)
 
             if isinstance(nachricht, StreamEvent):
                 e = nachricht.event or {}
@@ -743,7 +819,7 @@ class Hirn:
                             and not gewartet
                             and self._lohnt_warten(block)):
                         gewartet = True
-                        yield random.choice(config.WARTESAETZE) + " "
+                        yield self._wartesatz(block) + " "
             elif isinstance(nachricht, ResultMessage):
                 self.letzte_kosten = nachricht.total_cost_usd
                 self._offen = False
