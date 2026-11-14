@@ -48,6 +48,10 @@ SEITE_MAX = 200
 # Wie lang ein automatischer Titel höchstens wird.
 TITEL_LAENGE = 48
 
+# Wie lange ein gelöschtes Gespräch im Papierkorb liegt, bevor es
+# endgültig weg ist (Sascha, 14.11.2026: "Papierkorb 30 Tage").
+PAPIERKORB_TAGE = 30
+
 _sperre = threading.RLock()
 _bereit = False
 
@@ -121,11 +125,18 @@ def oeffnen() -> None:
         with _verbindung() as v:
             v.execute("PRAGMA journal_mode=WAL")
             v.executescript(_SCHEMA)
+            # Papierkorb (seit 14.11.2026): 0 = nicht gelöscht, sonst der
+            # Zeitpunkt des Löschens. Additiv, wie oben versprochen.
+            spalten = {z[1] for z in v.execute("PRAGMA table_info(faeden)")}
+            if "geloescht" not in spalten:
+                v.execute("ALTER TABLE faeden ADD COLUMN"
+                          " geloescht REAL NOT NULL DEFAULT 0")
         try:
             DATEI.chmod(0o600)
         except OSError:
             pass
         _bereit = True
+        papierkorb_leeren()
         _blaetter_uebernehmen()
         _formulare_nachtragen()
         if not aktiv():
@@ -188,13 +199,127 @@ def faden(kennung: str) -> dict | None:
 
 
 def faeden() -> list[dict]:
-    """Alle Fäden, zuletzt benutzte zuerst."""
+    """Alle Fäden außer denen im Papierkorb, zuletzt benutzte zuerst."""
     _sicher_offen()
     with _sperre, _verbindung() as v:
         zeilen = v.execute(
             "SELECT f.*, (SELECT COUNT(*) FROM eintraege e WHERE e.faden = f.id)"
-            " AS n FROM faeden f ORDER BY f.zuletzt DESC").fetchall()
+            " AS n FROM faeden f WHERE f.geloescht = 0"
+            " ORDER BY f.zuletzt DESC").fetchall()
     return [_faden_aus(z, z["n"]) for z in zeilen]
+
+
+# --- Papierkorb (seit 14.11.2026) -----------------------------------------
+#
+# Löschen legt ein Gespräch erst in den Papierkorb; nach PAPIERKORB_TAGE
+# ist es endgültig weg -- Einträge, Faden und die SDK-Sitzungsdatei. Was
+# Sarvis in dem Gespräch erzeugt hat (Blätter, Dateien in der Ablage),
+# bleibt: Das ist Arbeit, kein Gesprächsinhalt, und hat seinen eigenen
+# Platz in der App.
+
+def papierkorb() -> list[dict]:
+    """Was im Papierkorb liegt, zuletzt gelöschte zuerst."""
+    _sicher_offen()
+    papierkorb_leeren()
+    frist = PAPIERKORB_TAGE * 86400
+    with _sperre, _verbindung() as v:
+        zeilen = v.execute(
+            "SELECT f.*, (SELECT COUNT(*) FROM eintraege e WHERE e.faden = f.id)"
+            " AS n FROM faeden f WHERE f.geloescht > 0"
+            " ORDER BY f.geloescht DESC").fetchall()
+    raus = []
+    for z in zeilen:
+        d = _faden_aus(z, z["n"])
+        d["geloescht"] = z["geloescht"]
+        d["endgueltig"] = z["geloescht"] + frist
+        raus.append(d)
+    return raus
+
+
+def loeschen(kennung: str) -> bool:
+    """Ein Gespräch in den Papierkorb legen."""
+    with _sperre, _verbindung() as v:
+        n = v.execute("UPDATE faeden SET geloescht = ? WHERE id = ?"
+                      " AND geloescht = 0", (time.time(), kennung)).rowcount
+    return bool(n)
+
+
+def wiederherstellen(kennung: str) -> bool:
+    """Ein Gespräch aus dem Papierkorb zurückholen -- so, wie es war."""
+    with _sperre, _verbindung() as v:
+        n = v.execute("UPDATE faeden SET geloescht = 0 WHERE id = ?"
+                      " AND geloescht > 0", (kennung,)).rowcount
+    return bool(n)
+
+
+def _sitzungsdatei_weg(sitzung: str) -> None:
+    """Die SDK-Sitzung des Gesprächs löschen -- dort steht es auch.
+
+    Nur ein Name aus Hex und Bindestrichen, nur im Verlaufsordner: Die
+    Kennung kommt aus unserer eigenen Tabelle, aber ein Löschbefehl
+    verdient trotzdem keinen Pfad, der sich zusammensetzen lässt.
+    """
+    import re
+    if not re.fullmatch(r"[0-9a-fA-F-]{8,64}", sitzung or ""):
+        return
+    for ordner in (config.VERLAUF_ORDNER,):
+        try:
+            (Path(ordner) / f"{sitzung}.jsonl").unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def endgueltig_loeschen(kennung: str, nur_papierkorb: bool = True) -> bool:
+    """Ein Gespräch ganz entfernen. Standard: nur aus dem Papierkorb."""
+    with _sperre, _verbindung() as v:
+        z = v.execute("SELECT sitzung, geloescht FROM faeden WHERE id = ?",
+                      (kennung,)).fetchone()
+        if not z or (nur_papierkorb and not z["geloescht"]):
+            return False
+        v.execute("DELETE FROM eintraege WHERE faden = ?", (kennung,))
+        v.execute("DELETE FROM faeden WHERE id = ?", (kennung,))
+        # Die Ablage behält ihre Stücke, verliert nur den Verweis.
+        v.execute("UPDATE ablage SET faden = '' WHERE faden = ?", (kennung,))
+        sitzung = z["sitzung"]
+    # Teilt sich ein anderer Faden dieselbe Sitzung, bleibt die Datei.
+    if sitzung:
+        with _sperre, _verbindung() as v:
+            geteilt = v.execute("SELECT 1 FROM faeden WHERE sitzung = ?",
+                                (sitzung,)).fetchone()
+        if not geteilt:
+            _sitzungsdatei_weg(sitzung)
+    return True
+
+
+def papierkorb_leeren(alle: bool = False) -> int:
+    """Was länger als PAPIERKORB_TAGE im Papierkorb liegt, endgültig weg.
+
+    alle=True leert den ganzen Papierkorb sofort (Knopf in der App).
+    """
+    grenze = time.time() - (0 if alle else PAPIERKORB_TAGE * 86400)
+    with _sperre, _verbindung() as v:
+        zeilen = v.execute("SELECT id FROM faeden WHERE geloescht > 0"
+                           " AND geloescht <= ?", (grenze,)).fetchall()
+    n = 0
+    for z in zeilen:
+        n += endgueltig_loeschen(z["id"])
+    return n
+
+
+def geloeschte_sitzungen() -> set[str]:
+    """SDK-Sitzungen der Gespräche im Papierkorb.
+
+    verlauf_nachschlagen lässt sie aus: Wer ein Gespräch löscht, will
+    nicht, dass Sarvis es beim nächsten "weißt du noch" hervorholt.
+    """
+    try:
+        _sicher_offen()
+        with _sperre, _verbindung() as v:
+            return {z["sitzung"] for z in v.execute(
+                "SELECT sitzung FROM faeden WHERE geloescht > 0"
+                " AND sitzung != ''")}
+    except Exception:
+        return set()
 
 
 def aktiv() -> str:
@@ -211,9 +336,10 @@ def aktiv() -> str:
 def aktiv_setzen(kennung: str) -> None:
     _stand("aktiv", kennung)
     with _sperre, _verbindung() as v:
-        # Wer einen archivierten Faden wieder aufmacht, holt ihn zurück.
-        v.execute("UPDATE faeden SET archiviert = 0, zuletzt = ? WHERE id = ?",
-                  (time.time(), kennung))
+        # Wer einen archivierten Faden wieder aufmacht, holt ihn zurück --
+        # aus dem Archiv wie aus dem Papierkorb.
+        v.execute("UPDATE faeden SET archiviert = 0, geloescht = 0,"
+                  " zuletzt = ? WHERE id = ?", (time.time(), kennung))
 
 
 def umbenennen(kennung: str, titel: str) -> bool:
@@ -393,7 +519,7 @@ def suchen(wort: str, anzahl: int = 40) -> list[dict]:
         zeilen = v.execute(
             "SELECT e.*, f.titel AS faden_titel FROM eintraege e"
             " JOIN faeden f ON f.id = e.faden"
-            " WHERE e.text LIKE ? ESCAPE '\\' AND e.sorte IN"
+            " WHERE f.geloescht = 0 AND e.text LIKE ? ESCAPE '\\' AND e.sorte IN"
             " ('text', 'meldung', 'frage') ORDER BY e.id DESC LIMIT ?",
             (muster, int(anzahl))).fetchall()
     raus = []

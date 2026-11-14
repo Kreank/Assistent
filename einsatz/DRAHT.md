@@ -149,7 +149,7 @@ Art dazu, lange bevor alle drei Oberflächen sie kennen. `radio` und
 | `schirm_aus` | — | der Live-Strom ist zu Ende |
 | `verschieben` | `an` | dito |
 | `eintrag` | `faden`, `id`, `zeit`, `wer`, `sorte`, `text`, `daten`, `geraet` | ein Eintrag im Gesprächsverlauf, neu oder geändert (seit 11.11.2026) |
-| `faeden` | `aktiv`, `liste`, `wechselt` | welche Gesprächsfäden es gibt und welcher gilt (seit 11.11.2026) |
+| `faeden` | `aktiv`, `liste`, `wechselt`, `papierkorb` | welche Gesprächsfäden es gibt und welcher gilt (seit 11.11.2026; `papierkorb` seit 14.11.2026) |
 
 <!-- /draht:herein -->
 
@@ -495,6 +495,9 @@ gerade **alles** fertig geworden ist.
 | `faden_wechseln` | `faden` | in ein anderes Gespräch wechseln |
 | `faden_umbenennen` | `faden`, `titel` | einem Gespräch einen Namen geben |
 | `faden_archivieren` | `faden`, `an` | ins Archiv legen (`an: false` holt zurück) |
+| `faden_loeschen` | `faden` | in den Papierkorb legen, 30 Tage zurückholbar (seit 14.11.2026) |
+| `faden_wiederherstellen` | `faden` | aus dem Papierkorb zurückholen |
+| `papierkorb_leeren` | `faden` (optional) | endgültig löschen: mit `faden` nur dieses, ohne alles im Papierkorb |
 | `formular_antwort` | `eintrag`, `antworten` | ein ausgefülltes Formular abschicken (seit 13.11.2026) |
 
 <!-- /draht:hinaus -->
@@ -956,8 +959,17 @@ vorher gesagt wurde, war weg. Jetzt führt der Server den Verlauf selbst
 { "art": "faeden", "aktiv": "f-4aa4788c777c", "wechselt": false,
   "liste": [ { "id": "f-4aa4788c777c", "titel": "Urlaub planen",
                "angelegt": 1794392519.6, "zuletzt": 1794392990.1,
-               "archiviert": false, "eintraege": 14 } ] }
+               "archiviert": false, "eintraege": 14 } ],
+  "papierkorb": [ { "id": "f-…", "titel": "Alter Kram", "angelegt": …,
+                    "zuletzt": …, "archiviert": false, "eintraege": 9,
+                    "geloescht": 1794650000.0,
+                    "endgueltig": 1797242000.0 } ] }
 ```
+
+`papierkorb` (seit 14.11.2026): gelöschte Gespräche, zuletzt gelöschte
+zuerst. Sie stehen **nicht** in `liste`. `geloescht` ist der Zeitpunkt
+des Löschens, `endgueltig` der, ab dem es ganz weg ist (30 Tage später).
+Ältere Server schicken das Feld nicht — dann leer annehmen.
 
 Kommt **gleich nach dem `willkommen`**, nach jedem Wechsel, Umbenennen,
 Archivieren und nach jedem Zuruf (der Titel kann sich ändern, die
@@ -1040,7 +1052,22 @@ Stufen vorbei. Danach kommt derselbe Eintrag mit `offen: false`.
 { "art": "faden_wechseln", "faden": "f-…" }
 { "art": "faden_umbenennen", "faden": "f-…", "titel": "Urlaub" }
 { "art": "faden_archivieren", "faden": "f-…", "an": true }
+{ "art": "faden_loeschen", "faden": "f-…" }          // seit 14.11.2026
+{ "art": "faden_wiederherstellen", "faden": "f-…" }
+{ "art": "papierkorb_leeren" }                       // optional "faden"
 ```
+
+- `faden_loeschen` legt das Gespräch in den **Papierkorb**. Ist es das
+  aktive, wird wie beim Archivieren ein neues, leeres aktiv. Nach
+  **30 Tagen** ist es endgültig weg: Verlauf, Faden und Sarvis'
+  Sitzungsdatei. Was Sarvis darin erzeugt hat (Blätter, Dateien in der
+  Ablage), bleibt in der Ablage. Sarvis' Verlaufssuche lässt Gespräche
+  im Papierkorb schon ab dem Löschen aus; die Suche `GET /suche` auch.
+- `faden_wiederherstellen` holt es unverändert zurück. Ein `faden_wechseln`
+  in ein gelöschtes Gespräch holt es ebenfalls zurück (wie beim Archiv).
+- `papierkorb_leeren` ist endgültig — die App fragt vorher nach. Mit
+  `faden` nur dieses eine Gespräch (nur wenn es im Papierkorb liegt).
+- `GET /faeden` liefert zusätzlich `papierkorb` in derselben Form.
 
 - `faden_neu` ohne `titel`, während der aktive Faden noch leer ist:
   passiert nichts (ein zweiter leerer daneben wäre Müll). Sonst entsteht
@@ -1270,6 +1297,101 @@ POST /gedaechtnis/vergessen  { "id": "…" }  → { "gut": true } · 404
   höchstens 4000 Zeichen).
 - Sarvis erfährt es beim nächsten Zug („gilt nicht mehr“) — auch wenn der
   Eintrag noch in seiner laufenden Sitzung steckt.
+
+## Kalender (seit 14.11.2026)
+
+Saschas Google-Kalender in der App: ansehen **und** bearbeiten. Derselbe
+Google-Zugang wie Sarvis' Kalenderwerkzeuge, mit Geräteschlüssel
+(`X-Sarvis-Schluessel`) wie `/gedaechtnis`. Keine Rückfrage — das ist
+Saschas eigene Hand an seinem Kalender. Antwortet der Server mit **503**,
+ist Google nicht angemeldet; **502**: Google hat abgelehnt oder antwortet
+nicht.
+
+```
+GET /kalender
+→ { "kalender": [ { "id": "…@gmail.com", "name": "…", "farbe": "#9fe1e7",
+                    "haupt": true, "schreiben": true, "sichtbar": true } ] }
+
+GET /termine?von=2026-11-14&tage=7            // beide optional
+                                              // (heute, 7; tage 1–62)
+             &kalender=<id>,<id>               // optional, sonst alle
+                                              // mit "sichtbar"
+→ { "von": "2026-11-14", "bis": "2026-11-20",   // beide einschließlich
+    "termine": [ { "id": "…", "kalender": "<id>", "titel": "…",
+                   "beginn": "2026-12-03T16:40+01:00",
+                   "ende":   "2026-12-03T17:40+01:00",
+                   "ganztags": false, "ort": "", "notiz": "",
+                   "farbe": "#9fe1e7", "serie": false,
+                   "schreiben": true, "link": "https://www.google.com/…" } ],
+    "nicht_erreicht": [] }                    // Kalendernamen, die fehlten
+
+POST /termin/anlegen   { "titel": "Zahnarzt", "beginn": "2026-11-20T09:30",
+                         "ende": "2026-11-20T10:00",   // oder "dauer_minuten"
+                         "kalender": "<id>",           // optional: Hauptkalender
+                         "ort": "", "notiz": "" }      // optional
+                       → { "gut": true, "termin": { … wie oben … } }
+POST /termin/aendern   { "id": "…", "kalender": "<id>", …nur was sich ändert… }
+                       → { "gut": true, "termin": { … } }
+POST /termin/loeschen  { "id": "…", "kalender": "<id>" } → { "gut": true }
+                       Fehler: 400 { "fehler": "…" } · 403 · 404
+```
+
+- **Zeiten:** `beginn`/`ende` mit Uhrzeit als `JJJJ-MM-TTTHH:MM` in
+  Ortszeit (ein Versatz wie `+01:00` darf dabei sein). Zurück kommen sie
+  immer in Ortszeit mit Versatz. Ohne `ende` und `dauer_minuten` dauert ein
+  neuer Termin 60 Minuten.
+- **Ganztägig:** `"ganztags": true`, `beginn`/`ende` als `JJJJ-MM-TT`;
+  `ende` ist der **letzte Tag einschließlich** (ein eintägiger Termin hat
+  `ende == beginn`). So kommt es auch zurück.
+- **Ändern** ist ein Patch: Nur mitgeschickte Felder ändern sich;
+  Eingeladene, Erinnerungen und Farbe bleiben. Wird nur `beginn`
+  verschoben, bleibt die Dauer.
+- `kalender` immer mitschicken, wenn der Termin nicht im Hauptkalender
+  liegt (die `id` gilt nur innerhalb ihres Kalenders). Kalender mit
+  `schreiben: false` (z. B. Feiertage) nur anzeigen — der Server lehnt
+  mit 403 ab.
+- `serie: true` = ein Termin einer Serie. Ändern/Löschen trifft **nur
+  diesen einen** Termin, nicht die Serie.
+- Termine, die Sarvis per Sprache anlegt, erscheinen beim nächsten Holen.
+  Es gibt keine Meldung am Draht dafür — beim Öffnen der Leiste und nach
+  jeder eigenen Änderung neu holen.
+
+## Ordner (seit 14.11.2026)
+
+Die Orte, an die Sarvis kommt, als Baum zum Durchklicken — Namen,
+Größen, Zeiten, **keine Inhalte**. Mit Geräteschlüssel.
+
+```
+GET /ordner
+→ { "wurzeln": [ { "name": "Projekte", "pfad": "/srv/storage/projects",
+                   "beschreibung": "Alle Projekte auf dem Server",
+                   "darf": { "lesen": "frei", "schreiben": "fragen",
+                             "durchsuchen": "fragen" } } ] }
+
+GET /ordner?pfad=/srv/storage/projects
+→ { "pfad": "/srv/storage/projects", "wurzel": "Projekte",
+    "oben": null,                       // Elternordner, null an der Wurzel
+    "darf": { … wie bei der Wurzel … },
+    "eintraege": [ { "name": "sarvis", "pfad": "/srv/storage/projects/sarvis",
+                     "ordner": true, "bytes": 0, "geaendert": 1794…,
+                     "versteckt": false, "verknuepfung": false,
+                     "geschuetzt": false } ],
+    "mehr": false }                     // mehr als 500 Einträge: gekürzt
+Fehler: 403 { "fehler": "…" } (nicht Sarvis' Ort / geschützt) · 404
+```
+
+- Wurzeln derzeit: Projekte, Benutzerordner, Sandkasten, Erzeugt,
+  Eingang, Sarvis' Daten, Handbuch. Die Liste kommt vom Server — nicht
+  in der App festschreiben.
+- **`darf`** zeigt, was Sarvis dort tut: `frei` = ohne Rückfrage,
+  `fragen` = er fragt vorher. Kommt aus denselben Regeln, nach denen er
+  arbeitet, ist also immer der echte Stand.
+- Sortiert: Ordner zuerst, versteckte (Punkt-)Einträge hinten.
+- **`geschuetzt: true`** (z. B. `.ssh`, `.claude`, Schlüsseldateien):
+  Namen anzeigen, aber nicht öffnen — dort sieht Sarvis nur nach
+  Rückfrage hinein, und `/ordner` verweigert es mit 403.
+- Eine Datei holt man nicht über `/ordner`. Wer sie haben will, sagt es
+  Sarvis („schick mir …“) — das geht über `datei_schicken`.
 
 ## Benachrichtigungen bei geschlossener App (Web Push, seit 11.11.2026)
 

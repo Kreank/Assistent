@@ -514,6 +514,8 @@ _STOPP_PAARE = (("hör", "auf"), ("hoer", "auf"), ("hört", "auf"),
 # Fuellwort ("das ist halt so") -- als Abbruchbefehl gilt es nur, wenn
 # nicht viel anderes daneben steht.
 _STOPP_KURZ = {"halt", "still", "schluss", "ruhe"}
+# Laenger ist kein Not-Aus mehr, sondern etwas, das ans Hirn gehoert.
+STOPP_HOECHSTENS_WORTE = 8
 # Wird eines davon genannt, ist ein bestimmtes Ding gemeint und nicht
 # alles. "Timer beenden" oder "stopp die Musik" haben ihr eigenes
 # Werkzeug -- ein Not-Aus daraus zu machen waere schlimmer als die
@@ -629,15 +631,22 @@ def ist_stopp(text: str) -> bool:
     einem Lagebericht statt aufzuhoeren -- genau das ist passiert.
     """
     worte = [w.strip(".,!?;:-–\"'„“»«") for w in (text or "").lower().split()]
-    menge = {w for w in worte if w}
+    worte = [w for w in worte if w]
+    menge = set(worte)
     if not menge:
+        return False
+    # Ein Not-Aus ist kurz. Am 14.11.2026 ging eine getippte Spielidee
+    # von 1.655 Zeichen als "Gestoppt." unter, weil "Lass uns ..." und
+    # weiter hinten "das" darin standen -- das Hirn sah sie nie.
+    if len(worte) > STOPP_HOECHSTENS_WORTE:
         return False
     if menge & _ANDERES:
         return False
     if menge & _STOPP_WORTE:
         return True
+    # Ein Paar zaehlt nur direkt hintereinander: "hör auf", "lass das".
     for a, b in _STOPP_PAARE:
-        if a in menge and b in menge:
+        if any(x == a and y == b for x, y in zip(worte, worte[1:])):
             return True
     if menge & _STOPP_KURZ and (len(worte) <= 3 or worte[0] in _STOPP_KURZ):
         return True

@@ -354,7 +354,7 @@ class Sarvis:
     def _faeden_melden(self, wechselt: bool = False) -> None:
         try:
             self.anzeige.faeden(gespraeche.aktiv(), gespraeche.faeden(),
-                                wechselt)
+                                wechselt, gespraeche.papierkorb())
         except Exception as fehler:
             print(f"  (Fadenliste nicht gemeldet -- {fehler})")
 
@@ -526,6 +526,31 @@ class Sarvis:
                 # Wer den Faden wegraeumt, in dem er gerade ist, will
                 # woanders weiterreden -- in einem frischen.
                 self.schlange.put_nowait(("faden", "neu", ""))
+            self._faeden_melden()
+            return
+        if art == "faden_loeschen":
+            # In den Papierkorb (seit 14.11.2026). Wie beim Archivieren:
+            # Wer das Gespraech loescht, in dem er gerade ist, redet in
+            # einem frischen weiter.
+            if not gespraeche.loeschen(kennung):
+                return
+            print(f"  Faden {kennung} in den Papierkorb ({geraet})")
+            if kennung == gespraeche.aktiv():
+                self.schlange.put_nowait(("faden", "neu", ""))
+            self._faeden_melden()
+            return
+        if art == "faden_wiederherstellen":
+            if gespraeche.wiederherstellen(kennung):
+                self._faeden_melden()
+            return
+        if art == "papierkorb_leeren":
+            # Mit "faden": nur dieses eine endgueltig, ohne: alles.
+            if kennung:
+                weg = int(gespraeche.endgueltig_loeschen(kennung))
+            else:
+                weg = gespraeche.papierkorb_leeren(alle=True)
+            print(f"  Papierkorb: {weg} Gespraech(e) endgueltig geloescht"
+                  f" ({geraet})")
             self._faeden_melden()
             return
         if art == "faden_neu":

@@ -60,6 +60,23 @@ SITZUNGEN_TAGE = 45
 SITZUNGEN_HOECHSTENS = 400
 
 
+def _ist_titelsitzung(datei) -> bool:
+    """Die Sitzung, in der Sarvis nur einen Gespraechstitel vergeben hat."""
+    try:
+        with datei.open(encoding="utf-8") as f:
+            for zeile in f:
+                if '"type":"user"' not in zeile.replace(" ", ""):
+                    continue
+                inhalt = (json.loads(zeile).get("message") or {}).get("content")
+                if isinstance(inhalt, list):
+                    inhalt = " ".join(b.get("text", "") for b in inhalt
+                                      if isinstance(b, dict))
+                return str(inhalt or "").startswith("Erster Zuruf: ")
+    except (OSError, ValueError):
+        pass
+    return False
+
+
 def _sitzungen() -> list:
     """Sarvis' eigene Sitzungsdateien, neueste zuerst.
 
@@ -74,6 +91,11 @@ def _sitzungen() -> list:
     dateien = sorted(ordner.glob("*.jsonl"),
                      key=lambda d: d.stat().st_mtime, reverse=True)
     grenze = time.time() - SITZUNGEN_TAGE * 86400
+    try:
+        from .. import gespraeche
+        geloescht = gespraeche.geloeschte_sitzungen()
+    except Exception:
+        geloescht = set()
     eigene = []
     for datei in dateien:
         try:
@@ -93,6 +115,14 @@ def _sitzungen() -> list:
                     if marke == config.VERLAUF_MARKE:
                         eigene.append(datei)
                     break
+            # Zwei Sorten Sitzungen, die kein Gespraech sind (14.11.2026):
+            # Die Titelvergabe (main._selbst_benennen) laeuft als eigene
+            # Sitzung und sah nur die ersten 600 Zeichen -- von dort kam
+            # die falsche Auskunft, Saschas Nachricht sei "abgeschnitten".
+            # Und Gespraeche im Papierkorb soll er nicht hervorholen.
+            if eigene and eigene[-1] is datei and (
+                    datei.stem in geloescht or _ist_titelsitzung(datei)):
+                eigene.pop()
         except OSError:
             continue
         if len(eigene) >= SITZUNGEN_HOECHSTENS:

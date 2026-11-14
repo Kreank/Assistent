@@ -284,7 +284,9 @@ class Endpunkt:
             return self._kein_zugang()
         aktiv = await asyncio.to_thread(gespraeche.aktiv)
         liste = await asyncio.to_thread(gespraeche.faeden)
-        return self._json({"aktiv": aktiv, "liste": liste})
+        korb = await asyncio.to_thread(gespraeche.papierkorb)
+        return self._json({"aktiv": aktiv, "liste": liste,
+                           "papierkorb": korb})
 
     async def _verlauf(self, anfrage: web.Request) -> web.Response:
         """Die Eintraege eines Fadens, juengste zuletzt, aeltere seitenweise."""
@@ -742,6 +744,19 @@ class Endpunkt:
             if self.faden_an is not None:
                 await self.faden_an(art, m, o.name)
 
+        # Papierkorb (seit 14.11.2026)
+        elif art == "faden_loeschen":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
+        elif art == "faden_wiederherstellen":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
+        elif art == "papierkorb_leeren":
+            if self.faden_an is not None:
+                await self.faden_an(art, m, o.name)
+
         elif art == "auto":
             # Die Oberflaeche sagt, ob sie gerade im Auto steckt.
             #
@@ -846,6 +861,9 @@ class Endpunkt:
         # netz/spotify.py.
         from . import spotify
         spotify.anmelden(app)
+        # Kalender und Ordner fuer die Seitenleiste der App (14.11.2026).
+        from . import seitenleiste
+        seitenleiste.anmelden(app, self._wer)
         # Die Blaetter -- Berichte, PDFs, Word-Dateien. Ebenfalls ohne
         # Geraeteschluessel, und ebenfalls mit Begruendung: Ein <iframe>
         # und ein Download-Knopf schicken keine eigenen Kopfzeilen.

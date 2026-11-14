@@ -648,15 +648,18 @@ class Anzeige:
                      text=str(e.get("text") or ""), daten=e.get("daten") or {},
                      geraet=str(e.get("geraet") or ""))
 
-    def faeden(self, aktiv: str, liste, wechselt: bool = False) -> None:
+    def faeden(self, aktiv: str, liste, wechselt: bool = False,
+               papierkorb=None) -> None:
         """Welche Gespraechsfaeden es gibt und welcher gerade gilt.
 
         Immer die ganze Liste -- ein Zustand, keine Aenderung. Es gibt
         genau EINEN aktiven Faden fuer alle Oberflaechen: Es gibt ein
-        Hirn, und was per Weckwort gesagt wird, landet dort.
+        Hirn, und was per Weckwort gesagt wird, landet dort. Seit
+        14.11.2026 kommt der Papierkorb mit (geloeschte Gespraeche).
         """
         self._senden(art="faeden", aktiv=str(aktiv or ""),
-                     liste=list(liste or []), wechselt=bool(wechselt))
+                     liste=list(liste or []), wechselt=bool(wechselt),
+                     papierkorb=list(papierkorb or []))
 
     def geplant(self, eintraege) -> None:
         """Timer und geplante Aufgaben -- immer die ganze Liste (13.11.2026).
