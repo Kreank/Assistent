@@ -951,6 +951,17 @@ class Sarvis:
             and not self.freigaben.erlaubt(werkzeug, eingabe)
         )
 
+        # Buchungen tragen nur eine konto_id. Die Frage soll den Kontonamen
+        # nennen -- also die Namen holen, falls Sarvis sie in dieser
+        # Sitzung noch nicht abgefragt hat. Kurz begrenzt: lieber eine
+        # Frage ohne Kontonamen als eine, die haengt.
+        if werkzeug.startswith("finanzen_"):
+            from .werkzeuge import finanzen as _fz
+            try:
+                async with asyncio.timeout(3):
+                    await _fz.konten_vorladen()
+            except Exception:
+                pass
         frage = rueckfrage.formulieren(werkzeug, eingabe)
         if anbieten:
             frage += (" Sag ja, dann frage ich dafür "

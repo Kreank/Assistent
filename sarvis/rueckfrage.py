@@ -279,6 +279,8 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     # Nummern-Listen dort sind dieselben, mit denen das Werkzeug gleich
     # arbeitet -- die Frage benennt also genau die Mail, die es trifft.
     from .werkzeuge import microsoft as ms
+    from .werkzeuge import finanzen as fz
+    from .werkzeuge import zeit as zt
 
     # Edit hat keine deutsche Entsprechung: datei_schreiben unterscheidet
     # zwischen Anlegen und Ueberschreiben, Edit tut weder das eine noch
@@ -362,13 +364,17 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
                 f"{_kuerzen(e.get('text'))}?")
 
     if werkzeug == "aufgabe_erlauben":
-        namen = [str(n).removeprefix("mcp__sarvis__").replace("_", " ")
+        # Nummer und Werkzeugnamen sind Sarvis' Sicht. Gefragt wird mit dem
+        # Auftragstext und mit Taetigkeiten in Saschas Worten.
+        was = zt.aufgabe_benennen(e.get("nummer"))
+        aufgabe = (f"die geplante Aufgabe „{_kuerzen(was, 70)}“" if was
+                   else "die geplante Aufgabe, die du gerade eingerichtet hast")
+        namen = [taetigkeit(str(n).removeprefix("mcp__sarvis__"))
                  for n in (e.get("werkzeuge") or [])]
         if not namen:
-            return (f"Soll die geplante Aufgabe {e.get('nummer')} wieder bei "
-                    "allem nachfragen?")
-        return (f"Soll die geplante Aufgabe {e.get('nummer')} künftig ohne "
-                f"Rückfrage dürfen: {_kuerzen(', '.join(namen), 160)}?")
+            return f"Soll {aufgabe} wieder bei allem nachfragen?"
+        return (f"Soll {aufgabe} künftig ohne Rückfrage dürfen: "
+                f"{_kuerzen(', '.join(namen), 160)}?")
 
     # Outlook arbeitet mit Listennummern, die nur Sarvis gesehen hat. In
     # der Frage stehen deshalb Absender, Datum und Betreff -- "Mail 6" kann
@@ -407,7 +413,7 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
 
     if werkzeug == "outlook_termin_anlegen":
         return (f"Soll ich {_kuerzen(e.get('titel'), 50)} am "
-                f"{e.get('beginn', 'genannten Zeitpunkt')} in den Outlook-Kalender eintragen?")
+                f"{_datum(e.get('beginn')) or 'genannten Zeitpunkt'} in den Outlook-Kalender eintragen?")
 
     if werkzeug == "outlook_termin_loeschen":
         termin = (ms.termin_benennen(e.get("nummer"))
@@ -415,7 +421,7 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         return f"Soll ich {termin} aus dem Outlook-Kalender löschen?"
 
     if werkzeug == "onedrive_hochladen":
-        return (f"Soll ich {_kuerzen(e.get('pfad'), 70)} ins OneDrive hochladen"
+        return (f"Soll ich {schutz.sprechbar(e.get('pfad'))} ins OneDrive hochladen"
                 + (f", Ordner {_kuerzen(e.get('ordner'), 40)}" if e.get("ordner") else "")
                 + "?")
 
@@ -464,7 +470,7 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         # "am angegebenen Zeitpunkt", also genau die Angabe, wegen der man
         # ueberhaupt fragt.
         return (f"Soll ich {_kuerzen(e.get('titel'), 50)} "
-                f"am {e.get('beginn', 'genannten Zeitpunkt')} eintragen?")
+                f"am {_datum(e.get('beginn')) or 'genannten Zeitpunkt'} eintragen?")
 
     if werkzeug == "termin_absagen":
         return f"Soll ich den Termin {_kuerzen(e.get('titel'), 50)} absagen?"
@@ -477,22 +483,22 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
                      e.get("wohin"), "verschieben")
         anzahl = e.get("anzahl") or 1
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
-        return f"Soll ich {was} zu {_kuerzen(e.get('suche'), 40)} {wohin}?"
+        return f"Soll ich {_mit(was, suche_lesbar(e.get('suche')))} {wohin}?"
 
     if werkzeug == "mail_einsortieren":
         anzahl = e.get("anzahl") or 1
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
         label = _kuerzen(e.get("label"), 40)
-        suche = _kuerzen(e.get("suche"), 40)
+        suche = suche_lesbar(e.get("suche"))
         if e.get("abnehmen"):
             # "bei eine Mail" -- der Dativ braucht eine eigene Form.
             bei = "einer Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
-            return f"Soll ich bei {bei} zu {suche} das Label {label} abnehmen?"
+            return f"Soll ich bei {_mit(bei, suche)} das Label {label} abnehmen?"
         # Beides muss in die Frage, weil man beides der Mail hinterher nicht
         # mehr ansieht: dass sie aus dem Posteingang verschwindet, und dass
         # dabei ein Label entsteht, das es vorher nicht gab.
         raus = " und aus dem Posteingang nehmen" if e.get("aus_posteingang") else ""
-        frage = f"Soll ich {was} zu {suche} nach {label} einsortieren{raus}?"
+        frage = f"Soll ich {_mit(was, suche)} nach {label} einsortieren{raus}?"
         if e.get("anlegen"):
             frage += " Das Label lege ich dabei neu an."
         return frage
@@ -506,11 +512,11 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         from .werkzeuge.finanzen import _rhythmus
         roh = str(e.get("betrag") or "").strip()
         richtung = "raus" if roh.startswith("-") else "rein"
-        betrag = roh.lstrip("-") or "dem genannten Betrag"
+        betrag = _euro(roh.lstrip("-")) or "den genannten Betrag"
         return (f"Soll ich einen Dauerauftrag {_kuerzen(e.get('name'), 40)} "
-                f"über {betrag} Euro {richtung} anlegen, "
+                f"über {betrag} {richtung} anlegen, "
                 f"{_rhythmus(e.get('rhythmus') or 'monatlich')} ab "
-                f"{e.get('start') or 'dem genannten Datum'}?")
+                f"{_datum(e.get('start')) or 'dem genannten Datum'}?")
 
     if werkzeug == "dauerauftrag_buchen":
         # Das "bis" MUSS in die Frage. Es ist der einzige Unterschied
@@ -521,9 +527,57 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
                 + (f", alles bis {bis}?" if bis else " bis heute?"))
 
     if werkzeug == "telegram_medium_holen":
-        return (f"Soll ich das Medium aus Nachricht "
-                f"{e.get('nachricht_id')} im Chat mit "
-                f"{_kuerzen(e.get('chat'), 30)} herunterladen?")
+        return (f"Soll ich die Datei aus dem Chat mit "
+                f"{_kuerzen(e.get('chat'), 30)} herunterladen, die du "
+                "gerade besprochen hast?")
+
+    if werkzeug == "finanzen_buchen":
+        roh = str(e.get("betrag") or "").strip()
+        betrag = _euro(roh.lstrip("-")) or "den genannten Betrag"
+        richtung = "Ausgabe" if roh.startswith("-") else "Einnahme"
+        konto = fz.konto_benennen(e.get("konto_id"))
+        bei = f" bei {_kuerzen(e.get('gegenpartei'), 40)}" if e.get("gegenpartei") else ""
+        datum = f" am {_datum(e.get('datum'))}" if e.get("datum") else ""
+        return (f"Soll ich {betrag} als {richtung} für "
+                f"{_kuerzen(e.get('verwendungszweck'), 60)}{bei}{datum} "
+                f"eintragen{', Konto ' + konto if konto else ''}?")
+
+    if werkzeug == "finanzen_umbuchen":
+        betrag = _euro(str(e.get("betrag") or "")) or "den genannten Betrag"
+        von = fz.konto_benennen(e.get("von_konto_id")) or "dem einen Konto"
+        nach = fz.konto_benennen(e.get("nach_konto_id")) or "das andere"
+        zweck = (f", für {_kuerzen(e.get('verwendungszweck'), 50)}"
+                 if e.get("verwendungszweck") else "")
+        return f"Soll ich {betrag} von {von} auf {nach} umbuchen{zweck}?"
+
+    if werkzeug == "termin_verschieben":
+        dauer = (f", Dauer {e.get('dauer_minuten')} Minuten"
+                 if e.get("dauer_minuten") else "")
+        return (f"Soll ich den Termin {_kuerzen(e.get('titel'), 50)} auf "
+                f"{_datum(e.get('neuer_beginn')) or 'die neue Zeit'} "
+                f"verschieben{dauer}?")
+
+    if werkzeug == "programm_am_rechner":
+        danach = (f" und dort {_kuerzen(e.get('was'), 60)}" if e.get("was") else "")
+        return (f"Soll ich {_kuerzen(e.get('name'), 40)} an deinem Rechner "
+                f"starten{danach}?")
+
+    if werkzeug in ("web_klicken", "web_tippen"):
+        # Das Element haengt hirn._browserstufe an -- mit der Beschriftung
+        # von der Seite und dem, was der Code selbst erkannt hat.
+        el = e.get("element") or {}
+        art = {"knopf": "den Knopf", "link": "den Link", "feld": "das Feld",
+               "auswahl": "die Auswahl", "bild": "das Bild"}.get(
+                   el.get("art"), "das Element")
+        name = _kuerzen(el.get("text"), 60)
+        ziel = f"{art} „{name}“" if name else f"{art} ohne Beschriftung"
+        if werkzeug == "web_tippen":
+            frage = (f"Soll ich in {ziel} schreiben: "
+                     f"{_kuerzen(e.get('text'), 80)}?")
+        else:
+            frage = f"Soll ich auf {ziel} klicken?"
+        grund = schutz.klick_grund(el) if el else "unklar, worauf"
+        return f"{frage} Achtung, {grund}." if grund else frage
 
     if werkzeug == "mail_anhang_holen":
         # Der Dateiname gehoert in die Frage, nicht der Suchausdruck: Was
@@ -531,10 +585,10 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         # Einzige daran, was der Nutzer vorher beurteilen kann.
         datei = _kuerzen(e.get("datei") or "", 45)
         was = f"den Anhang {datei}" if datei else "den Anhang"
-        if e.get("nummer"):
-            was = f"Anhang Nummer {e.get('nummer')}"
-        return (f"Soll ich {was} aus der Mail zu "
-                f"{_kuerzen(e.get('suche'), 40)} herunterladen?")
+        if e.get("nummer") and not datei:
+            was = f"den {_ordnungszahl(e.get('nummer'))} Anhang"
+        return (f"Soll ich {was} aus der neuesten Mail"
+                f"{_mit('', suche_lesbar(e.get('suche')))} herunterladen?")
 
     if werkzeug == "drive_teilen":
         # Der Satz muss die Tragweite tragen, nicht den Werkzeugnamen:
@@ -559,9 +613,118 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     if werkzeug == "kontakt_anlegen":
         return f"Soll ich {_kuerzen(e.get('name'), 40)} als Kontakt anlegen?"
 
-    # Auffangfall: lieber umstaendlich als stumm.
-    teile = ", ".join(f"{k} {_kuerzen(v, 40)}" for k, v in list(e.items())[:3])
-    return f"Soll ich {werkzeug} ausführen{', mit ' + teile if teile else ''}?"
+    # Auffangfall: Kein Werkzeugname und keine Feldnamen -- die sagen
+    # Sascha nichts ("Soll ich finanzen_buchen ausführen, mit konto_id 2?").
+    # Taetigkeit in seinen Worten plus die Klartext-Werte. Nummern und
+    # Kennungen fallen weg; die Pruefung (einsatz/rueckfragen_pruefen.py)
+    # sorgt dafuer, dass hier gar nichts ankommt.
+    werte = [_kuerzen(v, 50) for k, v in e.items()
+             if isinstance(v, str) and v.strip()
+             and not k.endswith(("id", "_id", "nummer"))][:3]
+    print(f"  ! Rückfrage ohne eigene Formulierung: {werkzeug}")
+    return (f"Darf ich {taetigkeit(werkzeug)}"
+            + (f": {', '.join(werte)}" if werte else "") + "?")
+
+
+def taetigkeit(werkzeug: str) -> str:
+    """Werkzeugname -> was es tut, in Saschas Worten ("Termine verschieben")."""
+    return config.FREIGABE_NAMEN.get(werkzeug) or "das tun"
+
+
+# Gmail-Suchsyntax ist Sarvis' Sprache, nicht Saschas: "eine Mail zu
+# from:telekom older_than:1y" -> "eine Mail von telekom, älter als 1 Jahr".
+_SUCH_WOERTER = {
+    "from": "von {}", "to": "an {}", "subject": "mit Betreff „{}“",
+    "label": "mit dem Label {}", "in": "im Ordner {}",
+    "filename": "mit einer Datei {}", "after": "nach dem {}",
+    "before": "vor dem {}", "newer_than": "jünger als {}",
+    "older_than": "älter als {}", "category": "in der Rubrik {}",
+}
+_SUCH_IS = {"unread": "ungelesen", "read": "gelesen",
+            "starred": "markiert", "important": "wichtig"}
+_SUCH_ZEIT = {"d": ("Tag", "Tage"), "m": ("Monat", "Monate"),
+              "y": ("Jahr", "Jahre")}
+_SUCH_ORDNER = {"inbox": "Posteingang", "spam": "Spam", "trash": "Papierkorb",
+                "sent": "Gesendet", "anywhere": "überall"}
+_SUCH_RUBRIK = {"promotions": "Werbung", "social": "Soziale Netzwerke",
+                "updates": "Benachrichtigungen", "forums": "Foren",
+                "primary": "Allgemein"}
+
+
+def suche_lesbar(suche) -> str:
+    """Gmail-Suchausdruck -> 'von X, mit Anhang, älter als …' (ohne Hauptwort)."""
+    roh = str(suche or "").strip()
+    if not roh:
+        return ""
+    teile, frei = [], []
+    for wort in re.findall(r'\S+:"[^"]*"|\S+:\([^)]*\)|"[^"]*"|\S+', roh):
+        schluessel, trenner, wert = wort.partition(":")
+        wert = wert.strip('"()')
+        k = schluessel.lower().lstrip("-")
+        vorher = len(teile)
+        if not trenner:
+            frei.append(wort.strip('"'))
+        elif k == "has" and wert == "attachment":
+            teile.append("mit Anhang")
+        elif k == "is" and wert in _SUCH_IS:
+            teile.append(_SUCH_IS[wert])
+        elif k in ("newer_than", "older_than") and re.fullmatch(r"\d+[dmy]", wert):
+            n, e = int(wert[:-1]), _SUCH_ZEIT[wert[-1]]
+            teile.append(_SUCH_WOERTER[k].format(f"{n} {e[0] if n == 1 else e[1]}"))
+        elif k in ("after", "before"):
+            teile.append(_SUCH_WOERTER[k].format(_datum(wert.replace("/", "-"))))
+        elif k == "in":
+            teile.append(_SUCH_WOERTER[k].format(_SUCH_ORDNER.get(wert, wert)))
+        elif k == "category":
+            teile.append(_SUCH_WOERTER[k].format(_SUCH_RUBRIK.get(wert, wert)))
+        elif k in _SUCH_WOERTER:
+            teile.append(_SUCH_WOERTER[k].format(wert))
+        else:
+            frei.append(wert)
+        if schluessel.startswith("-") and len(teile) > vorher:
+            teile[-1] = "nicht " + teile[-1]
+    if frei:
+        teile.insert(0, f"zu „{_kuerzen(' '.join(frei), 40)}“")
+    return _kuerzen(", ".join(teile), 110)
+
+
+def _mit(was: str, beschreibung: str) -> str:
+    """'3 Mails' + 'von amazon, mit Anhang' -> '3 Mails (von amazon, mit Anhang)'."""
+    if not beschreibung:
+        return was
+    return f"{was} ({beschreibung})" if "," in beschreibung else f"{was} {beschreibung}"
+
+
+def _euro(roh: str) -> str:
+    """'12.50' -> '12,50 Euro'. Leer bei Unlesbarem."""
+    try:
+        wert = float(str(roh).replace(",", "."))
+    except ValueError:
+        return ""
+    text = f"{wert:.2f}".replace(".", ",").removesuffix(",00")
+    return f"{text} Euro"
+
+
+def _datum(roh) -> str:
+    """'2026-11-24' / '2026-11-24 10:30' -> '24.11.' / '24.11. um 10:30'."""
+    s = str(roh or "").strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}:\d{2}))?", s)
+    if not m:
+        return s
+    tag = f"{int(m.group(3))}.{int(m.group(2))}."
+    return f"{tag} um {m.group(4)}" if m.group(4) else tag
+
+
+_ORDNUNG = {1: "ersten", 2: "zweiten", 3: "dritten", 4: "vierten",
+            5: "fünften", 6: "sechsten", 7: "siebten", 8: "achten",
+            9: "neunten", 10: "zehnten"}
+
+
+def _ordnungszahl(n) -> str:
+    try:
+        return _ORDNUNG.get(int(n), f"{int(n)}.")
+    except (TypeError, ValueError):
+        return "genannten"
 
 
 # Woerter, die einen laufenden Vorgang beenden. Bewusst getrennt von den

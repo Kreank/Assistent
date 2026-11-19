@@ -1561,6 +1561,26 @@ FREIGABE_NAMEN = {
     "mail_anhang_holen": "Mailanhänge herunterladen",
     "telegram_medium_holen": "Telegram-Medien herunterladen",
     "merken": "sich Dinge merken",
+    # Auch fuer die Rueckfrage von aufgabe_erlauben und den Auffangfall --
+    # dort darf kein Werkzeugname mehr durchrutschen (19.11.2026).
+    "vergessen": "Dinge vergessen",
+    "telegram_senden": "Telegram-Nachrichten senden",
+    "dauerauftrag_buchen": "Daueraufträge buchen",
+    "programm_am_rechner": "Programme an deinem Rechner starten",
+    "aufgabe_erlauben": "geplanten Aufgaben etwas erlauben",
+    "outlook_mail_senden": "Outlook-Mails senden",
+    "outlook_mail_verschieben": "Outlook-Mails verschieben",
+    "outlook_anhang_holen": "Outlook-Anhänge herunterladen",
+    "outlook_termin_anlegen": "Outlook-Termine eintragen",
+    "outlook_termin_loeschen": "Outlook-Termine löschen",
+    "onedrive_hochladen": "ins OneDrive hochladen",
+    "web_klicken": "auf Webseiten klicken",
+    "termin_absagen": "Termine absagen",
+    "termin_verschieben": "Termine verschieben",
+    "mail_senden": "Mails senden",
+    "mail_verschieben": "Mails verschieben",
+    "mail_einsortieren": "Mails einsortieren",
+    "drive_teilen": "Dateien freigeben",
 }
 
 # Kurzer Zweiklang, bevor Sarvis sich von selbst meldet (Timer).

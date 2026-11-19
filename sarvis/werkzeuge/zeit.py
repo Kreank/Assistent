@@ -427,9 +427,24 @@ class Wecker:
         ]
 
 
+# Fuer die Rueckfrage: "geplante Aufgabe 3" sagt niemandem etwas, der
+# Auftragstext schon. Gesetzt, sobald die Werkzeuge gebaut werden.
+_wecker: "Wecker | None" = None
+
+
+def aufgabe_benennen(nummer) -> str | None:
+    try:
+        eintrag = (_wecker.laufende if _wecker else {}).get(int(nummer))
+    except (TypeError, ValueError):
+        return None
+    return str(eintrag.get("was") or "") or None if eintrag else None
+
+
 def werkzeuge(wecker: Wecker, protokoll=None) -> list:
     """Die Werkzeuge, die Claude sieht. Beschreibungen sind die halbe Miete:
     daran entscheidet das Modell, ob es sie ueberhaupt greift."""
+    global _wecker
+    _wecker = wecker
 
     def leuchten():
         if wecker.leuchten:

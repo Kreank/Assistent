@@ -172,9 +172,33 @@ async def _holen(weg: str, **parameter):
     if antwort.status_code >= 400:
         return None, f"Das Dashboard antwortet mit Fehler {antwort.status_code}."
     try:
-        return antwort.json(), ""
+        daten = antwort.json()
     except ValueError:
         return None, "Das Dashboard hat etwas Unlesbares geschickt."
+    if weg == "/konten" and isinstance(daten, list):
+        _konto_namen.clear()
+        _konto_namen.update({k.get("id"): k.get("name") for k in daten
+                             if isinstance(k, dict)})
+    return daten, ""
+
+
+# Kontonamen fuer die Rueckfrage. Die Werkzeuge buchen auf eine konto_id;
+# "auf Konto 2" kann niemand bestaetigen (Sascha, 19.11.: "eine interne
+# Modellangabe bringt mir nichts"). Gefuellt bei jedem Abruf von /konten.
+_konto_namen: dict = {}
+
+
+def konto_benennen(konto_id) -> str | None:
+    try:
+        return _konto_namen.get(int(konto_id))
+    except (TypeError, ValueError):
+        return None
+
+
+async def konten_vorladen() -> None:
+    """Fuer die Rueckfrage: Kontonamen holen, falls noch keine da sind."""
+    if not _konto_namen:
+        await _holen("/konten")
 
 
 async def _schicken(weg: str, koerper: dict, was: str):
