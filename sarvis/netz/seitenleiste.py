@@ -35,7 +35,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .. import config, schutz
+from .. import config, karte, schutz
 
 log = logging.getLogger("sarvis.netz")
 
@@ -120,6 +120,9 @@ def _termin_aus(e: dict, kal: dict) -> dict:
         "ganztags": ganztags,
         "ort": e.get("location") or "",
         "notiz": e.get("description") or "",
+        # Wohin ein Tippen auf den Ort fuehrt (Google-Maps-URL, '' ohne Ort).
+        "karte": karte.karte_fuer(e.get("location") or "",
+                                  e.get("description") or ""),
         "farbe": kal.get("farbe", ""),
         "serie": bool(e.get("recurringEventId")),
         "schreiben": kal.get("schreiben", False),
@@ -303,6 +306,12 @@ def kalender_routen(wer):
             return _json({"fehler": "in diesen Kalender darf man nicht "
                                     "schreiben"}, 403)
         koerper = {**_textfelder(k), **_ohne_none(zeit)}
+        if koerper.get("location"):  # Maps-Link -> Adresse + Link in Notiz
+            ort, notiz = await karte.ort_und_notiz(
+                koerper["location"], koerper.get("description", ""))
+            koerper["location"] = ort
+            if notiz:
+                koerper["description"] = notiz
         try:
             neu = await asyncio.to_thread(
                 lambda: dienst.events().insert(calendarId=kal["id"],

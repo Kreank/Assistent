@@ -874,7 +874,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                 "dauer_minuten": {"type": "integer", "minimum": 5,
                                   "maximum": 1440,
                                   "description": "Vorgabe 60."},
-                "ort": {"type": "string", "description": "Optional."},
+                "ort": {"type": "string", "description": "Optional. Adresse "
+                        "oder ein Google-Maps-Link, den Sascha geschickt "
+                        "hat -- den Link unverändert übergeben, er wird "
+                        "selbst in die Adresse aufgelöst."},
                 "notiz": {"type": "string", "description": "Optional."},
                 "kalender": {"type": "string",
                              "description": "Optional der Name eines anderen "
@@ -906,10 +909,15 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             "start": {"dateTime": beginn.isoformat()},
             "end": {"dateTime": ende.isoformat()},
         }
-        if args.get("ort"):
-            koerper["location"] = args["ort"]
-        if args.get("notiz"):
-            koerper["description"] = args["notiz"]
+        # Maps-Link als Ort -> echte Adresse ins Ort-Feld, Link in die
+        # Notiz (sonst oeffnet ein Tippen im Kalender kein Maps).
+        from ..karte import ort_und_notiz
+        ort, notiz = await ort_und_notiz(str(args.get("ort") or ""),
+                                         str(args.get("notiz") or ""))
+        if ort:
+            koerper["location"] = ort
+        if notiz:
+            koerper["description"] = notiz
 
         await asyncio.to_thread(
             lambda: dienst.events().insert(calendarId=kennung,
