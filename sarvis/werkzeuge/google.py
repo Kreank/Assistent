@@ -246,6 +246,76 @@ def _kopf(nachricht: dict, feld: str) -> str:
     return ""
 
 
+# --- Vorschau fuer die Rueckfrage -------------------------------------------
+#
+# "12 Mails von newsletter@xy.de in den Papierkorb?" sagt nicht, WELCHE.
+# Sascha, 19.11.2026: "man will ja wissen was gelöscht oder verschoben
+# wird". Vor der Rueckfrage werden die Treffer deshalb geholt und auf der
+# Karte aufgelistet -- und das Werkzeug fasst danach GENAU diese Mails an,
+# statt neu zu suchen. Sonst koennte zwischen Frage und Ja eine neue Mail
+# in die Suche rutschen, die niemand gesehen hat.
+
+import time as _uhr  # noqa: E402  (datetime.time heisst hier schon dtime)
+
+VORSCHAU_GILT_SEK = 300
+_vorschau: dict = {}
+
+
+def _vorschau_schluessel(suche, anzahl) -> tuple:
+    return (str(suche or "").strip(), int(anzahl or 1))
+
+
+async def mails_vorschau(suche, anzahl) -> list[dict] | None:
+    """Treffer einer Suche samt Absender/Betreff/Datum holen und merken."""
+    dienst = await _hole("gmail", "v1")
+    if dienst is None or not str(suche or "").strip():
+        return None
+    schluessel = _vorschau_schluessel(suche, anzahl)
+    liste = await asyncio.to_thread(
+        lambda: dienst.users().messages().list(
+            userId="me", q=schluessel[0], maxResults=schluessel[1]).execute())
+    treffer = []
+    for m in liste.get("messages", []):
+        n = await asyncio.to_thread(
+            lambda k=m["id"]: dienst.users().messages().get(
+                userId="me", id=k, format="metadata",
+                metadataHeaders=["From", "Subject", "Date"]).execute())
+        try:
+            datum = datetime.fromtimestamp(int(n.get("internalDate", 0)) / 1000)
+            datum = f"{datum:%d.%m.%y}"
+        except (TypeError, ValueError, OSError):
+            datum = ""
+        treffer.append({
+            "id": m["id"],
+            "von": re.sub(r"\s*<[^>]+>", "", _kopf(n, "From")).strip('" ') or "?",
+            "betreff": " ".join(_kopf(n, "Subject").split()) or "(kein Betreff)",
+            "datum": datum,
+        })
+    _vorschau[schluessel] = (_uhr.monotonic(), treffer)
+    return treffer
+
+
+def vorschau(suche, anzahl) -> list[dict] | None:
+    """Fuer die Rueckfrage: die gemerkten Treffer, solange sie frisch sind."""
+    eintrag = _vorschau.get(_vorschau_schluessel(suche, anzahl))
+    if not eintrag or _uhr.monotonic() - eintrag[0] > VORSCHAU_GILT_SEK:
+        return None
+    return eintrag[1]
+
+
+def _gezeigte_kennungen(suche, anzahl) -> list[str] | None:
+    """Fuer das Werkzeug: genau die Mails, die auf der Karte standen.
+
+    Wird dabei verbraucht -- ein zweiter Lauf derselben Suche (andere
+    Bitte, spaeter) sucht wieder frisch und fragt ja auch wieder.
+    """
+    treffer = vorschau(suche, anzahl)
+    _vorschau.pop(_vorschau_schluessel(suche, anzahl), None)
+    # Leer gezeigt heisst: nichts gefunden -- dann frisch suchen statt
+    # still nichts zu tun.
+    return [t["id"] for t in treffer] if treffer else None
+
+
 def _text_aus(nutzlast: dict) -> str:
     """Den lesbaren Teil einer Mail herausholen."""
     if nutzlast.get("mimeType", "").startswith("text/plain"):
@@ -1402,11 +1472,15 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         dienst = await _hole("gmail", "v1")
         if dienst is None:
             return _fehlt()
-        liste = await asyncio.to_thread(
-            lambda: dienst.users().messages().list(
-                userId="me", q=args["suche"], maxResults=1).execute()
-        )
-        treffer = liste.get("messages", [])
+        gezeigt = _gezeigte_kennungen(args["suche"], 1)
+        if gezeigt:
+            treffer = [{"id": gezeigt[0]}]
+        else:
+            liste = await asyncio.to_thread(
+                lambda: dienst.users().messages().list(
+                    userId="me", q=args["suche"], maxResults=1).execute()
+            )
+            treffer = liste.get("messages", [])
         if not treffer:
             return {"content": [{"type": "text", "text":
                     "Dazu finde ich keine Mail."}]}
@@ -1596,11 +1670,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if dienst is None:
             return _fehlt()
         anzahl = int(args.get("anzahl") or 1)
-        liste = await asyncio.to_thread(
-            lambda: dienst.users().messages().list(
-                userId="me", q=args["suche"], maxResults=anzahl).execute()
-        )
-        kennungen = [m["id"] for m in liste.get("messages", [])]
+        kennungen = _gezeigte_kennungen(args["suche"], anzahl)
+        if kennungen is None:
+            liste = await asyncio.to_thread(
+                lambda: dienst.users().messages().list(
+                    userId="me", q=args["suche"], maxResults=anzahl).execute()
+            )
+            kennungen = [m["id"] for m in liste.get("messages", [])]
         if not kennungen:
             return {"content": [{"type": "text", "text":
                     "Dazu finde ich nichts."}]}
@@ -1691,11 +1767,13 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         # nichts trifft, ein leeres Label -- und das steht dann fuer immer in
         # der Seitenleiste.
         anzahl = int(args.get("anzahl") or 1)
-        liste = await asyncio.to_thread(
-            lambda: dienst.users().messages().list(
-                userId="me", q=args["suche"], maxResults=anzahl).execute()
-        )
-        kennungen = [m["id"] for m in liste.get("messages", [])]
+        kennungen = _gezeigte_kennungen(args["suche"], anzahl)
+        if kennungen is None:
+            liste = await asyncio.to_thread(
+                lambda: dienst.users().messages().list(
+                    userId="me", q=args["suche"], maxResults=anzahl).execute()
+            )
+            kennungen = [m["id"] for m in liste.get("messages", [])]
         if not kennungen:
             return {"content": [{"type": "text", "text":
                     "Dazu finde ich nichts."}]}

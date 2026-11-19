@@ -962,14 +962,30 @@ class Sarvis:
                     await _fz.konten_vorladen()
             except Exception:
                 pass
+        # Welche Mails genau? Die Treffer werden jetzt geholt, damit die
+        # Frage sie benennen kann -- und das Werkzeug fasst danach genau
+        # diese an (google._gezeigte_kennungen). Ohne Netz bleibt es bei
+        # der Beschreibung der Suche.
+        if werkzeug in rueckfrage.GMAIL_MIT_VORSCHAU:
+            from .werkzeuge import google as _gg
+            e_ = eingabe or {}
+            anzahl_ = 1 if werkzeug == "mail_anhang_holen" else (e_.get("anzahl") or 1)
+            try:
+                async with asyncio.timeout(12):
+                    await _gg.mails_vorschau(e_.get("suche"), anzahl_)
+            except Exception as fehler:
+                print(f"  ! Mail-Vorschau für die Rückfrage ging nicht: {fehler}")
         frage = rueckfrage.formulieren(werkzeug, eingabe)
+        liste = rueckfrage.details(werkzeug, eingabe)
         if anbieten:
             frage += (" Sag ja, dann frage ich dafür "
                       f"{Freigaben.wo_lang(wo)} die nächsten "
                       f"{Freigaben.dauer_lang(config.FREIGABE_MINUTEN)} "
                       "nicht mehr.")
         print(f"\n  ? Sarvis fragt: {frage}")
-        e = self._eintragen("sarvis", "frage", frage,
+        # Die Karte zeigt die Liste mit, gesprochen wird nur die Frage.
+        karte = frage + ("\n\n" + "\n".join(liste) if liste else "")
+        e = self._eintragen("sarvis", "frage", karte,
                             {"offen": True, "werkzeug": werkzeug}, geraet="")
         self._frage_eintrag = e["id"] if e else 0
 

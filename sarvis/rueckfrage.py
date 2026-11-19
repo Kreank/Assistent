@@ -482,6 +482,9 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
                  "ungelesen": "auf ungelesen setzen"}.get(
                      e.get("wohin"), "verschieben")
         anzahl = e.get("anzahl") or 1
+        treffer = _gmail_treffer(e)
+        if treffer:
+            return f"Soll ich {_treffer_nennen(treffer, e)} {wohin}?"
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
         return f"Soll ich {_mit(was, suche_lesbar(e.get('suche')))} {wohin}?"
 
@@ -490,7 +493,13 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         was = "eine Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
         label = _kuerzen(e.get("label"), 40)
         suche = suche_lesbar(e.get("suche"))
+        treffer = _gmail_treffer(e)
+        if treffer:
+            was = _treffer_nennen(treffer, e)
+            suche = ""
         if e.get("abnehmen"):
+            if treffer:
+                return f"Soll ich bei {_dativ(was)} das Label {label} abnehmen?"
             # "bei eine Mail" -- der Dativ braucht eine eigene Form.
             bei = "einer Mail" if int(anzahl) == 1 else f"{anzahl} Mails"
             return f"Soll ich bei {_mit(bei, suche)} das Label {label} abnehmen?"
@@ -587,6 +596,10 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         was = f"den Anhang {datei}" if datei else "den Anhang"
         if e.get("nummer") and not datei:
             was = f"den {_ordnungszahl(e.get('nummer'))} Anhang"
+        treffer = _gmail_treffer(dict(e, anzahl=1))
+        if treffer:
+            return (f"Soll ich {was} aus {_dativ(_treffer_nennen(treffer, e))} "
+                    "herunterladen?")
         return (f"Soll ich {was} aus der neuesten Mail"
                 f"{_mit('', suche_lesbar(e.get('suche')))} herunterladen?")
 
@@ -686,6 +699,64 @@ def suche_lesbar(suche) -> str:
     if frei:
         teile.insert(0, f"zu „{_kuerzen(' '.join(frei), 40)}“")
     return _kuerzen(", ".join(teile), 110)
+
+
+# --- Welche Mails genau? (Gmail) ------------------------------------------
+#
+# main.py holt die Treffer VOR der Frage (google.mails_vorschau), das
+# Werkzeug fasst danach genau diese an. Hier werden sie benannt: eine Mail
+# direkt im Satz, mehrere als echte Anzahl -- und die Liste selbst kommt
+# ueber details() auf die Karte. Vorgelesen werden 12 Betreffzeilen nicht.
+
+GMAIL_MIT_VORSCHAU = ("mail_verschieben", "mail_einsortieren", "mail_anhang_holen")
+
+
+def _gmail_treffer(e: dict) -> list[dict] | None:
+    try:
+        from .werkzeuge import google
+    except Exception:
+        return None
+    anzahl = 1 if e.get("anzahl") is None else e.get("anzahl")
+    return google.vorschau(e.get("suche"), anzahl) or None
+
+
+def _eine_mail(t: dict) -> str:
+    betreff = _kuerzen(t.get("betreff"), 70)
+    datum = f" vom {t['datum'][:6]}" if t.get("datum") else ""
+    return f"die Mail von {_kuerzen(t.get('von'), 40)}{datum}, Betreff „{betreff}“"
+
+
+def _treffer_nennen(treffer: list[dict], e: dict) -> str:
+    if len(treffer) == 1:
+        return _eine_mail(treffer[0])
+    absender = {t.get("von") for t in treffer}
+    von = f" von {_kuerzen(next(iter(absender)), 40)}" if len(absender) == 1 else ""
+    return f"diese {len(treffer)} Mails{von}"
+
+
+def _dativ(nennung: str) -> str:
+    if nennung.startswith("die Mail"):
+        return "der Mail" + nennung[len("die Mail"):]
+    if nennung.startswith("diese "):
+        return "diesen " + nennung[len("diese "):]
+    return nennung
+
+
+def details(werkzeug: str, eingabe: dict) -> list[str]:
+    """Zeilen fuer die Karte unter der Frage -- nicht zum Vorlesen.
+
+    Bei mehreren Mails steht hier jede einzeln: Datum, Absender, Betreff.
+    """
+    if werkzeug not in GMAIL_MIT_VORSCHAU:
+        return []
+    e = dict(eingabe or {})
+    if werkzeug == "mail_anhang_holen":
+        e["anzahl"] = 1
+    treffer = _gmail_treffer(e) or []
+    if len(treffer) < 2:
+        return []
+    return [f"• {t.get('datum') or '—'}  {_kuerzen(t.get('von'), 35)}: "
+            f"{_kuerzen(t.get('betreff'), 80)}" for t in treffer]
 
 
 def _mit(was: str, beschreibung: str) -> str:
