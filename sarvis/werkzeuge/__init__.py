@@ -14,7 +14,7 @@ from claude_agent_sdk import create_sdk_mcp_server
 from .. import config
 
 from . import (vorschau, auftrag, bericht, dokument, eingang, versand, erinnern, fachdaten,
-               finanzen, google, kacheln, lesen, medien, musik, programme,
+               finanzen, google, kacheln, microsoft, lesen, medien, musik, programme,
                projekte, rechnen, rechner, system, telegram, unterwegs, verlauf,
                wetter, zeit)
 
@@ -114,6 +114,9 @@ def bauen(sagen, leuchten=None, melden=None, ohren=None):
         alle += musik.werkzeuge(protokoll, leuchten)
     if google.bereit():
         alle += google.werkzeuge(protokoll, leuchten)
+    if microsoft.bereit():
+        # Outlook, Kalender, OneDrive -- nur mit Anmeldung (19.11.2026).
+        alle += microsoft.werkzeuge(protokoll, leuchten)
     if config.telegram_bereit():
         alle += telegram.werkzeuge(protokoll, leuchten, ohren=ohren)
     server = create_sdk_mcp_server(name=SERVER, version="1.0.0", tools=alle)

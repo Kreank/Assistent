@@ -1297,6 +1297,19 @@ WERKZEUG_STUFEN = {
     # Einer geplanten Aufgabe vorab Werkzeuge erlauben (zeit.py). Fragt
     # IMMER -- es ist selbst eine Erlaubnis und steht in FREIGABE_NIE.
     "aufgabe_erlauben":   "fragen",
+    # Microsoft (werkzeuge/microsoft.py, 19.11.2026) -- dieselbe Linie
+    # wie Google: ansehen still, alles Veraendernde fragt.
+    "outlook_mails_ansehen":    "still",
+    "outlook_mail_lesen":       "still",
+    "outlook_mail_senden":      "fragen",
+    "outlook_mail_verschieben": "fragen",
+    "outlook_anhang_holen":     "fragen",
+    "outlook_termine_ansehen":  "still",
+    "outlook_termin_anlegen":   "fragen",
+    "outlook_termin_loeschen":  "fragen",
+    "onedrive_suchen":          "still",
+    "onedrive_holen":           "still",
+    "onedrive_hochladen":       "fragen",
 
     # Klicken und Tippen NICHT. Bis vor kurzem galt "Sarvis bringt die
     # Seite, du bedienst sie" -- das trug, weil Zeigen keine Handlung
@@ -1493,6 +1506,7 @@ FREIGABE_NIE = {
     "mail_senden", "telegram_senden", "drive_teilen", "vergessen",
     # Eine Erlaubnis darf sich nicht selbst per Freigabe erteilen.
     "aufgabe_erlauben",
+    "outlook_mail_senden", "outlook_mail_verschieben", "outlook_termin_loeschen",
     # mail_einsortieren steht hier aus einem Grund: Mit aus_posteingang tut
     # es, was mail_verschieben tut. Fehlte es, waere die Sperre daneben
     # umgehbar -- eine halbe Stunde Freigabe aufs Einsortieren, und der

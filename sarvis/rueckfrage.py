@@ -366,6 +366,33 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         return (f"Soll die geplante Aufgabe {e.get('nummer')} künftig ohne "
                 f"Rückfrage dürfen: {_kuerzen(', '.join(namen), 160)}?")
 
+    if werkzeug == "outlook_mail_senden":
+        an = e.get("an") or (f"den Absender von Mail {e.get('antwort_auf')}"
+                             if e.get("antwort_auf") else "den Empfänger")
+        return (f"Soll ich über Outlook an {an} schreiben"
+                + (f", Betreff {_kuerzen(e.get('betreff'), 50)}" if e.get("betreff") else "")
+                + f"? Der Text lautet: {_kuerzen(e.get('text'), 160)}")
+
+    if werkzeug == "outlook_mail_verschieben":
+        return (f"Soll ich die Outlook-Mail {e.get('nummer')} nach "
+                f"{_kuerzen(e.get('wohin'), 40)} verschieben?")
+
+    if werkzeug == "outlook_anhang_holen":
+        return (f"Soll ich Anhang {e.get('anhang')} der Outlook-Mail "
+                f"{e.get('nummer')} auf dem Server ablegen?")
+
+    if werkzeug == "outlook_termin_anlegen":
+        return (f"Soll ich {_kuerzen(e.get('titel'), 50)} am "
+                f"{e.get('beginn', 'genannten Zeitpunkt')} in den Outlook-Kalender eintragen?")
+
+    if werkzeug == "outlook_termin_loeschen":
+        return f"Soll ich Termin {e.get('nummer')} aus dem Outlook-Kalender löschen?"
+
+    if werkzeug == "onedrive_hochladen":
+        return (f"Soll ich {_kuerzen(e.get('pfad'), 70)} ins OneDrive hochladen"
+                + (f", Ordner {_kuerzen(e.get('ordner'), 40)}" if e.get("ordner") else "")
+                + "?")
+
     if werkzeug == "mail_senden":
         an = e.get("an") or "den Empfänger"
         # Bei einer Mail zaehlt der Inhalt, nicht nur der Empfaenger --
