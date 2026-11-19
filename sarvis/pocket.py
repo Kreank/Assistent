@@ -37,6 +37,10 @@ from . import config
 # Vorsprung gegen Netzschwankungen, und er waechst mit jedem Stueck.
 # Pocket liefert intern ~80-ms-Happen.
 ERSTES_STUECK_S = 0.48
+# Bewusst klein lassen (19.11. geprueft): Pocket rechnet nur knapp schneller
+# als Echtzeit. Groessere Stuecke hiessen, dass die App nach dem ersten Stueck
+# auf das zweite warten muss -- ein Stocken am Satzanfang. Die vielen kleinen
+# Stuecke muss die App nahtlos abspielen (AENDERUNG-TON-ENDE-2026-11-19.md).
 STUECK_S = 0.24
 
 
