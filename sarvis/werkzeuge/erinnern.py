@@ -28,7 +28,10 @@ Fuer Handlungen nach aussen zaehlt ohnehin keins von beidem: Mail,
 Telegram und Termine gehen nur auf ausdruecklichen Zuruf und mit
 Rueckfrage.
 """
+import functools
+import os
 import re
+import threading
 from datetime import date, datetime
 
 from claude_agent_sdk import tool
@@ -66,6 +69,21 @@ _ABLAUF = re.compile(r"\(gilt bis (\d{1,2})\.(\d{1,2})\.(\d{4})\)")
 # hat oder nicht. Ein Zaehler statt eines Ereignisses, weil er von
 # ueberall gelesen werden kann, ohne dass jemand zuhoeren muss.
 _geschrieben = 0
+
+# Ein Schloss fuer alles, was eine Gedaechtnisdatei liest, aendert und
+# zurueckschreibt. Die App loescht ueber POST /gedaechtnis/vergessen in
+# einem Faden, waehrend das Hirn gleichzeitig merken kann -- ohne Schloss
+# ging dabei ein frisch Gemerktes verloren (Review 19.11.). RLock, weil
+# merken() umschichten() aufruft.
+_SCHLOSS = threading.RLock()
+
+
+def _geschuetzt(f):
+    @functools.wraps(f)
+    def innen(*a, **k):
+        with _SCHLOSS:
+            return f(*a, **k)
+    return innen
 
 
 def schreibstand() -> int:
@@ -169,6 +187,7 @@ def _ablegen(art: str, zeilen: list[str]) -> None:
         f.write("\n".join(zeilen) + "\n")
 
 
+@_geschuetzt
 def umschichten(art: str) -> int:
     """Was ueber die Grenze hinausgeht, wandert eine Schicht tiefer.
 
@@ -251,6 +270,7 @@ def _abgelaufen(zeile: str, heute: date) -> bool:
         return False
 
 
+@_geschuetzt
 def aufraeumen(art: str) -> int:
     """Abgelaufene Eintraege entfernen. Gibt zurueck, wie viele.
 
@@ -294,9 +314,14 @@ def _schreiben(pfad, zeilen: list[str]) -> None:
         # Vor den Eintraegen, nicht dazwischen: Die urspruengliche Stelle
         # laesst sich nicht sicher wiederfinden, der Satz selbst schon.
         text += "\n".join(fremd) + "\n\n"
-    pfad.write_text(text + "\n".join(zeilen) + "\n", encoding="utf-8")
+    # Ueber eine Nebendatei: wer waehrenddessen liest, sieht die alte oder
+    # die neue Fassung, nie eine halbe.
+    neu = pfad.with_name(pfad.name + ".neu")
+    neu.write_text(text + "\n".join(zeilen) + "\n", encoding="utf-8")
+    os.replace(neu, pfad)
 
 
+@_geschuetzt
 def lesen(art: str) -> list[str]:
     aufraeumen(art)
     return _zeilen(_datei(art))
@@ -361,6 +386,7 @@ def fuer_app() -> dict:
     return aus
 
 
+@_geschuetzt
 def per_kennung_vergessen(kennung: str) -> str | None:
     """Einen Eintrag (oder eine Personenakte) loeschen.
 
@@ -463,46 +489,47 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
                     "Da war kein Inhalt."}], "is_error": True}
         art = args.get("art") or "gesagt"
         pfad = _datei(art)
-        zeilen = _zeilen(pfad)
+        with _SCHLOSS:   # gegen POST /gedaechtnis/vergessen im Faden
+            zeilen = _zeilen(pfad)
 
-        eintrag = f"- {datetime.now():%Y-%m-%d} — {inhalt}"
-        if args.get("gilt_bis"):
-            eintrag += f"  (gilt bis {args['gilt_bis']})"
-        thema = " ".join(str(args.get("thema") or "").lower().split())[:60]
-        if thema:
-            eintrag += f"  [thema: {thema}]"
+            eintrag = f"- {datetime.now():%Y-%m-%d} — {inhalt}"
+            if args.get("gilt_bis"):
+                eintrag += f"  (gilt bis {args['gilt_bis']})"
+            thema = " ".join(str(args.get("thema") or "").lower().split())[:60]
+            if thema:
+                eintrag += f"  [thema: {thema}]"
 
-        # Widersprueche ersetzen statt anhaeufen: zwei sich widersprechende
-        # Eintraege sind schlimmer als keiner.
-        #
-        # Zwei Wege dahin, und der erste ist der verlaessliche:
-        #
-        # (1) Ueber das THEMA. Gleicher Schluessel heisst dieselbe Sache,
-        #     Punkt -- ein Zeichenvergleich, keine Einschaetzung. Genau
-        #     daran scheiterte es vorher: "Projekt X wird verworfen" und
-        #     "Projekt X ist in Arbeit" haben keine 20 gemeinsamen
-        #     Anfangszeichen und standen deshalb beide im Prompt, als
-        #     gaelte beides.
-        #
-        # (2) Ueber den Wortlaut, wie bisher -- fuer Eintraege ohne Thema.
-        #     Erst ab einer Laenge, die wirklich denselben Sachverhalt
-        #     meint: Ein kurzer Kern ist Praefix von allem Moeglichen und
-        #     frass sonst den genaueren Eintrag ("Ich mag Kaffee" gegen
-        #     "Ich mag Kaffee schwarz").
-        if thema:
-            ersetzt = [z for z in zeilen if _thema_von(z) == thema]
-        else:
-            kern = inhalt.lower()[:40]
-            ersetzt = [z for z in zeilen
-                       if len(kern) >= 20 and kern in z.lower()]
-        if ersetzt:
-            # Aus Schicht 1 nehmen heisst nicht wegwerfen -- dasselbe
-            # Versprechen wie in umschichten().
-            _ablegen(art, ersetzt)
-            zeilen = [z for z in zeilen if z not in ersetzt]
-        zeilen.append(eintrag)
-        _schreiben(pfad, zeilen)
-        umschichten(art)      # Schicht 1 bleibt klein genug, um zu wirken
+            # Widersprueche ersetzen statt anhaeufen: zwei sich widersprechende
+            # Eintraege sind schlimmer als keiner.
+            #
+            # Zwei Wege dahin, und der erste ist der verlaessliche:
+            #
+            # (1) Ueber das THEMA. Gleicher Schluessel heisst dieselbe Sache,
+            #     Punkt -- ein Zeichenvergleich, keine Einschaetzung. Genau
+            #     daran scheiterte es vorher: "Projekt X wird verworfen" und
+            #     "Projekt X ist in Arbeit" haben keine 20 gemeinsamen
+            #     Anfangszeichen und standen deshalb beide im Prompt, als
+            #     gaelte beides.
+            #
+            # (2) Ueber den Wortlaut, wie bisher -- fuer Eintraege ohne Thema.
+            #     Erst ab einer Laenge, die wirklich denselben Sachverhalt
+            #     meint: Ein kurzer Kern ist Praefix von allem Moeglichen und
+            #     frass sonst den genaueren Eintrag ("Ich mag Kaffee" gegen
+            #     "Ich mag Kaffee schwarz").
+            if thema:
+                ersetzt = [z for z in zeilen if _thema_von(z) == thema]
+            else:
+                kern = inhalt.lower()[:40]
+                ersetzt = [z for z in zeilen
+                           if len(kern) >= 20 and kern in z.lower()]
+            if ersetzt:
+                # Aus Schicht 1 nehmen heisst nicht wegwerfen -- dasselbe
+                # Versprechen wie in umschichten().
+                _ablegen(art, ersetzt)
+                zeilen = [z for z in zeilen if z not in ersetzt]
+            zeilen.append(eintrag)
+            _schreiben(pfad, zeilen)
+            umschichten(art)      # Schicht 1 bleibt klein genug, um zu wirken
         _geschrieben += 1
 
         blinken()
@@ -666,13 +693,14 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return {"content": [{"type": "text", "text":
                     "Ohne Stichwort lösche ich nichts."}], "is_error": True}
         geloescht = []
-        for art in ("entschieden", "gesagt", "bemerkt"):
-            pfad = _datei(art)
-            zeilen = _zeilen(pfad)
-            bleiben = [z for z in zeilen if wort not in z.lower()]
-            if len(bleiben) != len(zeilen):
-                geloescht += [z for z in zeilen if wort in z.lower()]
-                _schreiben(pfad, bleiben)
+        with _SCHLOSS:   # gegen POST /gedaechtnis/vergessen im Faden
+            for art in ("entschieden", "gesagt", "bemerkt"):
+                pfad = _datei(art)
+                zeilen = _zeilen(pfad)
+                bleiben = [z for z in zeilen if wort not in z.lower()]
+                if len(bleiben) != len(zeilen):
+                    geloescht += [z for z in zeilen if wort in z.lower()]
+                    _schreiben(pfad, bleiben)
         blinken()
         if not geloescht:
             return {"content": [{"type": "text", "text":

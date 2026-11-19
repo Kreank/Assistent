@@ -380,7 +380,13 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
     # der Frage stehen deshalb Absender, Datum und Betreff -- "Mail 6" kann
     # niemand beantworten (Sascha, 19.11.).
     if werkzeug == "outlook_mail_senden":
-        if e.get("an"):
+        # Dieselbe Reihenfolge wie im Werkzeug: antwort_auf gewinnt (und
+        # mit an/cc zusammen lehnt das Werkzeug ab).
+        if e.get("antwort_auf") and not (e.get("an") or e.get("cc")):
+            an = ("als Antwort auf "
+                  + (ms.mail_benennen(e.get("antwort_auf"))
+                     or f"Mail {e.get('antwort_auf')}"))
+        elif e.get("an"):
             an = f"an {e.get('an')}"
         elif e.get("antwort_auf"):
             an = ("als Antwort auf "
@@ -389,6 +395,7 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         else:
             an = "an den Empfänger"
         return (f"Soll ich über Outlook {an} schreiben"
+                + (f", Kopie an {_kuerzen(e.get('cc'), 80)}" if e.get("cc") else "")
                 + (f", Betreff {_kuerzen(e.get('betreff'), 50)}" if e.get("betreff") else "")
                 + f"? Der Text lautet: {_kuerzen(e.get('text'), 160)}")
 
@@ -752,7 +759,13 @@ def details(werkzeug: str, eingabe: dict) -> list[str]:
     e = dict(eingabe or {})
     if werkzeug == "mail_anhang_holen":
         e["anzahl"] = 1
-    treffer = _gmail_treffer(e) or []
+    treffer = _gmail_treffer(e)
+    if treffer is None and str(e.get("suche") or "").strip():
+        # Die Liste kam nicht (Netz, Zeitgrenze). Dann sucht das Werkzeug
+        # nach dem Ja frisch -- das soll man vorher wissen (Review 19.11.).
+        return ["(Welche Mails genau, konnte ich gerade nicht nachsehen — "
+                "es trifft die neuesten passenden.)"]
+    treffer = treffer or []
     if len(treffer) < 2:
         return []
     return [f"• {t.get('datum') or '—'}  {_kuerzen(t.get('von'), 35)}: "

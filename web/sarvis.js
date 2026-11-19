@@ -1912,7 +1912,7 @@ function blattZeigen(m) {
     // Ein Bild zeigen wir gleich -- ein <img> fuehrt nichts aus, und
     // die Adresse ist dieselbe wie die zum Herunterladen.
     const bild = BILD_ENDUNG.test(name)
-      ? `<img class="vorschau" alt="" src="${sicher(adresse)}">` : '';
+      ? `<img class="vorschau" alt="" src="${attr(adresse)}">` : '';
     text.innerHTML = bild + `<p>Diese Datei liegt für dich bereit. `
       + `<strong>${sicher(name)}</strong>${gross ? ' · ' + sicher(gross) : ''}</p>`
       + `<p>Du findest sie auch später oben unter „Dateien“.</p>`;
@@ -3071,7 +3071,19 @@ async function geteiltAbholen() {
     }
     await lager.delete(anfrage);
   }
-  if (dateien.length) await hochladen(dateien);
+  // Erst fragen, dann hochladen. Der Service Worker nimmt JEDEN POST auf
+  // /teilen an -- auch einen, den eine fremde Webseite per Formular
+  // ausloest. Ohne Nachfrage landeten deren Dateien als "von dir" im
+  // Eingang und damit vor Sarvis (Review 19.11.).
+  if (dateien.length) {
+    const namen = dateien.slice(0, 8).map(d => '• ' + d.name).join('\n')
+      + (dateien.length > 8 ? `\n… und ${dateien.length - 8} weitere` : '');
+    const ja = window.confirm(
+      `${dateien.length === 1 ? 'Diese Datei' : `Diese ${dateien.length} Dateien`} `
+      + `an Sarvis schicken?\n\n${namen}`);
+    if (ja) await hochladen(dateien);
+    else hinweis('Geteilte Dateien verworfen.');
+  }
   // Geteilter Text oder Link: ins Eingabefeld, damit man noch sagen
   // kann, was damit passieren soll -- nicht blind abschicken.
   if (text) { const z = document.getElementById('zeile'); z.value = text; z.focus(); }

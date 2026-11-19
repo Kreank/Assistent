@@ -16,7 +16,9 @@ Gebaut wird mit --base auf den Unterpfad. Ohne das laedt ein Vite-Build
 seine Skripte von /assets/... und zeigt unter /vorschau/x/ eine weisse
 Seite.
 """
+import asyncio
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -25,16 +27,51 @@ from pathlib import Path
 from claude_agent_sdk import tool
 
 from .. import anzeige as anzeige_modul
-from .projekte import _finden, kurzname
+from .projekte import _finden, eigenes_repo, kurzname
 
 WURZEL = Path("/srv/data/sarvis/vorschau")
 ADRESSE = "https://test.tech-artist.de"
 ZUGAENGE = {"login": "vorschau", "offen": "offen"}   # zugang -> Unterordner
 
-# Was beim reinen Kopieren (Seite ohne Build) nicht mit darf.
-_NICHT_KOPIEREN = shutil.ignore_patterns(
-    ".git", "node_modules", ".env", ".env.*", "*.pem", "*.key", ".laufzeit",
-    "__pycache__", ".venv", "venv", "fortschritt.md", "bericht.md")
+# Was veroeffentlicht werden darf. Vorher war es eine Sperrliste, und die
+# liess eingang/ (Saschas Screenshots), zugang.env, Datenbanken und das Ziel
+# jedes Symlinks durch (Review 19.11.). Jetzt: nur Webdateien, keine
+# Verknuepfungen, nichts Heikles, keine Arbeitsordner.
+_WEB_ENDUNGEN = {
+    ".html", ".htm", ".css", ".js", ".mjs", ".map", ".json", ".webmanifest",
+    ".txt", ".xml", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+    ".ico", ".bmp", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp3", ".ogg",
+    ".wav", ".mp4", ".webm", ".glb", ".gltf", ".bin", ".hdr", ".ktx2", ".wasm",
+    ".pdf",
+}
+_NIE_ORDNER = {".git", "node_modules", "eingang", ".laufzeit", "__pycache__",
+               ".venv", "venv", ".claude"}
+_NIE_DATEIEN = {"fortschritt.md", "bericht.md", "package-lock.json"}
+
+
+def _nicht_kopieren(ordner: str, namen: list[str]) -> set[str]:
+    from .. import schutz
+    weg = set()
+    for n in namen:
+        pfad = Path(ordner) / n
+        if pfad.is_symlink() or n.startswith(".env"):
+            weg.add(n)
+        elif pfad.is_dir():
+            if n in _NIE_ORDNER:
+                weg.add(n)
+        elif (n in _NIE_DATEIEN or pfad.suffix.lower() not in _WEB_ENDUNGEN
+              or schutz.heikel(str(pfad))):
+            weg.add(n)
+    return weg
+
+
+# Umgebung fuer npm/vite: ohne Sarvis' Schluessel. Der Build fuehrt Code
+# aus, den ein Arbeiter geschrieben hat.
+def _build_umgebung() -> dict:
+    heim = Path(tempfile.gettempdir()) / "vorschau-heim"
+    heim.mkdir(exist_ok=True)
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(heim),
+            "LANG": "C.UTF-8", "CI": "1"}
 
 
 def _text(t: str, fehler: bool = False) -> dict:
@@ -47,7 +84,7 @@ def _text(t: str, fehler: bool = False) -> dict:
 def _laufen(befehl: list[str], ordner: Path, sekunden: int) -> tuple[bool, str]:
     try:
         r = subprocess.run(befehl, cwd=ordner, capture_output=True, text=True,
-                           timeout=sekunden)
+                           timeout=sekunden, env=_build_umgebung())
     except (subprocess.SubprocessError, OSError) as e:
         return False, str(e)
     aus = (r.stdout + "\n" + r.stderr).strip()
@@ -68,7 +105,9 @@ def _bauen(ordner: Path, ziel: Path, basis: str) -> str | None:
         if not vite and "build" not in skripte:
             return "Das Projekt hat kein Build-Skript."
         if not (ordner / "node_modules").exists():
-            ok, aus = _laufen(["npm", "install", "--no-audit", "--no-fund"],
+            # --ignore-scripts: postinstall wuerde fremden Code ausfuehren.
+            ok, aus = _laufen(["npm", "install", "--no-audit", "--no-fund",
+                               "--ignore-scripts"],
                               ordner, 600)
             if not ok:
                 return f"npm install ging nicht:\n{aus}"
@@ -83,18 +122,20 @@ def _bauen(ordner: Path, ziel: Path, basis: str) -> str | None:
             return f"Der Build ging nicht:\n{aus}"
         for name in ("dist", "build", "out"):
             if (ordner / name / "index.html").exists():
-                shutil.copytree(ordner / name, ziel)
+                shutil.copytree(ordner / name, ziel, ignore=_nicht_kopieren)
                 return None
         return "Der Build lief, aber ich finde keinen Ausgabeordner mit index.html."
     if (ordner / "index.html").exists():
-        shutil.copytree(ordner, ziel, ignore=_NICHT_KOPIEREN)
+        shutil.copytree(ordner, ziel, ignore=_nicht_kopieren)
         return None
     return "Das ist keine Webseite: weder package.json noch index.html."
 
 
 def _ordner(name: str) -> Path | None:
     ziel, _ort = _finden(name)
-    return ziel if ziel is not None and ziel.is_dir() else None
+    if ziel is None or not ziel.is_dir() or eigenes_repo(ziel):
+        return None
+    return ziel
 
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:
@@ -149,7 +190,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         # mittendrin scheitert, laesst die alte Vorschau stehen.
         neu = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=WURZEL / unter))
         neu.rmdir()            # copytree/vite wollen ihn selbst anlegen
-        fehler = _bauen(ordner, neu, basis)
+        # Im Faden: npm install und Build dauern bis zu 20 Minuten, und
+        # solange stand vorher die ganze Ereignisschleife (Review 19.11.).
+        fehler = await asyncio.to_thread(_bauen, ordner, neu, basis)
         if fehler:
             shutil.rmtree(neu, ignore_errors=True)
             return _text(fehler, True)

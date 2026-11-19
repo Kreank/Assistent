@@ -168,7 +168,7 @@ def uebersetzen(text: str) -> str:
 
     async def fragen() -> str:
         opt = ClaudeAgentOptions(
-            model=config.TITEL_MODELL, allowed_tools=[], max_turns=1,
+            model=config.TITEL_MODELL, tools=[], allowed_tools=[], max_turns=1,
             setting_sources=[],
             system_prompt=(
                 "Uebersetze die Notiz eines Assistenten ueber sein eigenes "

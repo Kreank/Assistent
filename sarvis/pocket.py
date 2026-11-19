@@ -40,6 +40,30 @@ ERSTES_STUECK_S = 0.48
 STUECK_S = 0.24
 
 
+# Pocket rechnet in Stuecken von hoechstens 50 Tokens und teilt selbst an
+# Satzzeichen. Ein langer Satz OHNE Komma bleibt dabei ein Stueck -- dann
+# warnt Pocket "may skip words", und ein verschlucktes "nicht" dreht die
+# Aussage um (gemessen 15.11., Review 19.11.). Solche Saetze teilen wir
+# vorher an einer Wortgrenze.
+WOERTER_JE_STUECK = 22
+
+
+def _teilen(text: str) -> list[str]:
+    worte = text.split()
+    if len(worte) <= WOERTER_JE_STUECK:
+        return [text]
+    teile, aktuell = [], []
+    for w in worte:
+        aktuell.append(w)
+        satzende = w[-1:] in ",;:.!?–—"
+        if (satzende and len(aktuell) >= 6) or len(aktuell) >= WOERTER_JE_STUECK:
+            teile.append(" ".join(aktuell))
+            aktuell = []
+    if aktuell:
+        teile.append(" ".join(aktuell))
+    return teile
+
+
 class Pocket:
     def __init__(self):
         t = time.perf_counter()
@@ -68,7 +92,10 @@ class Pocket:
         halt = threading.Event()
         with self._schloss:
             try:
-                yield from self._bloecke(text, halt)
+                for teil in _teilen(text):
+                    if halt.is_set():
+                        break
+                    yield from self._bloecke(teil, halt)
             finally:
                 halt.set()
 

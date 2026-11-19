@@ -34,6 +34,7 @@ import os
 import re
 import time
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import quote
 
@@ -210,6 +211,10 @@ def _nummer(liste: list, roh, art: str):
     if not 1 <= n <= len(liste):
         return None, (f"{art} {n} kenne ich nicht — erst die Liste neu "
                       "holen.")
+    if liste[n - 1] is None:
+        # Geloeschte Eintraege bleiben als Luecke stehen, damit die
+        # Nummern der uebrigen nicht verrutschen (Review 19.11.).
+        return None, f"{art} {n} ist schon gelöscht."
     return liste[n - 1], None
 
 
@@ -291,7 +296,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             params = {"$top": anzahl, "$select": felder,
                       "$orderby": "receivedDateTime desc"}
             if args.get("nur_ungelesen"):
-                params["$filter"] = "isRead eq false"
+                # Graph verlangt: Was in $orderby steht, muss im $filter
+                # zuerst stehen -- sonst 400 InefficientFilter.
+                params["$filter"] = ("receivedDateTime ge 1900-01-01T00:00:00Z "
+                                     "and isRead eq false")
             daten = await _graph("GET", "/me/mailFolders/inbox/messages",
                                  params=params)
         mails = daten.get("value") or []
@@ -367,6 +375,11 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
             return [{"emailAddress": {"address": a.strip()}}
                     for a in str(roh or "").split(",") if "@" in a]
 
+        if args.get("antwort_auf") and (args.get("an") or args.get("cc")):
+            # Die Rueckfrage nennt, was hier passiert -- beides zugleich
+            # waere eine Antwort an X, waehrend die Frage Y nennt.
+            return _antwort("Entweder antworten (antwort_auf) oder an eine "
+                            "Adresse schreiben (an/cc) — nicht beides.", True)
         if args.get("antwort_auf"):
             m, fehler = _nummer(_mails, args.get("antwort_auf"), "Mail")
             if fehler:
@@ -468,7 +481,10 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     async def outlook_termine_ansehen(args):
         blinken()
         beginn = zeit_deuten(args.get("ab")) if args.get("ab") else None
-        beginn = (beginn or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Mit Zeitzone: ohne Versatz liest Graph die Zeiten als UTC, und
+        # das Fenster begann um 01:00/02:00 statt um Mitternacht.
+        beginn = (beginn or datetime.now()).replace(
+            hour=0, minute=0, second=0, microsecond=0, tzinfo=ZoneInfo(ZEITZONE))
         ende = beginn + timedelta(days=int(args.get("tage") or 7))
         daten = await _graph("GET", "/me/calendarView", params={
             "startDateTime": beginn.isoformat(), "endDateTime": ende.isoformat(),
@@ -542,7 +558,9 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
         if fehler:
             return _antwort(fehler, True)
         await _graph("DELETE", f"/me/events/{t['id']}")
-        _termine.remove(t)
+        # Nicht entfernen: Sonst heisst der bisherige Termin 4 jetzt 3, und
+        # "loesch noch Termin 3" trifft einen anderen als gemeint.
+        _termine[_termine.index(t)] = None
         vermerken(f"outlook_termin_loeschen: {t.get('subject')}")
         return _antwort(f"Gelöscht: {t.get('subject')}.")
 
@@ -560,7 +578,7 @@ def werkzeuge(protokoll=None, leuchten=None) -> list:
     async def onedrive_suchen(args):
         blinken()
         suche = str(args.get("suche") or "").replace("'", "''")
-        daten = await _graph("GET", f"/me/drive/root/search(q='{suche}')", params={
+        daten = await _graph("GET", f"/me/drive/root/search(q='{quote(suche.replace(chr(39), chr(39) * 2), safe='')}')", params={
             "$top": 20,
             "$select": "id,name,size,lastModifiedDateTime,file,folder,parentReference"})
         dateien = daten.get("value") or []

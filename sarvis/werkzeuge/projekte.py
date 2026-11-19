@@ -78,6 +78,19 @@ def _pfad(name: str, ort: str = "sandkasten"):
     return ziel
 
 
+def eigenes_repo(ordner) -> bool:
+    """Liegt der Ordner in Sarvis' eigenem Code (config.WURZEL)?
+
+    Dort duerfen weder Arbeiter noch Vorschau-Builds laufen: Beide fuehren
+    fremden bzw. selbst geschriebenen Code mit Sarvis' Rechten aus.
+    """
+    try:
+        o, w = Path(ordner).resolve(), Path(config.WURZEL).resolve()
+    except (OSError, ValueError, TypeError):
+        return True
+    return o == w or w in o.parents or o in w.parents
+
+
 def _finden(name: str):
     """Ein bestehendes Projekt in allen Orten suchen."""
     for ort in config.PROJEKT_ORTE:

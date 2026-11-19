@@ -748,6 +748,35 @@ def entwicklung_frei(befehl: str) -> bool:
     return True
 
 
+# Vorsaetze, hinter denen derselbe Befehl steht: "sudo rm -rf x" ist
+# "rm -rf x". Gemessen am 19.11. rutschten sudo/command/env/xargs/"/bin/rm"
+# an der harten Sperre vorbei auf "fragen".
+_VORSATZ = {"sudo", "command", "env", "nice", "nohup", "time", "exec",
+            "builtin", "doas", "ionice", "stdbuf", "timeout", "xargs"}
+
+
+def _ohne_vorsatz(woerter: list[str]) -> list[str]:
+    woerter = list(woerter)
+    # "xargs rm -rf <<< /pfad": das Ziel kommt aus der Umleitung.
+    if "<<<" in woerter:
+        i = woerter.index("<<<")
+        woerter = woerter[:i] + woerter[i + 1:]
+    while woerter:
+        kopf = os.path.basename(woerter[0])
+        if kopf not in _VORSATZ:
+            break
+        woerter = woerter[1:]
+        # Optionen und Zuweisungen des Vorsatzes ueberspringen
+        # (sudo -u x, env A=1, nice -n 5, timeout 10).
+        while woerter and (woerter[0].startswith("-") or "=" in woerter[0]
+                           or (kopf in ("timeout", "nice", "ionice") and
+                               re.fullmatch(r"[\d.]+[smhd]?", woerter[0]))):
+            schritt = 2 if woerter[0] in ("-u", "-g", "-n", "-c", "-C", "-I",
+                                          "-d", "-s", "-k") else 1
+            woerter = woerter[schritt:]
+    return woerter
+
+
 def _loescht_wurzel(teil: str, ort: str) -> bool:
     """Loescht dieser Schritt rekursiv einen Wurzelort -- oder etwas darueber?
 
@@ -763,12 +792,33 @@ def _loescht_wurzel(teil: str, ort: str) -> bool:
     der Wurzelort selbst, sein Inhalt als Ganzes ("/*") und alles
     darueber.
     """
-    if not re.match(r"^rm\b", teil):
-        return False
     try:
         woerter = shlex.split(teil)
     except ValueError:
         woerter = teil.split()
+    woerter = _ohne_vorsatz(woerter)
+    if not woerter:
+        return False
+    befehl = os.path.basename(woerter[0])
+    if befehl == "find":
+        # find <orte> ... -delete  /  -exec rm ...: loescht rekursiv alles
+        # unter den Startorten (Review 19.11.).
+        rest = woerter[1:]
+        loescht = "-delete" in rest
+        for schalter in ("-exec", "-execdir", "-ok", "-okdir"):
+            if schalter in rest:
+                nach = rest[rest.index(schalter) + 1:]
+                loescht = loescht or any(os.path.basename(w) == "rm" for w in nach)
+        if not loescht:
+            return False
+        orte = []
+        for w in rest:
+            if w.startswith("-") or w in ("(", "!"):
+                break
+            orte.append(w)
+        woerter = ["rm", "-r", *(orte or ["."])]
+    elif befehl != "rm":
+        return False
     flaggen = [w for w in woerter[1:] if w.startswith("-")]
     if not any(w == "--recursive" or (not w.startswith("--") and "r" in w.lower())
                for w in flaggen):

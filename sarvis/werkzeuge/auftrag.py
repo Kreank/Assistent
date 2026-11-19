@@ -38,6 +38,7 @@ from claude_agent_sdk import (
 )
 
 from .. import config, schutz
+from .projekte import eigenes_repo
 from .projekte import _finden, _pfad
 
 # Werkzeuge, die der Arbeiter benutzen darf. Alles Uebrige wird abgelehnt.
@@ -705,6 +706,13 @@ class Werkstatt:
         if ordner is None:
             return None, ("Dieses Projekt finde ich nicht — weder privat "
                           "noch unter Arbeit noch im Sandkasten.")
+        # Nie in Sarvis selbst. Auftraege starten seit 13.11. ohne
+        # Rueckfrage; ein Arbeiter im eigenen Repo koennte schutz.py und
+        # config.py umschreiben -- also genau die Bremse, die fuer das Hirn
+        # "nie" ist (Review 19.11.). Gebraucht wurde es bisher nie.
+        if eigenes_repo(ordner):
+            return None, ("In Sarvis' eigenem Code arbeiten keine Arbeiter "
+                          "— das macht Sascha mit Claude Code direkt.")
 
         laeuft = [a for a in self.auftraege.values()
                   if a.status == "läuft" and a.ordner == ordner]

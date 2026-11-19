@@ -81,6 +81,11 @@ class Hirn:
         # Was die gerade laufende GEPLANTE Aufgabe vorab darf
         # (aufgabe_erlauben). Setzt main.py nur fuer die Dauer ihres Zugs.
         self.aufgabe_erlaubt: set[str] = set()
+        # Laeuft gerade ein geplanter Zug, bei dem niemand zusieht? Dann
+        # keine laute Rueckfrage (Review 19.11.): Sie ging nachts an alle
+        # Geraete, und ein Zuruf in den 75 Sekunden wurde als Antwort
+        # verschluckt.
+        self.unbeaufsichtigt = False
         self._offen = False  # laeuft gerade eine Antwortrunde?
         # Ein Abbruch, dessen Leerlesen nicht durchkam: In der Leitung
         # koennen Reste der alten Runde liegen. Der naechste Zuruf raeumt
@@ -405,6 +410,14 @@ class Hirn:
             if self.nachfragen is None:
                 return PermissionResultDeny(
                     message="Rückfragen sind gerade nicht möglich."
+                )
+            if self.unbeaufsichtigt:
+                return PermissionResultDeny(
+                    message="Das ist eine geplante Aufgabe, und niemand ist "
+                            "da, um zu bestätigen — deshalb nicht ausgeführt. "
+                            "Schreib im Ergebnis kurz, was du tun wolltest, "
+                            "damit Sascha es später bestätigen oder der "
+                            "Aufgabe vorab erlauben kann."
                 )
 
             entscheidung, wortlaut = await self.nachfragen(kurz, eingabe)

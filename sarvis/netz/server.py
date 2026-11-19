@@ -59,6 +59,24 @@ from .traeger import NetzTraeger, Oberflaeche, als_text
 
 log = logging.getLogger("sarvis.netz")
 
+# Fehlversuche mit IP ins Laufprotokoll (Hausstandard: "Fehlversuche mit IP
+# loggen"). Am WebSocket sieht Caddy nur 101 -- ein falscher Schluessel
+# taucht sonst nirgends auf. Gedrosselt: hoechstens eine Zeile je IP und
+# Minute, damit ein Schwall das Protokoll nicht flutet.
+_FEHL_ZULETZT: dict[str, float] = {}
+
+
+def _fehlversuch(ip: str, wo: str) -> None:
+    import time as _t
+    jetzt = _t.monotonic()
+    if jetzt - _FEHL_ZULETZT.get(ip, -999.0) < 60:
+        return
+    if len(_FEHL_ZULETZT) > 1000:
+        _FEHL_ZULETZT.clear()
+    _FEHL_ZULETZT[ip] = jetzt
+    print(f"  ! Zugang abgelehnt: falscher Geräteschlüssel von {ip} ({wo})",
+          flush=True)
+
 # Wo die Oberflaeche liegt. Neben dem Quelltext, nicht unter DATEN:
 # Sie ist Programm und gehoert ins Git.
 WEB = config.WURZEL / "web"
@@ -268,7 +286,10 @@ class Endpunkt:
 
     async def _wer(self, anfrage: web.Request) -> str | None:
         schluessel = anfrage.headers.get("X-Sarvis-Schluessel", "")
-        return await asyncio.to_thread(geraete.pruefen, schluessel)
+        name = await asyncio.to_thread(geraete.pruefen, schluessel)
+        if name is None and schluessel:
+            _fehlversuch(anfrage.headers.get("X-Real-IP", "?"), anfrage.path)
+        return name
 
     @staticmethod
     def _kein_zugang() -> web.Response:
@@ -586,6 +607,7 @@ class Endpunkt:
     async def _draht(self, anfrage: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30.0, max_msg_size=NACHRICHT_MAX)
         await ws.prepare(anfrage)
+        ws._sarvis_ip = anfrage.headers.get("X-Real-IP", "?")
 
         oberflaeche = await self._anmelden(ws)
         if oberflaeche is None:
@@ -648,6 +670,7 @@ class Endpunkt:
 
         name = await asyncio.to_thread(geraete.pruefen, m.get("schluessel", ""))
         if name is None:
+            _fehlversuch(getattr(ws, "_sarvis_ip", "?"), "/draht")
             # Bewusst dieselbe Antwort wie bei fehlender Anmeldung und
             # bewusst ohne Hinweis, WAS falsch war.
             await ws.close(code=4401, message=b"kein Zugang")

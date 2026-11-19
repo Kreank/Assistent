@@ -33,7 +33,9 @@ Gemessen 13.11.2026 im Container: Bildschirmfoto eines Berichts 0,3 s.
 """
 import logging
 import mimetypes
+import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -81,15 +83,32 @@ def mime_von(name: str, typ: str = "") -> str:
 
 
 def _lauf(befehl: list, sekunden: float) -> bool:
+    """Ein Hilfsprogramm mit Zeitgrenze -- und bei Ablauf samt Kindern weg.
+
+    soffice ist ein Shellskript, das soffice.bin als Kind startet. Bei
+    einem Zeitablauf traf subprocess.run nur das Skript; soffice.bin lief
+    als Waise weiter (Review 19.11.). Deshalb eigene Prozessgruppe und
+    beim Ablauf die ganze Gruppe beenden.
+    """
     try:
-        r = subprocess.run(befehl, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE, timeout=sekunden)
-    except (OSError, subprocess.TimeoutExpired) as e:
+        proc = subprocess.Popen(befehl, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, start_new_session=True)
+    except OSError as e:
         log.warning("%s: %s", befehl[0], e)
         return False
-    if r.returncode != 0:
-        log.warning("%s endete mit %s: %s", befehl[0], r.returncode,
-                    r.stderr.decode("utf-8", "replace")[-300:])
+    try:
+        _aus, fehler = proc.communicate(timeout=sekunden)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.communicate()
+        log.warning("%s: nach %s s abgebrochen", befehl[0], sekunden)
+        return False
+    if proc.returncode != 0:
+        log.warning("%s endete mit %s: %s", befehl[0], proc.returncode,
+                    (fehler or b"").decode("utf-8", "replace")[-300:])
         return False
     return True
 

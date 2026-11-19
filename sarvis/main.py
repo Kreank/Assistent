@@ -202,7 +202,7 @@ class Sarvis:
                                          entscheidungen_nachtrag(),
                                          eingang.eingang_zeile(
                                              self._eingang_gesehen),
-                                         self._anstupser,
+                                         self._anstupser_abgeben(),
                                          schutz.arbeitsordner_zeile())
                              if z),
                          freigaben=self.freigaben)
@@ -223,6 +223,14 @@ class Sarvis:
         # Entscheidung und nichts wurde festgehalten. Siehe
         # gedaechtnis.entscheidung_verpasst.
         self._anstupser = ""
+        # Was davon wirklich im Vorspann des laufenden Zugs mitging. Nur
+        # das wird am Zugende entfernt -- ein Hinweis, der WAEHREND des
+        # Zugs dazukam (Loeschen in der App), ging sonst verloren
+        # (Review 19.11.).
+        self._anstupser_gesendet = ""
+        # Der Antworttext des letzten Zugs -- fuer die Benachrichtigung
+        # nach einer geplanten Aufgabe.
+        self._letzte_antwort = ""
         # Bis zu welchem Zeitpunkt die Dateien im Eingang schon erwaehnt
         # wurden. Alles Neuere kommt in den Vorspann -- Sascha soll eine
         # Datei schicken und weiterreden koennen, ohne sie anzusagen.
@@ -318,7 +326,7 @@ class Sarvis:
             from claude_agent_sdk import (AssistantMessage, ClaudeAgentOptions,
                                           TextBlock, query)
             opt = ClaudeAgentOptions(
-                model=config.TITEL_MODELL, allowed_tools=[], max_turns=1,
+                model=config.TITEL_MODELL, tools=[], allowed_tools=[], max_turns=1,
                 setting_sources=[],
                 system_prompt=("Gib einem Gespraech einen kurzen deutschen "
                                "Titel aus 2 bis 5 Woertern, der sagt, worum "
@@ -624,7 +632,13 @@ class Sarvis:
                     "Folgeauftrag an den Arbeiter weiter und lass ihn sie "
                     "einbauen:\n" + "\n".join(zeilen))
         self._formular_zuruf = text
-        await self._zuruf_vom_netz(text, geraet)
+        # Als Formular gekennzeichnet: Steht gerade eine Ja/Nein-Rueckfrage
+        # offen, darf es die NICHT beantworten -- "1. Senden?: Nein" galt
+        # sonst als Nein auf eine ganz andere Frage (Review 19.11.).
+        print(f"\n  Du ({geraet}): {text}")
+        self._antwort_an(geraet)
+        self.anzeige.untertitel("du", text)
+        self.schlange.put_nowait(("weckwort", text, "formular"))
 
     def _rueckfragen_schliessen(self, gesagt: str) -> None:
         """Offene Rueckfrage-Formulare zu, wenn anders geantwortet wurde.
@@ -971,7 +985,7 @@ class Sarvis:
             e_ = eingabe or {}
             anzahl_ = 1 if werkzeug == "mail_anhang_holen" else (e_.get("anzahl") or 1)
             try:
-                async with asyncio.timeout(12):
+                async with asyncio.timeout(20):
                     await _gg.mails_vorschau(e_.get("suche"), anzahl_)
             except Exception as fehler:
                 print(f"  ! Mail-Vorschau für die Rückfrage ging nicht: {fehler}")
@@ -1418,6 +1432,12 @@ class Sarvis:
             nonlocal erster_ton
             if self.abgebrochen or self.durchgang != marke:
                 return
+            # "Sei still" gilt auch fuer geplante Aufgaben: Die Antwort
+            # steht im Verlauf und kommt als Benachrichtigung, gesprochen
+            # wird sie nicht (Review 19.11.).
+            if (self.hirn.unbeaufsichtigt and self._ruhe_bis
+                    and time.monotonic() < self._ruhe_bis):
+                return
             # Beim Reinreden bleibt das Ohr offen -- der Satz geht mit,
             # damit _eigen_echo seine eigene Stimme aussortieren kann.
             self.horcher.spricht(satz)
@@ -1480,23 +1500,26 @@ class Sarvis:
         def denk_schreiben(fertig: bool | None = None,
                            abgebrochen: bool = False) -> None:
             # Ohne fertig: der Stand bleibt, wie er ist (Uebersetzung,
-            # die nach dem Zug eintrifft).
-            if fertig is not None:
-                denkkarte["fertig"] = fertig
-            if abgebrochen:
-                denkkarte["abgebrochen"] = True
-            fertig = denkkarte["fertig"]
-            abgebrochen = denkkarte["abgebrochen"]
-            schritte = denkkarte["schritte"]
-            if not schritte:
-                return
-            dauer = time.time() - denkkarte["seit"]
-            daten = {"schritte": schritte, "fertig": fertig,
-                     "seit": denkkarte["seit"], "dauer": round(dauer, 1)}
-            if abgebrochen:
-                daten["abgebrochen"] = True
-            text = denken.zusammenfassung(schritte, dauer, fertig)
+            # die nach dem Zug eintrifft). ALLES unter dem Schloss: Ein
+            # Uebersetzungsfaden, der vor dem abschliessenden Schreiben las
+            # und danach schrieb, setzte die fertige Karte zurueck auf
+            # "Denkt nach …" (Review 19.11.).
             with denkkarte["schloss"]:
+                if fertig is not None:
+                    denkkarte["fertig"] = fertig
+                if abgebrochen:
+                    denkkarte["abgebrochen"] = True
+                fertig = denkkarte["fertig"]
+                abgebrochen = denkkarte["abgebrochen"]
+                schritte = denkkarte["schritte"]
+                if not schritte:
+                    return
+                dauer = time.time() - denkkarte["seit"]
+                daten = {"schritte": schritte, "fertig": fertig,
+                         "seit": denkkarte["seit"], "dauer": round(dauer, 1)}
+                if abgebrochen:
+                    daten["abgebrochen"] = True
+                text = denken.zusammenfassung(schritte, dauer, fertig)
                 if denkkarte["id"] is None:
                     e = self._eintragen("sarvis", "denken", text, daten, geraet="")
                     if e:
@@ -1560,6 +1583,7 @@ class Sarvis:
         denk_schreiben(True)
 
         text = "".join(ganze_antwort).strip()
+        self._letzte_antwort = text
         if text:
             self._eintragen("sarvis", "text", text, geraet="")
         print(f"  Sarvis : {text}")
@@ -1584,11 +1608,17 @@ class Sarvis:
         # Auftragshinweis vorher getan hat.
         self._eingang_gesehen = time.time()
         # Er ist mitgelaufen -- stehenbleiben darf er nicht, sonst mahnt
-        # er dieselbe Sache in jedem weiteren Zug an.
-        self._anstupser = ""
+        # er dieselbe Sache in jedem weiteren Zug an. Aber nur, was
+        # wirklich mitging.
+        gesendet, self._anstupser_gesendet = self._anstupser_gesendet, ""
+        if gesendet and self._anstupser.startswith(gesendet):
+            self._anstupser = self._anstupser[len(gesendet):].strip()
+        elif gesendet == self._anstupser:
+            self._anstupser = ""
 
         if klang_entschieden and erinnern.schreibstand() == stand_vorher:
-            self._anstupser = entscheidung_verpasst(gesagt)
+            self._anstupser = " ".join(
+                z for z in (self._anstupser, entscheidung_verpasst(gesagt)) if z)
             print("  (Entscheidungswort gefallen, nichts gemerkt — "
                   "ich hake beim nächsten Zuruf nach)")
 
@@ -1881,9 +1911,14 @@ class Sarvis:
         """
         print(f"\n  Geplant {nummer}: {was[:100]}")
         self._antwort_an(None)
-        vorher = self._zuletzt_gesagt
+        # Die Antwort des Hirns ist das Ergebnis -- nicht _zuletzt_gesagt,
+        # das nur _sagen() setzt (Rueckfrage-Saetze, Zeitablauf). Vorher
+        # bekam Sascha nachts "Ich habe kein Ja bekommen" als Push statt
+        # des Briefings (Review 19.11.).
+        self._letzte_antwort = ""
         # Vorab erteilte Erlaubnisse gelten NUR fuer diesen Zug.
         self.hirn.aufgabe_erlaubt = set(erlaubt or [])
+        self.hirn.unbeaufsichtigt = True
         try:
             await self._weckwort_durchgang(
                 "[Geplante Aufgabe — von selbst ausgelöst, Sascha hat gerade "
@@ -1891,10 +1926,21 @@ class Sarvis:
                 "Lege dafür keinen neuen Timer an, sie wiederholt sich von "
                 f"selbst.]\n\n{was}",
                 als_eintrag=f"Geplante Aufgabe {nummer}: {was}")
+        except asyncio.CancelledError:
+            # Unterbrochen (jemand hat gesprochen oder getippt). Nicht
+            # still verschlucken: Im Verlauf steht, dass sie nicht fertig
+            # wurde -- "mach die geplante Aufgabe nochmal" genuegt dann
+            # (Review 19.11.).
+            print(f"  (Geplant {nummer} unterbrochen)")
+            self._eintragen("sarvis", "meldung",
+                            f"Geplante Aufgabe unterbrochen, nicht fertig: "
+                            f"{was[:160]}", geraet="")
+            raise
         finally:
             self.hirn.aufgabe_erlaubt = set()
-        ergebnis = self._zuletzt_gesagt
-        if ergebnis and ergebnis != vorher:
+            self.hirn.unbeaufsichtigt = False
+        ergebnis = self._letzte_antwort
+        if ergebnis:
             self._benachrichtigen("Geplant", ergebnis[:240])
 
     def _geplant_melden(self) -> None:
@@ -1903,6 +1949,11 @@ class Sarvis:
             self.anzeige.geplant(self.wecker.liste())
         except Exception as fehler:
             print(f"  (Geplant-Liste nicht gemeldet -- {fehler})")
+
+    def _anstupser_abgeben(self) -> str:
+        """Fuer den Vorspann: den Anstupser liefern und vermerken."""
+        self._anstupser_gesendet = self._anstupser
+        return self._anstupser
 
     def gedaechtnis_vergessen_gemeldet(self, text: str) -> None:
         """Sascha hat in der App einen Gedaechtniseintrag geloescht.
@@ -2125,6 +2176,12 @@ class Sarvis:
                 # also nichts mehr aufgenommen werden.
                 if isinstance(befehl, tuple) and befehl[0] == "weckwort":
                     zuruf = befehl[1]
+                    if antwortet and befehl[2:] == ("formular",):
+                        # Formularantworten warten, bis die Rueckfrage
+                        # entschieden ist (hoechstens deren 75 Sekunden).
+                        self.schleife.call_later(
+                            1.0, self.schlange.put_nowait, befehl)
+                        continue
                     if antwortet:
                         # "Hör auf" waehrend einer offenen Frage stoppte
                         # bisher nichts: Der Satz ging als Antwort in die

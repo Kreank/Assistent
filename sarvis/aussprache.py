@@ -241,8 +241,11 @@ _ZAHLKOPF = r"(\d{1,3}(?:\.\d{3})+|\d+)"
 _GELD_NACH = re.compile(
     r"(?<![\w.,\-−])([-−])?" + _ZAHLKOPF + r"(?:,(\d{1,2}))?"
     r"\s*(?:€|Euro\b|EUR\b)", re.IGNORECASE)
+# Das Vorzeichen darf vor ODER hinter dem Zeichen stehen: "-€5" und
+# "€-5". Vorher blieb bei "-€5" das Minus stumm stehen (Review 19.11.).
 _GELD_VOR = re.compile(
-    r"(?:€|EUR\b)\s*([-−])?" + _ZAHLKOPF + r"(?:,(\d{1,2}))?(?![\d,])",
+    r"(?:(?<![\w.,\-−])([-−]))?(?:€|EUR\b)\s*([-−])?" + _ZAHLKOPF
+    + r"(?:,(\d{1,2}))?(?![\d,])",
     re.IGNORECASE)
 
 _ORDINAL = re.compile(
@@ -302,6 +305,10 @@ def _ersetze_geld(m: re.Match) -> str:
     return _betragswort(m[1] or "", _ganz(m[2]), _cent(m[3]))
 
 
+def _ersetze_geld_vor(m: re.Match) -> str:
+    return _betragswort(m[1] or m[2] or "", _ganz(m[3]), _cent(m[4]))
+
+
 def _ersetze_ordinal(m: re.Match) -> str:
     zahl = int(m[2])
     if zahl == 0:
@@ -317,7 +324,7 @@ _REGELN = (
     (_DATUM_KURZ, _ersetze_datum),
     (_TAG_MONAT, _ersetze_tag_monat),
     (_UHRZEIT, _ersetze_uhrzeit),
-    (_GELD_VOR, _ersetze_geld),
+    (_GELD_VOR, _ersetze_geld_vor),
     (_GELD_NACH, _ersetze_geld),
     (_ORDINAL, _ersetze_ordinal),
     (_MINUS, "minus "),
@@ -416,6 +423,25 @@ _WEIBLICH = {
 _PROZENT = re.compile(r"\s*%")
 _GRAD = re.compile(r"\s*°\s*C?\b|\s*°")
 _BEREICH = re.compile(r"(?<![\d.,])(\d+)\s*[-–]\s*(\d+)(?![\d.,])")
+# Telefonnummern: mit + oder 0 vorn und mindestens sieben Ziffern. Vor
+# dem Bereich, sonst wurde "0711-123456" zu "… bis einhundertdrei…"
+# (Review 19.11.).
+_TELEFON = re.compile(r"(?<![\w.,])(\+|0)\d[\d /-]{4,}\d(?![\d,.])")
+
+
+def _telefon(m: re.Match) -> str:
+    ziffern = re.sub(r"\D", "", m[0])
+    if len(ziffern) < 7:
+        return m[0]
+    return ("plus " if m[0].startswith("+") else "") + _ziffernweise(ziffern)
+
+
+def _bereich(m: re.Match) -> str:
+    """'10-15' ist ein Bereich, '2026-0042' und '2-1' sind es nicht."""
+    links, rechts = m[1], m[2]
+    if rechts.startswith("0") or int(rechts) <= int(links):
+        return f"{links} Strich {rechts}"
+    return f"{links} bis {rechts}"
 _KOMMAZAHL = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+|\d+),(\d+)(?![\d,])")
 _PUNKTZAHL = re.compile(r"(?<![\d.,])(\d+)\.(\d+)(?![\d.,])")
 _TAUSENDER = re.compile(r"(?<![\d.,])(\d{1,3}(?:\.\d{3})+)(?![\d,]|\.\d)")
@@ -453,7 +479,8 @@ _ALLES = (
     (_PROZENT, " Prozent"),
     (_GRAD, " Grad"),
     (_JAHR, lambda m: m[1] + " " + jahreszahl(int(m[2]))),
-    (_BEREICH, lambda m: m[1] + " bis " + m[2]),
+    (_TELEFON, _telefon),
+    (_BEREICH, _bereich),
     (_VERSION, lambda m: " Punkt ".join(_ziffernweise(t) if len(t) > 3 else zahlwort(int(t)) for t in m[0].split("."))),
     (_KOMMAZAHL, lambda m: zahlwort(_ganz(m[1])) + " Komma " + _ziffernweise(m[2])),
     (_TAUSENDER, lambda m: zahlwort(_ganz(m[1]))),
