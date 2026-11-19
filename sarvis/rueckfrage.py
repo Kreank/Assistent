@@ -357,6 +357,15 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         return (f"Soll ich {an}{bezug} schreiben: "
                 f"{_kuerzen(e.get('text'))}?")
 
+    if werkzeug == "aufgabe_erlauben":
+        namen = [str(n).removeprefix("mcp__sarvis__").replace("_", " ")
+                 for n in (e.get("werkzeuge") or [])]
+        if not namen:
+            return (f"Soll die geplante Aufgabe {e.get('nummer')} wieder bei "
+                    "allem nachfragen?")
+        return (f"Soll die geplante Aufgabe {e.get('nummer')} künftig ohne "
+                f"Rückfrage dürfen: {_kuerzen(', '.join(namen), 160)}?")
+
     if werkzeug == "mail_senden":
         an = e.get("an") or "den Empfänger"
         # Bei einer Mail zaehlt der Inhalt, nicht nur der Empfaenger --

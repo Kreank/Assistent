@@ -78,6 +78,9 @@ class Hirn:
         # Laufende Freigaben auf Zeit ("frag die naechste halbe Stunde
         # nicht mehr"). Siehe freigabe.py.
         self.freigaben = freigaben
+        # Was die gerade laufende GEPLANTE Aufgabe vorab darf
+        # (aufgabe_erlauben). Setzt main.py nur fuer die Dauer ihres Zugs.
+        self.aufgabe_erlaubt: set[str] = set()
         self._offen = False  # laeuft gerade eine Antwortrunde?
         # Ein Abbruch, dessen Leerlesen nicht durchkam: In der Leitung
         # koennen Reste der alten Runde liegen. Der naechste Zuruf raeumt
@@ -390,6 +393,13 @@ class Hirn:
             # Nachfrage durchgeht, das sonst fragen wuerde.
             if self.freigaben is not None and self.freigaben.erlaubt(kurz, eingabe):
                 print(f"  ~ {kurz}: läuft unter einer Freigabe durch")
+                return erlauben()
+            # Vorab erteilt beim Einrichten der geplanten Aufgabe. Die
+            # NIE-Liste wird hier noch einmal geprueft -- falls sie
+            # nach dem Erteilen gewachsen ist.
+            if (kurz in self.aufgabe_erlaubt
+                    and kurz not in config.FREIGABE_NIE):
+                print(f"  ~ {kurz}: von der geplanten Aufgabe vorab erlaubt")
                 return erlauben()
 
             if self.nachfragen is None:

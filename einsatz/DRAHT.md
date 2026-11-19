@@ -1258,7 +1258,8 @@ GET  /geplant                         (X-Sarvis-Schluessel)
                      "was": "Morgenbriefing: …",
                      "faellig": 1794466800.0, "wiederholt": "taeglich"
                        | "woechentlich" | "monatlich" | null,
-                     "pausiert": false, "zuletzt": 1794380400.0 | null } ] }
+                     "pausiert": false, "zuletzt": 1794380400.0 | null,
+                     "erlaubt": ["termin_anlegen"] } ] }
 
 POST /geplant/loeschen   { "nummer": 7 }             → { "gut": true } · 404
 POST /geplant/pausieren  { "nummer": 7, "an": true } → { "gut": true } · 404
@@ -1271,6 +1272,13 @@ POST /geplant/pausieren  { "nummer": 7, "an": true } → { "gut": true } · 404
   einmaliger wartet und kommt sofort, wenn er wieder an ist.
 - Löschen und Pausieren sind Handlungen des Menschen in seiner eigenen
   App — **ohne Rückfrage**, sofort.
+- `erlaubt` (seit 19.11.2026): Werkzeuge, die die Aufgabe bei ihrem Lauf
+  **ohne Rückfrage** benutzen darf. Erteilt per Sprache beim Einrichten
+  (Werkzeug `aufgabe_erlauben`, Sascha bestätigt einmal). Leer = alles
+  fragt wie sonst. Nie erteilbar: was in `FREIGABE_NIE` steht (Mail und
+  Telegram senden, Teilen, Löschen). Die App zeigt es nur an — z. B. als
+  kleine Zeile „darf ohne Rückfrage: Termin anlegen“; Feld fehlt bei
+  älteren Servern → leer.
 
 Nach **jeder** Änderung (anlegen, löschen, pausieren, Termin vorbei) kommt
 auf dem Draht die ganze Liste, ein Zustand wie `faeden`:
@@ -1329,6 +1337,7 @@ GET /termine?von=2026-11-14&tage=7            // beide optional
                    "beginn": "2026-12-03T16:40+01:00",
                    "ende":   "2026-12-03T17:40+01:00",
                    "ganztags": false, "ort": "", "notiz": "",
+                   "karte": "https://…",       // seit 16.11.2026, s. u.
                    "farbe": "#9fe1e7", "serie": false,
                    "schreiben": true, "link": "https://www.google.com/…" } ],
     "nicht_erreicht": [] }                    // Kalendernamen, die fehlten
@@ -1343,6 +1352,13 @@ POST /termin/aendern   { "id": "…", "kalender": "<id>", …nur was sich änder
 POST /termin/loeschen  { "id": "…", "kalender": "<id>" } → { "gut": true }
                        Fehler: 400 { "fehler": "…" } · 403 · 404
 ```
+
+**`karte` (seit 16.11.2026):** Google-Maps-URL zum Ort des Termins, `""` ohne Ort.
+Die App macht den Ort damit **antippbar** und öffnet die URL per `ACTION_VIEW`
+(Android gibt sie an die Maps-App). Die App baut keine Maps-URL selbst.
+Steht beim Anlegen ein Maps-Link in `ort` (z. B. `https://maps.app.goo.gl/…` aus dem
+Teilen-Menü), löst der Server ihn auf: `ort` wird die Adresse, der Link landet als
+`Karte: …` in `notiz`.
 
 - **Zeiten:** `beginn`/`ende` mit Uhrzeit als `JJJJ-MM-TTTHH:MM` in
   Ortszeit (ein Versatz wie `+01:00` darf dabei sein). Zurück kommen sie

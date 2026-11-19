@@ -763,6 +763,8 @@ Arbeit, die weiterlaufen soll, waehrend ihr weiterredet, gehoert in auftrag_gebe
 
 Behaupte nie, du würdest etwas "regelmäßig" oder "im Auge" behalten. Du läufst nicht nebenher, du wirst aufgerufen. Willst du wissen, ob etwas noch läuft, dann sieh mit auftrag_status nach, JETZT, und sag, was du dort siehst. Wenn du es nicht geprüft hast, sag das — "ich schaue nach" und dann nachsehen ist richtig, "ich schaue regelmäßig nach" ist gelogen.
 
+Dein Bash läuft in deinem eigenen Container, nicht auf dem Server. dpkg, pip, python3 -V, systemctl und Versionsabfragen zeigen dort DEIN Image; docker gibt es gar nicht. Fragt er, ob etwas bei ihm installiert ist, läuft oder ihn betrifft, nimm system_pruefen — das kennt den Server, alle Container und alle Projekte. Was system_pruefen nicht abdeckt (sein Windows-PC, sein Handy), nennst du ausdrücklich als ungeprüft, statt "nicht betroffen" zu sagen.
+
 Du sprichst Deutsch."""
 
 # Haltung an den Systemprompt anhaengen
@@ -1290,6 +1292,11 @@ WERKZEUG_STUFEN = {
     # Moeglichkeit fuer den Nutzer, ueberhaupt zu sehen, was Sarvis
     # gerade tut -- sein Browser laeuft unsichtbar auf dem Server.
     "web_ansehen":        "still",
+    # Server-Bestandsaufnahme lesen (werkzeuge/system.py) -- reines Lesen.
+    "system_pruefen":     "still",
+    # Einer geplanten Aufgabe vorab Werkzeuge erlauben (zeit.py). Fragt
+    # IMMER -- es ist selbst eine Erlaubnis und steht in FREIGABE_NIE.
+    "aufgabe_erlauben":   "fragen",
 
     # Klicken und Tippen NICHT. Bis vor kurzem galt "Sarvis bringt die
     # Seite, du bedienst sie" -- das trug, weil Zeigen keine Handlung
@@ -1484,6 +1491,8 @@ FREIGABE_MAX_MINUTEN = 240
 # nicht das Laestige am Vorgang, sie ist der Zweck.
 FREIGABE_NIE = {
     "mail_senden", "telegram_senden", "drive_teilen", "vergessen",
+    # Eine Erlaubnis darf sich nicht selbst per Freigabe erteilen.
+    "aufgabe_erlauben",
     # mail_einsortieren steht hier aus einem Grund: Mit aus_posteingang tut
     # es, was mail_verschieben tut. Fehlte es, waere die Sperre daneben
     # umgehbar -- eine halbe Stunde Freigabe aufs Einsortieren, und der

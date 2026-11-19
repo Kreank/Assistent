@@ -108,7 +108,8 @@ class Wecker:
     def stellen_bis(self, faellig: datetime, was: str,
                     wiederholt: str | None = None, sorte: str = "timer",
                     pausiert: bool = False, zuletzt: float | None = None,
-                    nummer: int | None = None) -> tuple[int, datetime]:
+                    nummer: int | None = None,
+                    erlaubt: list | None = None) -> tuple[int, datetime]:
         """Auf einen festen Zeitpunkt stellen.
 
         Fuer genannte Uhrzeiten der genauere Weg: Der Umweg ueber eine
@@ -129,7 +130,10 @@ class Wecker:
                                  "aufgabe": aufgabe, "wiederholt": wiederholt,
                                  "sorte": sorte if sorte == "aufgabe" else "timer",
                                  "pausiert": bool(pausiert),
-                                 "zuletzt": zuletzt}
+                                 "zuletzt": zuletzt,
+                                 # Was die Aufgabe ohne Rueckfrage darf
+                                 # (aufgabe_erlauben, 19.11.2026).
+                                 "erlaubt": list(erlaubt or [])}
         self._sichern()
         return nummer, faellig
 
@@ -206,7 +210,8 @@ class Wecker:
             self.stellen_bis(
                 self._naechster_termin(eintrag["faellig"], wiederholt),
                 was, wiederholt=wiederholt, sorte=sorte, pausiert=pausiert,
-                zuletzt=zuletzt, nummer=nummer)
+                zuletzt=zuletzt, nummer=nummer,
+                erlaubt=eintrag.get("erlaubt"))
         else:
             self._sichern()
         if pausiert:
@@ -217,7 +222,7 @@ class Wecker:
             # als haette Sascha ihn gerade gesagt. Gesprochen und gezeigt
             # wird, was dabei herauskommt.
             try:
-                await self.ausfuehren(was, nummer)
+                await self.ausfuehren(was, nummer, eintrag.get("erlaubt") or [])
             except Exception as e:
                 print(f"  ! Geplante Aufgabe {nummer} nicht ausgeführt: {e}")
             return
@@ -265,7 +270,8 @@ class Wecker:
                         "was": e["was"], "faellig": faellig,
                         "wiederholt": e.get("wiederholt"),
                         "pausiert": bool(e.get("pausiert")),
-                        "zuletzt": e.get("zuletzt")})
+                        "zuletzt": e.get("zuletzt"),
+                        "erlaubt": list(e.get("erlaubt") or [])})
         return aus
 
     # --- ueber einen Neustart retten ---------------------------------------
@@ -294,7 +300,8 @@ class Wecker:
                       "wiederholt": e.get("wiederholt"),
                       "sorte": e.get("sorte") or "timer",
                       "pausiert": bool(e.get("pausiert")),
-                      "zuletzt": e.get("zuletzt")}
+                      "zuletzt": e.get("zuletzt"),
+                      "erlaubt": list(e.get("erlaubt") or [])}
                      for n, e in self.laufende.items()],
                     ensure_ascii=False, indent=1,
                 ),
@@ -350,7 +357,8 @@ class Wecker:
             was = e.get("was", "")
             sorte = e.get("sorte") or "timer"
             mehr = {"sorte": sorte, "pausiert": bool(e.get("pausiert")),
-                    "zuletzt": e.get("zuletzt")}
+                    "zuletzt": e.get("zuletzt"),
+                    "erlaubt": list(e.get("erlaubt") or [])}
             try:
                 mehr["nummer"] = int(e["nummer"])
             except (KeyError, TypeError, ValueError):
@@ -412,6 +420,7 @@ class Wecker:
              "sorte": e.get("sorte") or "timer",
              "pausiert": bool(e.get("pausiert")),
              "wiederholt": e.get("wiederholt"),
+             "erlaubt": list(e.get("erlaubt") or []),
              "rest": max(0, int((e["faellig"]
                                  - _jetzt_wie(e["faellig"])).total_seconds()))}
             for n, e in sorted(self.laufende.items())
@@ -684,6 +693,8 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
             + ({"taeglich": ", täglich", "woechentlich": ", wöchentlich",
                 "monatlich": ", monatlich"}.get(t["wiederholt"] or "", ""))
             + (" — pausiert" if t["pausiert"] else "")
+            + (f" — darf ohne Rückfrage: {', '.join(t['erlaubt'])}"
+               if t.get("erlaubt") else "")
             for t in offen
         ]
         return {"content": [{"type": "text", "text": "\n".join(zeilen)}]}
@@ -708,4 +719,77 @@ def werkzeuge(wecker: Wecker, protokoll=None) -> list:
         return {"content": [{"type": "text", "text":
                 "Diesen Timer gibt es nicht."}], "is_error": True}
 
-    return [timer_stellen, timer_liste, timer_abbrechen]
+    @tool(
+        "aufgabe_erlauben",
+        "Gibt einer GEPLANTEN Aufgabe vorab die Erlaubnis für Werkzeuge, "
+        "die sonst nachfragen — damit sie nachts oder morgens durchläuft, "
+        "ohne dass jemand bestätigen muss. Sascha bestätigt das EINMAL "
+        "jetzt, beim Einrichten. Benutze es direkt nach timer_stellen mit "
+        "'auftrag', wenn der Auftrag absehbar Werkzeuge braucht, die "
+        "fragen (z. B. termin_anlegen, datei_schreiben-artige Werkzeuge). "
+        "Lesende Werkzeuge brauchen das nicht, die laufen sowieso still. "
+        "Mails senden, Telegram senden, Teilen und Löschen lassen sich "
+        "hier NIE freigeben. Leere Liste nimmt alle Erlaubnisse zurück.",
+        {
+            "type": "object",
+            "properties": {
+                "nummer": {"type": "integer",
+                           "description": "Nummer der geplanten Aufgabe."},
+                "werkzeuge": {"type": "array", "items": {"type": "string"},
+                              "description": "Werkzeugnamen, z. B. "
+                                             "['termin_anlegen']."},
+            },
+            "required": ["nummer", "werkzeuge"],
+        },
+    )
+    async def aufgabe_erlauben(args):
+        leuchten()
+        nummer = int(args.get("nummer") or 0)
+        eintrag = wecker.laufende.get(nummer)
+        if eintrag is None or eintrag.get("sorte") != "aufgabe":
+            return {"content": [{"type": "text", "text":
+                    f"Eine geplante Aufgabe {nummer} gibt es nicht."}],
+                    "is_error": True}
+        gut, abgelehnt = erlaubnis_pruefen(args.get("werkzeuge") or [])
+        eintrag["erlaubt"] = gut
+        wecker._sichern()
+        if wecker.geaendert is not None:
+            try:
+                wecker.geaendert()
+            except Exception:
+                pass
+        vermerken(f"aufgabe_erlauben: Aufgabe {nummer} darf ohne Rückfrage: "
+                  + (", ".join(gut) or "nichts mehr"))
+        text = (f"Aufgabe {nummer} darf jetzt ohne Rückfrage: {', '.join(gut)}."
+                if gut else f"Aufgabe {nummer} fragt wieder bei allem nach.")
+        if abgelehnt:
+            text += " Nicht freigegeben: " + "; ".join(abgelehnt) + "."
+        return {"content": [{"type": "text", "text": text}]}
+
+    return [timer_stellen, timer_liste, timer_abbrechen, aufgabe_erlauben]
+
+
+def erlaubnis_pruefen(namen) -> tuple[list[str], list[str]]:
+    """Welche Werkzeuge eine geplante Aufgabe vorab bekommen darf.
+
+    Nur, was sonst FRAGT. "still" braucht keine Erlaubnis, "pfad"
+    (Bash, Schreiben) und "browser" haengen am Ort bzw. am Element und
+    lassen sich nicht pauschal fuer eine Uhrzeit zusagen. FREIGABE_NIE
+    bleibt NIE -- eine Mail um sechs Uhr frueh, die niemand gesehen
+    hat, ist genau der Fall, fuer den die Rueckfrage da ist.
+    """
+    gut, abgelehnt = [], []
+    for roh in namen:
+        name = str(roh).strip().removeprefix("mcp__sarvis__")
+        stufe = config.WERKZEUG_STUFEN.get(name)
+        if not name:
+            continue
+        if name in config.FREIGABE_NIE:
+            abgelehnt.append(f"{name} (fragt immer)")
+        elif stufe == "still":
+            abgelehnt.append(f"{name} (braucht keine Erlaubnis)")
+        elif stufe != "fragen":
+            abgelehnt.append(f"{name} (geht nicht pauschal)")
+        elif name not in gut:
+            gut.append(name)
+    return gut, abgelehnt

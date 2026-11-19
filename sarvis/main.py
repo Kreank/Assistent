@@ -1835,15 +1835,17 @@ class Sarvis:
 
     # --- Geplante Aufgaben (seit 13.11.2026, DRAHT.md "Geplant") --------
 
-    async def _geplant_faellig(self, was: str, nummer: int) -> None:
+    async def _geplant_faellig(self, was: str, nummer: int,
+                               erlaubt: list | None = None) -> None:
         """Vom Wecker gerufen: einreihen, nicht selbst ausfuehren.
 
         Die Hauptschleife entscheidet, wann -- sie weiss, ob gerade
         geredet wird.
         """
-        self.schlange.put_nowait(("geplant", was, nummer))
+        self.schlange.put_nowait(("geplant", was, nummer, list(erlaubt or [])))
 
-    async def _geplant_durchgang(self, was: str, nummer: int) -> None:
+    async def _geplant_durchgang(self, was: str, nummer: int,
+                                 erlaubt: list | None = None) -> None:
         """Ein Zug des Hirns, den niemand gesprochen hat.
 
         An ALLE Geraete wie eine Timer-Meldung: Wer das Briefing
@@ -1853,12 +1855,17 @@ class Sarvis:
         print(f"\n  Geplant {nummer}: {was[:100]}")
         self._antwort_an(None)
         vorher = self._zuletzt_gesagt
-        await self._weckwort_durchgang(
-            "[Geplante Aufgabe — von selbst ausgelöst, Sascha hat gerade "
-            "nichts gesagt. Führe sie jetzt aus und berichte das Ergebnis. "
-            "Lege dafür keinen neuen Timer an, sie wiederholt sich von "
-            f"selbst.]\n\n{was}",
-            als_eintrag=f"Geplante Aufgabe {nummer}: {was}")
+        # Vorab erteilte Erlaubnisse gelten NUR fuer diesen Zug.
+        self.hirn.aufgabe_erlaubt = set(erlaubt or [])
+        try:
+            await self._weckwort_durchgang(
+                "[Geplante Aufgabe — von selbst ausgelöst, Sascha hat gerade "
+                "nichts gesagt. Führe sie jetzt aus und berichte das Ergebnis. "
+                "Lege dafür keinen neuen Timer an, sie wiederholt sich von "
+                f"selbst.]\n\n{was}",
+                als_eintrag=f"Geplante Aufgabe {nummer}: {was}")
+        finally:
+            self.hirn.aufgabe_erlaubt = set()
         ergebnis = self._zuletzt_gesagt
         if ergebnis and ergebnis != vorher:
             self._benachrichtigen("Geplant", ergebnis[:240])
@@ -2084,7 +2091,7 @@ class Sarvis:
                     self.abgebrochen = False
                     self.arbeitet = True
                     self.aufgabe = asyncio.create_task(
-                        self._geplant_durchgang(befehl[1], befehl[2]))
+                        self._geplant_durchgang(*befehl[1:]))
                     continue
 
                 # Weckwort: der Zuruf steckt schon im selben Satz, es muss

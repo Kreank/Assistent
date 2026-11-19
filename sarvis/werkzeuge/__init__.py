@@ -15,7 +15,7 @@ from .. import config
 
 from . import (vorschau, auftrag, bericht, dokument, eingang, versand, erinnern, fachdaten,
                finanzen, google, kacheln, lesen, medien, musik, programme,
-               projekte, rechnen, rechner, telegram, unterwegs, verlauf,
+               projekte, rechnen, rechner, system, telegram, unterwegs, verlauf,
                wetter, zeit)
 
 SERVER = "sarvis"
@@ -97,6 +97,9 @@ def bauen(sagen, leuchten=None, melden=None, ohren=None):
     alle += unterwegs.werkzeuge(protokoll, leuchten)
     alle += lesen.werkzeuge(protokoll, leuchten)
     alle += fachdaten.werkzeuge(protokoll, leuchten)
+    # Was auf dem SERVER installiert ist (19.11.2026) -- Bash im
+    # Container sieht nur das Image. Liest die Host-Bestandsaufnahme.
+    alle += system.werkzeuge(protokoll, leuchten)
     # Was auf dem Rechner des Nutzers geschehen soll, nicht hier.
     alle += rechner.werkzeuge(protokoll, leuchten)
     if config.finanz_schluessel():
