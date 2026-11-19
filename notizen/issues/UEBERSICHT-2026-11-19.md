@@ -29,12 +29,11 @@ gezielte Proben je Fund).
 | niedrig | Unterbrochene geplante Aufgabe verschwand still | behoben: Meldung im Verlauf |
 | niedrig | soffice-Zeitablauf ließ soffice.bin als Waise | behoben: Prozessgruppe + killpg |
 | niedrig | Titel/Übersetzung mit `max_turns=1` ohne Werkzeugsperre | behoben: `tools=[]` |
+| niedrig | Caddy-Zugriffslog für alle lesbar (enthält geheime /blatt/-Adressen) | behoben 19.11. per `/srv/storage/scripts/caddy-log-schuetzen.sh` (Sascha, sudo): `mode 0640` im Caddyfile, Ordner 0750, ACL nur für server3070 (Wächter-Sammler); CrowdSec läuft als root |
 | niedrig | Fehlversuche am Schlüssel nicht geloggt (Hausstandard) | behoben: gedrosselt mit IP |
 
 ## Offen
 
-- **Caddy-Zugriffslog für alle lesbar** (`/var/log/caddy/access.log` 0644) — enthält die
-  geheimen `/blatt/<kennung>`-Adressen. Systemänderung, mit Sascha abzustimmen.
 - Office→PDF hält das Blatt bis zu 2 min auf (Begleitfelder sollten nachgereicht werden).
 - Arbeiter-Bash: die Pfadprüfung ist eine Heuristik (z. B. base64-kodierte Pfade);
   echte Abhilfe wäre ein eigener Container ohne Daten-Mounts.
