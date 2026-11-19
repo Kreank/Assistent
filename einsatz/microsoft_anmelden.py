@@ -5,7 +5,8 @@ Einmalig, im Container:
 
     docker exec -it sarvis python3 /srv/storage/projects/sarvis/einsatz/microsoft_anmelden.py
 
-Zeigt einen Code. Auf https://microsoft.com/devicelogin (Handy oder PC)
+Zeigt einen Code. Auf https://www.microsoft.com/link (Handy oder PC;
+private Konten -- NICHT microsoft.com/devicelogin, das ist nur fuer Firmenkonten)
 eingeben, mit dem Hotmail-Konto anmelden, Zugriff erlauben. Das Skript
 wartet und legt das Token in /srv/data/sarvis/microsoft_token.json ab.
 Danach Sarvis neu starten -- die Werkzeuge werden nur gebaut, wenn das

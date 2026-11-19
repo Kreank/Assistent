@@ -11,7 +11,7 @@ ANMELDUNG
 
 Privates Konto (hotmail) -> Endpunkt "consumers". Oeffentlicher Client
 ohne Geheimnis, Geraetecode-Fluss: einsatz/microsoft_anmelden.py zeigt
-einen Code, Sascha bestaetigt ihn auf microsoft.com/devicelogin, danach
+einen Code, Sascha bestaetigt ihn auf www.microsoft.com/link (privates Konto), danach
 liegt hier ein Auffrischungs-Token in /srv/data/sarvis/microsoft_token.json
 (chmod 600). Die App-Kennung (Client-ID) steht als MICROSOFT_CLIENT_ID in
 /srv/data/sarvis/.env. Bewusst kein msal: Das waere ein Neubau des Images
