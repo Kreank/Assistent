@@ -213,6 +213,43 @@ def _nummer(liste: list, roh, art: str):
     return liste[n - 1], None
 
 
+# --- Fuer die Rueckfrage ----------------------------------------------------
+#
+# Die Werkzeuge arbeiten mit Listennummern, Sascha sieht die Liste aber nie:
+# "Soll ich die Outlook-Mail 6 nach papierkorb verschieben?" war nicht zu
+# beantworten (Sascha, 19.11.: "Woher soll ich wissen, was Mail 6 ist?").
+# Diese Helfer loesen die Nummer in das auf, was man wiedererkennt.
+
+def mail_benennen(nummer) -> str | None:
+    """'die Mail von X vom TT.MM., Betreff „Y“' -- oder None, wenn unbekannt."""
+    m, fehler = _nummer(_mails, nummer, "Mail")
+    if fehler:
+        return None
+    betreff = " ".join(str(m.get("subject") or "").split()) or "ohne Betreff"
+    if len(betreff) > 70:
+        betreff = betreff[:69].rsplit(" ", 1)[0] + "…"
+    wann = (m.get("receivedDateTime") or "")[:10]
+    datum = f" vom {wann[8:10]}.{wann[5:7]}." if len(wann) == 10 else ""
+    return f"die Mail von {_absender(m)}{datum}, Betreff „{betreff}“"
+
+
+def anhang_benennen(nummer, anhang) -> str | None:
+    m, fehler = _nummer(_mails, nummer, "Mail")
+    if fehler or not m.get("_anhaenge"):
+        return None
+    a, fehler = _nummer(m["_anhaenge"], anhang, "Anhang")
+    return None if fehler else (str(a.get("name") or "") or None)
+
+
+def termin_benennen(nummer) -> str | None:
+    t, fehler = _nummer(_termine, nummer, "Termin")
+    if fehler:
+        return None
+    titel = t.get("subject") or "ohne Titel"
+    return (f"den Termin „{titel}“ am "
+            f"{_zeit_lesbar(t.get('start'), bool(t.get('isAllDay')))}")
+
+
 # --- Werkzeuge ------------------------------------------------------------
 
 def werkzeuge(protokoll=None, leuchten=None) -> list:

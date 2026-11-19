@@ -275,6 +275,10 @@ def _uebersetzen(werkzeug: str, eingabe: dict):
 def formulieren(werkzeug: str, eingabe: dict) -> str:
     """Aus Werkzeug und Eingabe eine Frage machen, die man hören kann."""
     e = eingabe or {}
+    # Spaet importiert: microsoft.py zieht Netz-Bibliotheken nach, und die
+    # Nummern-Listen dort sind dieselben, mit denen das Werkzeug gleich
+    # arbeitet -- die Frage benennt also genau die Mail, die es trifft.
+    from .werkzeuge import microsoft as ms
 
     # Edit hat keine deutsche Entsprechung: datei_schreiben unterscheidet
     # zwischen Anlegen und Ueberschreiben, Edit tut weder das eine noch
@@ -366,27 +370,49 @@ def formulieren(werkzeug: str, eingabe: dict) -> str:
         return (f"Soll die geplante Aufgabe {e.get('nummer')} künftig ohne "
                 f"Rückfrage dürfen: {_kuerzen(', '.join(namen), 160)}?")
 
+    # Outlook arbeitet mit Listennummern, die nur Sarvis gesehen hat. In
+    # der Frage stehen deshalb Absender, Datum und Betreff -- "Mail 6" kann
+    # niemand beantworten (Sascha, 19.11.).
     if werkzeug == "outlook_mail_senden":
-        an = e.get("an") or (f"den Absender von Mail {e.get('antwort_auf')}"
-                             if e.get("antwort_auf") else "den Empfänger")
-        return (f"Soll ich über Outlook an {an} schreiben"
+        if e.get("an"):
+            an = f"an {e.get('an')}"
+        elif e.get("antwort_auf"):
+            an = ("als Antwort auf "
+                  + (ms.mail_benennen(e.get("antwort_auf"))
+                     or f"Mail {e.get('antwort_auf')}"))
+        else:
+            an = "an den Empfänger"
+        return (f"Soll ich über Outlook {an} schreiben"
                 + (f", Betreff {_kuerzen(e.get('betreff'), 50)}" if e.get("betreff") else "")
                 + f"? Der Text lautet: {_kuerzen(e.get('text'), 160)}")
 
     if werkzeug == "outlook_mail_verschieben":
-        return (f"Soll ich die Outlook-Mail {e.get('nummer')} nach "
-                f"{_kuerzen(e.get('wohin'), 40)} verschieben?")
+        mail = (ms.mail_benennen(e.get("nummer"))
+                or f"die Outlook-Mail {e.get('nummer')}")
+        roh = str(e.get("wohin") or "").strip()
+        wohin = {"papierkorb": "in den Papierkorb verschieben",
+                 "archiv": "archivieren",
+                 "spam": "in den Spam verschieben",
+                 "posteingang": "zurück in den Posteingang legen"}.get(
+                     roh.lower(), f"in den Ordner {_kuerzen(roh, 40)} verschieben")
+        return f"Soll ich {mail} {wohin}?"
 
     if werkzeug == "outlook_anhang_holen":
-        return (f"Soll ich Anhang {e.get('anhang')} der Outlook-Mail "
-                f"{e.get('nummer')} auf dem Server ablegen?")
+        name = ms.anhang_benennen(e.get("nummer"), e.get("anhang"))
+        mail = (ms.mail_benennen(e.get("nummer"))
+                or f"der Outlook-Mail {e.get('nummer')}")
+        mail = mail.replace("die Mail", "der Mail", 1)
+        was = f"den Anhang {_kuerzen(name, 45)}" if name else f"Anhang {e.get('anhang')}"
+        return f"Soll ich {was} aus {mail} auf dem Server ablegen?"
 
     if werkzeug == "outlook_termin_anlegen":
         return (f"Soll ich {_kuerzen(e.get('titel'), 50)} am "
                 f"{e.get('beginn', 'genannten Zeitpunkt')} in den Outlook-Kalender eintragen?")
 
     if werkzeug == "outlook_termin_loeschen":
-        return f"Soll ich Termin {e.get('nummer')} aus dem Outlook-Kalender löschen?"
+        termin = (ms.termin_benennen(e.get("nummer"))
+                  or f"Termin {e.get('nummer')}")
+        return f"Soll ich {termin} aus dem Outlook-Kalender löschen?"
 
     if werkzeug == "onedrive_hochladen":
         return (f"Soll ich {_kuerzen(e.get('pfad'), 70)} ins OneDrive hochladen"
